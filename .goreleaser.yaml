@@ -36,7 +36,7 @@ release:
     whatever touches them. Windows 10/11, 64-bit.
 
     **Install:** download `aba_{{ .Tag }}_windows_amd64.exe`, check its hash (below), then run
-    `.ba_{{ .Tag }}_windows_amd64.exe install` (it asks for admin). Try it with `aba test`.
+    `.\aba_{{ .Tag }}_windows_amd64.exe install` (it asks for admin). Try it with `aba test`.
 
     Highlights: instant freeze (caught ~0.1 s after opening a bait), decoys for 18 apps,
     phone alerts (ntfy, Discord, Pushover, email), strict-mode network isolation, canary
