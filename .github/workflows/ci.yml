@@ -32,11 +32,13 @@ jobs:
         run: go test -count=1 -v ./internal/integration/
 
       - name: Build
-        run: go build -ldflags "-s -w -X main.version=ci-${{ github.sha }}" -o dist/aba.exe ./cmd/aba
+        run: |
+          go build -ldflags "-s -w -X main.version=ci-${{ github.sha }}" -o dist/aba.exe ./cmd/aba
+          go build -o dist/medium.exe ./scripts/medium
 
       # Every feature on a throwaway machine: install, fake stealers, freeze,
       # block, kill, resume+ignore, release, strict-mode isolation with a phone
       # alert sent while isolated, bait repair, decoy retirement, uninstall.
       - name: End-to-end
         shell: pwsh
-        run: ./scripts/e2e.ps1 -Aba ./dist/aba.exe
+        run: ./scripts/e2e.ps1 -Aba ./dist/aba.exe -Medium ./dist/medium.exe

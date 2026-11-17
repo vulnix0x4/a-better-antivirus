@@ -11,10 +11,14 @@
   DO NOT run this on a PC you care about: it isolates the network for a few
   seconds and changes system settings. It's meant for CI runners.
 #>
-param([string]$Aba = (Join-Path $PSScriptRoot '..\dist\aba.exe'))
+param(
+    [string]$Aba = (Join-Path $PSScriptRoot '..distba.exe'),
+    [string]$Medium = (Join-Path $PSScriptRoot '..distmedium.exe')
+)
 
 $ErrorActionPreference = 'Stop'
 $Aba  = (Resolve-Path $Aba).Path
+$Medium = (Resolve-Path $Medium).Path
 $data = Join-Path $env:ProgramData 'FileAccessMonitor'
 $installDir = Join-Path $env:ProgramFiles 'File Access Monitor'
 $fsGuid = '{0CCE921D-69AE-11D9-BED3-505054503030}'
@@ -60,16 +64,17 @@ function Did($alert, $action) { [bool]($alert.actions | Where-Object { $_.action
 
 # A fake stealer: a copy of aba.exe in Temp (unsigned, user-writable -> critical)
 # that reads a bait and then waits around.
-# Like real stealers it runs with a normal, non-admin token (runas /trustlevel),
-# and a few random bytes make its hash differ from ABA's, so it isn't "ABA".
+# Like real stealers it runs as the normal user at medium integrity (not admin;
+# scripts/medium does that from the elevated runner), and a few random bytes
+# make its hash differ from ABA's, so it isn't recognised as ABA itself.
 function Stealer([string]$name, [string]$bait) {
     $exe = Join-Path $env:TEMP "$name.exe"
     Copy-Item $Aba $exe -Force
     [IO.File]::AppendAllText($exe, [guid]::NewGuid().ToString())
-    $before = @(Get-Process -Name $name -ErrorAction SilentlyContinue | ForEach-Object Id)
-    & runas.exe /trustlevel:0x20000 "`"$exe`" test-reader `"$bait`"" | Out-Null
-    $p = WaitFor { Get-Process -Name $name -ErrorAction SilentlyContinue | Where-Object { $before -notcontains $_.Id } | Select-Object -First 1 } 10
-    if (-not $p) { Fail "fake stealer $name didn't start" }
+    $procId = & $Medium $exe test-reader $bait
+    if ($LASTEXITCODE -or -not $procId) { Fail "fake stealer $name didn't start" }
+    $p = Get-Process -Id ([int]$procId) -ErrorAction SilentlyContinue
+    if (-not $p) { Fail "fake stealer $name exited immediately" }
     return $p
 }
 function IsSuspended([int]$procId) {
@@ -127,7 +132,7 @@ Check (WaitFor { IsSuspended $s1.Id } 5) 'process really is suspended'
 Check ((WfpRules) -gt 0) 'WFP block rules present'
 Check ((State).frozen.pid -contains $s1.Id) 'state lists it as frozen'
 $sess = (Get-Process -Id $s1.Id -ErrorAction SilentlyContinue).SessionId
-Ok "stealer ran in session $sess with a non-admin token"
+Ok "stealer ran in session $sess as a normal (medium-integrity) process"
 if ($sess -eq 0) {
     Ok 'instant freeze deliberately skips session 0 (services); caught via the event log instead'
 } else {
