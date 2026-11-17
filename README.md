@@ -68,12 +68,15 @@ Infostealers (Lumma, RedLine, Vidar, StealC…) are the most common malware on p
 
 ## Install
 
-1. Download `aba_<version>_windows_amd64.exe` from [Releases](../../releases) and check its SHA-256 against `SHA256SUMS.txt`.
-2. Double-click it (or run `aba install`). Approve the admin prompt and follow the setup.
+**One command** (PowerShell): downloads v0.1.0, checks its SHA-256 against the published value, and only then runs the installer. It asks for admin and walks you through setup.
 
-Releases aren't code-signed yet, so SmartScreen will warn you. Verify the hash first, then use *More info → Run anyway*.
+```powershell
+$u='https://github.com/vulnix0x4/a-better-antivirus/releases/download/v0.1.0'; $f="$env:TEMP\aba.exe"; iwr "$u/aba_v0.1.0_windows_amd64.exe" -OutFile $f -UseBasicParsing; if ((Get-FileHash $f -A SHA256).Hash -ne '7612BF1120C66E17DCFF1DAC6D798C1B7B32CFC475D4B30E951A5723190A4DF9') { throw 'checksum mismatch: do not run this file' }; & $f install
+```
 
-> We deliberately don't offer a `irm … | iex` one-liner: pasting commands into PowerShell is exactly how many stealers get installed.
+**Or by hand:** download `aba_v0.1.0_windows_amd64.exe` from [Releases](../../releases), check its SHA-256 against `SHA256SUMS.txt`, then double-click it (or run `.\aba_v0.1.0_windows_amd64.exe install`). Releases aren't code-signed yet, so SmartScreen may warn you: verify the hash first, then use *More info → Run anyway*.
+
+> Why not the usual `irm … | iex`? That runs whatever a URL serves, unchecked, and pasting it into PowerShell is exactly how many stealers get installed. The command above downloads a fixed file and refuses to run it unless its fingerprint matches.
 
 ## Everyday use
 
