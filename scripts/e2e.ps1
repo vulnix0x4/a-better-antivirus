@@ -181,6 +181,7 @@ Aba bait add $custom
 Check (Test-Path $custom) 'custom bait created'
 $cid = ((State).baits.PSObject.Properties | Where-Object { $_.Value.files[0].path -eq $custom }).Name
 Check ($cid) "registered as $cid"
+if ($decoy) { Check ((State).baits.$decoy.status -eq 'retired') "retired $decoy decoy stays retired after changing baits" }
 $s4 = Stealer 'stealer4' $custom
 Check (AlertFor $s4.Id) 'reading the custom bait alerts'
 Aba release
