@@ -272,3 +272,30 @@ func unchanged(f config.BaitFile) bool {
 	}
 	return fi.Size() == f.Size && fi.ModTime().Equal(f.ModTime)
 }
+
+// Retire removes a decoy whose real app is now installed, plus any baits
+// living inside it (e.g. fake MetaMask inside a fake browser the user now
+// really uses). Returns the IDs retired.
+func Retire(st *config.State, u config.UserInfo, id, why string) []string {
+	bs := st.Baits[id]
+	if bs == nil || bs.Status == "retired" {
+		return nil
+	}
+	var out []string
+	if spec, ok := ByID(id); ok && spec.Root != nil {
+		root := spec.Root(u)
+		for otherID, other := range st.Baits {
+			if otherID == id || other.Status == "retired" || len(other.Files) == 0 {
+				continue
+			}
+			if paths.Under(other.Files[0].Path, root) {
+				Remove(other)
+				other.Status, other.StatusNote = "retired", "its host decoy was retired: "+why
+				out = append(out, otherID)
+			}
+		}
+	}
+	Remove(bs)
+	bs.Status, bs.StatusNote = "retired", why
+	return append(out, id)
+}

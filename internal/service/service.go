@@ -374,12 +374,10 @@ func (s *server) ClearTest() { os.Remove(paths.TestFile()) }
 
 func (s *server) RetireDecoy(id, why string) {
 	err := config.UpdateState(func(st *config.State) error {
-		bs := st.Baits[id]
-		if bs == nil || bs.Status == "retired" {
-			return nil
-		}
-		baits.Remove(bs)
-		bs.Status, bs.StatusNote = "retired", why
+		s.mu.Lock()
+		u := s.cfg.User
+		s.mu.Unlock()
+		baits.Retire(st, u, id, why)
 		return nil
 	})
 	if err != nil {

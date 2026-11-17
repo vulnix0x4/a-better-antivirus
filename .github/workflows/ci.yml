@@ -33,18 +33,9 @@ jobs:
       - name: Build
         run: go build -ldflags "-s -w -X main.version=ci-${{ github.sha }}" -o dist/aba.exe ./cmd/aba
 
-      # Full install -> simulated stealer -> detection -> uninstall.
+      # Every feature on a throwaway machine: install, fake stealers, freeze,
+      # block, kill, resume+ignore, release, strict-mode isolation with a phone
+      # alert sent while isolated, bait repair, decoy retirement, uninstall.
       - name: End-to-end
         shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          ./dist/aba.exe install --yes --preset balanced --learning 0
-          if ($LASTEXITCODE) { throw "install failed" }
-          ./dist/aba.exe doctor
-          ./dist/aba.exe test
-          if ($LASTEXITCODE) { Get-Content C:\ProgramData\FileAccessMonitor\service.log; throw "test detection failed" }
-          ./dist/aba.exe alerts
-          ./dist/aba.exe status --once
-          ./dist/aba.exe uninstall --yes --purge
-          if ($LASTEXITCODE) { throw "uninstall failed" }
-          if (Get-Service FileAccessMonitor -ErrorAction SilentlyContinue) { throw "service still installed" }
+        run: ./scripts/e2e.ps1 -Aba ./dist/aba.exe

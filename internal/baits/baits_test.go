@@ -213,3 +213,32 @@ func TestRemoveKeepsFilesTheRealAppRewrote(t *testing.T) {
 		t.Fatalf("real app data was deleted or damaged: %v", err)
 	}
 }
+
+func TestRetireTakesDependentsWithIt(t *testing.T) {
+	u := testUser(t)
+	u.DecoyBrowser = "vivaldi"
+	viv, _ := ByID("vivaldi")
+	mm, _ := ByID("metamask")
+	mk := func(s Spec) *config.BaitState {
+		bs := &config.BaitState{ID: s.ID, Status: "ok"}
+		for _, f := range s.Files(u) {
+			os.MkdirAll(filepath.Dir(f.Path), 0o755)
+			os.WriteFile(f.Path, []byte("x"), 0o644)
+			fi, _ := os.Stat(f.Path)
+			bs.Files = append(bs.Files, config.BaitFile{Path: f.Path, Created: true, Size: fi.Size(), ModTime: fi.ModTime()})
+		}
+		return bs
+	}
+	st := config.NewState()
+	st.Baits["vivaldi"], st.Baits["metamask"] = mk(viv), mk(mm)
+	st.Baits["desktop-passwords"] = &config.BaitState{ID: "desktop-passwords", Status: "ok",
+		Files: []config.BaitFile{{Path: filepath.Join(u.Desktop, "passwords.txt")}}}
+
+	got := Retire(st, u, "vivaldi", "real app installed")
+	if len(got) != 2 || st.Baits["metamask"].Status != "retired" || st.Baits["desktop-passwords"].Status != "ok" {
+		t.Fatalf("retired %v; metamask=%s desktop=%s", got, st.Baits["metamask"].Status, st.Baits["desktop-passwords"].Status)
+	}
+	if _, err := os.Stat(mm.Files(u)[0].Path); !os.IsNotExist(err) {
+		t.Fatal("metamask decoy file left behind inside the real browser's folder")
+	}
+}

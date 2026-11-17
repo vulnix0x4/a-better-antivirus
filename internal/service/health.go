@@ -102,9 +102,7 @@ func (s *server) healthCheck(startup bool) {
 			}
 		}
 		for _, id := range retire {
-			bs := st.Baits[id]
-			baits.Remove(bs)
-			bs.Status, bs.StatusNote = "retired", "real app installed"
+			baits.Retire(st, cfg.User, id, "real app installed")
 		}
 		// Forget frozen processes that no longer exist.
 		var live []config.FrozenProcess
