@@ -1,0 +1,273 @@
+package baits
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"golang.org/x/sys/windows"
+
+	"github.com/vulnix0x4/a-better-antivirus/internal/config"
+	"github.com/vulnix0x4/a-better-antivirus/internal/winsec"
+)
+
+// legacyMarkers identify baits planted by the original PowerShell honeypot
+// script, so we adopt (and later clean up) them as our own.
+var legacyMarkers = []string{"j.marsh.1987@outlook.com"}
+
+// Create plants a bait and returns its state. Existing files are adopted, not
+// overwritten (the user may have customised them). Requires admin for audit rules.
+func Create(s Spec, u config.UserInfo, g *Gen) (*config.BaitState, error) {
+	bs := &config.BaitState{ID: s.ID, Name: s.Name, Kind: s.Kind, Status: "ok", CreatedAt: time.Now()}
+	created := map[string]bool{}
+	for _, f := range s.Files(u) {
+		dir := filepath.Dir(f.Path)
+		if top := topMissingDir(dir); top != "" && !created[top] {
+			created[top] = true
+			bs.CreatedDirs = append(bs.CreatedDirs, top)
+		}
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return bs, fmt.Errorf("%s: %w", dir, err)
+		}
+		bf := config.BaitFile{Path: f.Path, Audit: f.Audit}
+		if b, err := os.ReadFile(f.Path); err == nil {
+			// Adopt an existing file (e.g. from the original honeypot script).
+			if f.Text {
+				bf.Text = string(b)
+			}
+			for _, m := range legacyMarkers {
+				if strings.Contains(string(b), m) {
+					bf.Created = true
+				}
+			}
+		} else {
+			data := f.Gen(g)
+			if err := os.WriteFile(f.Path, data, 0o644); err != nil {
+				return bs, fmt.Errorf("%s: %w", f.Path, err)
+			}
+			bf.Created = true
+			if f.Text {
+				bf.Text = string(data)
+			}
+			ageFile(f.Path)
+		}
+		setNotIndexed(f.Path)
+		if f.Audit {
+			if err := winsec.SetBaitAudit(f.Path); err != nil {
+				return bs, fmt.Errorf("audit rule on %s: %w", f.Path, err)
+			}
+		}
+		if fi, err := os.Stat(f.Path); err == nil {
+			bf.Size, bf.ModTime = fi.Size(), fi.ModTime()
+		}
+		bs.Files = append(bs.Files, bf)
+	}
+	return bs, nil
+}
+
+// topMissingDir returns the highest ancestor of dir that doesn't exist yet.
+func topMissingDir(dir string) string {
+	top := ""
+	for d := dir; ; d = filepath.Dir(d) {
+		if _, err := os.Stat(d); err == nil {
+			return top
+		}
+		top = d
+		if filepath.Dir(d) == d {
+			return top
+		}
+	}
+}
+
+// ageFile backdates timestamps by 1–14 months so the bait doesn't look brand new.
+func ageFile(path string) {
+	t := time.Now().Add(-time.Duration(30+rint(400)) * 24 * time.Hour).Add(-time.Duration(rint(86400)) * time.Second)
+	ft := windows.NsecToFiletime(t.UnixNano())
+	p, _ := windows.UTF16PtrFromString(path)
+	h, err := windows.CreateFile(p, windows.FILE_WRITE_ATTRIBUTES, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
+	if err != nil {
+		return
+	}
+	defer windows.CloseHandle(h)
+	windows.SetFileTime(h, &ft, &ft, &ft)
+}
+
+// setNotIndexed keeps Windows Search from reading (and tripping) the bait.
+func setNotIndexed(path string) {
+	p, _ := windows.UTF16PtrFromString(path)
+	a, err := windows.GetFileAttributes(p)
+	if err != nil {
+		return
+	}
+	windows.SetFileAttributes(p, a|windows.FILE_ATTRIBUTE_NOT_CONTENT_INDEXED)
+}
+
+// Problem found by Check.
+type Problem struct {
+	File   string
+	Kind   string // missing | no-audit | modified
+	Detail string
+}
+
+// Check inspects a bait without reading its contents (reading would trip it).
+func Check(bs *config.BaitState) []Problem {
+	var out []Problem
+	for _, f := range bs.Files {
+		fi, err := os.Stat(f.Path)
+		if errors.Is(err, os.ErrNotExist) {
+			out = append(out, Problem{File: f.Path, Kind: "missing"})
+			continue
+		}
+		if err != nil {
+			continue
+		}
+		if f.Audit {
+			if ok, err := winsec.HasBaitAudit(f.Path); err == nil && !ok {
+				out = append(out, Problem{File: f.Path, Kind: "no-audit", Detail: "audit rule was stripped (an editor rewrote the file?)"})
+			}
+		}
+		if f.Size != 0 && (fi.Size() != f.Size || !fi.ModTime().Equal(f.ModTime)) {
+			out = append(out, Problem{File: f.Path, Kind: "modified", Detail: "contents changed"})
+		}
+	}
+	return out
+}
+
+// Repair fixes problems: recreates missing files and re-applies audit rules.
+func Repair(bs *config.BaitState, s Spec, u config.UserInfo, g *Gen, probs []Problem) error {
+	specs := map[string]FileSpec{}
+	for _, f := range s.Files(u) {
+		specs[strings.ToLower(f.Path)] = f
+	}
+	var firstErr error
+	for _, p := range probs {
+		idx := -1
+		for i := range bs.Files {
+			if strings.EqualFold(bs.Files[i].Path, p.File) {
+				idx = i
+			}
+		}
+		if idx < 0 {
+			continue
+		}
+		bf := &bs.Files[idx]
+		switch p.Kind {
+		case "missing":
+			fs, ok := specs[strings.ToLower(p.File)]
+			if !ok {
+				continue
+			}
+			os.MkdirAll(filepath.Dir(p.File), 0o755)
+			data := []byte(bf.Text)
+			if data == nil || !fs.Text {
+				data = fs.Gen(g)
+			}
+			if err := os.WriteFile(p.File, data, 0o644); err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				continue
+			}
+			ageFile(p.File)
+			setNotIndexed(p.File)
+			bf.Created = true
+			if fs.Text {
+				bf.Text = string(data)
+			}
+			fallthrough
+		case "no-audit":
+			if bf.Audit {
+				if err := winsec.SetBaitAudit(p.File); err != nil && firstErr == nil {
+					firstErr = err
+				}
+			}
+			if fi, err := os.Stat(p.File); err == nil {
+				bf.Size, bf.ModTime = fi.Size(), fi.ModTime()
+			}
+		case "modified":
+			// Something (you, or a real app) wrote to it: from now on we never
+			// delete it, we only take our audit rule off when removing.
+			bf.Created = false
+			if fi, err := os.Stat(p.File); err == nil {
+				bf.Size, bf.ModTime = fi.Size(), fi.ModTime()
+			}
+		}
+	}
+	return firstErr
+}
+
+// Remove takes a bait away: audit rules first (so deleting doesn't alert),
+// then files ABA created, then folders it created if they're now empty.
+// Adopted files the user made themselves are kept.
+func Remove(bs *config.BaitState) error {
+	var firstErr error
+	for _, f := range bs.Files {
+		if f.Audit {
+			winsec.ClearAudit(f.Path)
+		}
+		// Only delete a file if it's still exactly what we planted. If anything
+		// rewrote it (e.g. the real app moved in and saved its own data there),
+		// it's no longer ours: keep it.
+		if f.Created && unchanged(f) {
+			if err := os.Remove(f.Path); err != nil && !errors.Is(err, os.ErrNotExist) && firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	for i := len(bs.CreatedDirs) - 1; i >= 0; i-- {
+		removeEmptyTree(bs.CreatedDirs[i])
+	}
+	return firstErr
+}
+
+// removeEmptyTree deletes dir and empty subdirectories, keeping anything with
+// files in it (e.g. if the real app has since moved in).
+func removeEmptyTree(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	empty := true
+	for _, e := range entries {
+		if e.IsDir() && removeEmptyTree(filepath.Join(dir, e.Name())) {
+			continue
+		}
+		if e.IsDir() || e.Name() != "LOCK" {
+			empty = false
+		} else {
+			os.Remove(filepath.Join(dir, e.Name())) // our zero-byte leveldb LOCK
+		}
+	}
+	if empty {
+		return os.Remove(dir) == nil
+	}
+	return false
+}
+
+// Index maps lowercase file paths to bait IDs, for event lookup.
+func Index(st *config.State) map[string]string {
+	m := map[string]string{}
+	for id, bs := range st.Baits {
+		if bs.Status == "retired" {
+			continue
+		}
+		for _, f := range bs.Files {
+			if f.Audit {
+				m[strings.ToLower(filepath.Clean(f.Path))] = id
+			}
+		}
+	}
+	return m
+}
+
+// unchanged reports whether a bait file still has the size and timestamp we recorded.
+func unchanged(f config.BaitFile) bool {
+	fi, err := os.Stat(f.Path)
+	if err != nil {
+		return true // already gone; nothing to protect
+	}
+	return fi.Size() == f.Size && fi.ModTime().Equal(f.ModTime)
+}

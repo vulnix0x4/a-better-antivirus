@@ -1,0 +1,39 @@
+version: 2
+
+project_name: a-better-antivirus
+
+builds:
+  - id: aba
+    main: ./cmd/aba
+    binary: aba
+    env: [CGO_ENABLED=0]
+    goos: [windows]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags: ["-s -w -X main.version={{.Tag}}"]
+
+archives:
+  # Plain .exe downloads: the simplest thing to double-click.
+  - id: exe
+    formats: [binary]
+    name_template: "aba_{{ .Tag }}_windows_{{ .Arch }}"
+  - id: zip
+    formats: [zip]
+    name_template: "aba_{{ .Tag }}_windows_{{ .Arch }}"
+    files: [README.md, LICENSE]
+
+checksum:
+  name_template: "SHA256SUMS.txt"
+  algorithm: sha256
+
+release:
+  footer: |
+    **Verify your download** before running it:
+    ```powershell
+    (Get-FileHash .\aba_{{ .Tag }}_windows_amd64.exe -Algorithm SHA256).Hash
+    ```
+    and compare with `SHA256SUMS.txt`. Releases aren't code-signed yet, so Windows SmartScreen
+    will warn: click "More info" → "Run anyway" only if the hash matches.
+
+changelog:
+  use: github

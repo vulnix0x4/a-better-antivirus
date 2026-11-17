@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Unit tests
+        run: go test ./...
+
+      # GitHub's Windows runners are elevated, so we can test the real thing:
+      # audit rules, the Security log and WFP filters.
+      - name: Integration tests (admin)
+        env:
+          ABA_INTEGRATION: "1"
+        run: go test -v ./internal/integration/
+
+      - name: Build
+        run: go build -ldflags "-s -w -X main.version=ci-${{ github.sha }}" -o dist/aba.exe ./cmd/aba
+
+      # Full install -> simulated stealer -> detection -> uninstall.
+      - name: End-to-end
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./dist/aba.exe install --yes --preset balanced --learning 0
+          if ($LASTEXITCODE) { throw "install failed" }
+          ./dist/aba.exe doctor
+          ./dist/aba.exe test
+          if ($LASTEXITCODE) { Get-Content C:\ProgramData\FileAccessMonitor\service.log; throw "test detection failed" }
+          ./dist/aba.exe alerts
+          ./dist/aba.exe status --once
+          ./dist/aba.exe uninstall --yes --purge
+          if ($LASTEXITCODE) { throw "uninstall failed" }
+          if (Get-Service FileAccessMonitor -ErrorAction SilentlyContinue) { throw "service still installed" }
