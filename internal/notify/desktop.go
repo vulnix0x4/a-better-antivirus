@@ -138,14 +138,20 @@ func ShowPopup(a *alerts.Alert, cli string) {
 		}
 		switch messageBox(title, text, mbYesNoCancel|mbIconError) {
 		case idYes:
-			RunElevated(cli, "kill", a.ID)
+			if cli != "" {
+				RunElevated(cli, "kill", a.ID)
+			}
 		case idNo:
-			RunElevated(cli, "resume", a.ID)
+			if cli != "" {
+				RunElevated(cli, "resume", a.ID)
+			}
 		}
 	case isolated:
 		text := body + "\nYour PC is isolated from the network (ABA's own alerts still get out).\n\nYes = Restore the internet now (only if you're sure)\nNo = Keep it isolated"
 		if messageBox(title, text, mbYesNo|mbIconError) == idYes {
-			RunElevated(cli, "release")
+			if cli != "" {
+				RunElevated(cli, "release")
+			}
 		}
 	case a.Tier == config.TierCritical:
 		messageBox(title, body, mbOK|mbIconError)

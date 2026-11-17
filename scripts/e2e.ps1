@@ -68,7 +68,13 @@ function WfpRules {
     netsh wfp show filters file="$f" | Out-Null
     (Select-String -Path $f -Pattern '<name>ABA: ' -AllMatches).Matches.Count
 }
-function NtfyMessages { (Invoke-RestMethod "https://ntfy.sh/$topic/json?poll=1&since=all") -split "`n" | Where-Object { $_ } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object event -eq 'message' }
+# ntfy returns one JSON object per line; read the raw text (Invoke-RestMethod
+# would auto-parse a single line into an object).
+function NtfyMessages {
+    $raw = (Invoke-WebRequest "https://ntfy.sh/$topic/json?poll=1&since=all" -UseBasicParsing).Content
+    if ($raw -is [byte[]]) { $raw = [Text.Encoding]::UTF8.GetString($raw) }
+    $raw -split "`n" | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object event -eq 'message'
+}
 function AuditFS { (auditpol /get /subcategory:"$fsGuid" /r | ConvertFrom-Csv).'Inclusion Setting' }
 
 # ---------------------------------------------------------------------------

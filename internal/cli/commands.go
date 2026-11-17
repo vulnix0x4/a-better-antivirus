@@ -774,9 +774,20 @@ func phoneCmd() *cobra.Command {
 // ---- notify (runs in the user's session, started by the service) ----
 
 func notifyCmd() *cobra.Command {
-	return &cobra.Command{
-		Use: "notify <alert-id>", Hidden: true, Args: cobra.ExactArgs(1),
+	var demo bool
+	c := &cobra.Command{
+		Use: "notify <alert-id>", Hidden: true, Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if demo {
+				// Preview the alert UI with fake data; the buttons do nothing.
+				a := demoAlert()
+				notify.Toast("ABA: "+a.Title, a.Summary)
+				notify.ShowPopup(a, "")
+				return nil
+			}
+			if len(args) != 1 {
+				return exitf("usage: aba notify <alert-id>")
+			}
 			a, err := alerts.Load(args[0])
 			if err != nil {
 				return err
@@ -795,4 +806,19 @@ func notifyCmd() *cobra.Command {
 			return nil
 		},
 	}
+	c.Flags().BoolVar(&demo, "demo", false, "show a sample alert (nothing is installed or changed)")
+	return c
+}
+
+func demoAlert() *alerts.Alert {
+	a := &alerts.Alert{
+		ID: "DEMO", Time: time.Now(), Kind: alerts.KindRead, Tier: config.TierCritical,
+		Title:   "Possible stealer: FreeRobux.exe read your bait",
+		Summary: `DEMO: unsigned program running from a user-writable folder (C:\Users\you\Downloads): typical of stealers`,
+		Baits:   []alerts.BaitHit{{Name: "passwords.txt on the Desktop", Path: `C:\Users\you\Desktop\passwords.txt`, Access: "read", Time: time.Now()}},
+		Process: &alerts.Process{PID: 4242, Image: `C:\Users\you\Downloads\FreeRobux.exe`},
+	}
+	a.AddAction(config.ActionFreeze, nil, "1 process(es) frozen")
+	a.AddAction(config.ActionBlockProgram, nil, "")
+	return a
 }
