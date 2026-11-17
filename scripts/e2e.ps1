@@ -132,7 +132,7 @@ Aba ignore remove 1
 Step 'Release everything'
 Aba release
 $st = State
-Check (@($st.frozen).Count -eq 0 -and @($st.blocked).Count -eq 0) 'nothing frozen or blocked'
+Check ((-not $st.frozen) -and (-not $st.blocked)) "nothing frozen or blocked (frozen=$($st.frozen | ConvertTo-Json -Compress) blocked=$($st.blocked | ConvertTo-Json -Compress))"
 Check ((WfpRules) -eq 0) 'all WFP rules gone'
 
 Step 'Strict mode: isolation, with the phone alert sent while isolated'
