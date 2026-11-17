@@ -434,3 +434,48 @@ func (s *server) onOpen(path string, at time.Time, pids []uint32) {
 		go s.eng.HandleOpen(pid, path, at, frozen)
 	}
 }
+
+var (
+	selfHashOnce sync.Once
+	selfHash     string
+	hashCacheMu  sync.Mutex
+	hashCache    = map[string]string{}
+)
+
+// IsSelf reports whether image is a copy of ABA's own executable, by SHA-256.
+// (A path check isn't enough: the CLI may run from Downloads or a build folder.)
+func (s *server) IsSelf(image string) bool {
+	selfHashOnce.Do(func() { selfHash, _ = procinfo.FileSHA256(s.selfExe) })
+	if selfHash == "" || image == "" {
+		return false
+	}
+	key := strings.ToLower(image)
+	if fi, err := os.Stat(image); err == nil {
+		key += fmt.Sprintf("|%d|%d", fi.Size(), fi.ModTime().UnixNano())
+	}
+	hashCacheMu.Lock()
+	h, ok := hashCache[key]
+	hashCacheMu.Unlock()
+	if !ok {
+		h, _ = procinfo.FileSHA256(image)
+		hashCacheMu.Lock()
+		hashCache[key] = h
+		hashCacheMu.Unlock()
+	}
+	return h == selfHash
+}
+
+// Elevated reports whether pid runs with an elevated (administrator) token.
+func (s *server) Elevated(pid uint32) bool {
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	if err != nil {
+		return true // can't inspect it: treat as elevated, i.e. don't instant-freeze
+	}
+	defer windows.CloseHandle(h)
+	var tok windows.Token
+	if err := windows.OpenProcessToken(h, windows.TOKEN_QUERY, &tok); err != nil {
+		return true
+	}
+	defer tok.Close()
+	return tok.IsElevated()
+}

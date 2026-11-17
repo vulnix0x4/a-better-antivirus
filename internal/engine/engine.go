@@ -48,6 +48,8 @@ type Ops interface {
 	RetireDecoy(baitID string, why string)
 	PendingTest() *TestRequest
 	UserSession(pid uint32) bool // runs in an interactive user session (not session 0)
+	IsSelf(image string) bool    // the executable is ABA itself (same file hash as the service)
+	Elevated(pid uint32) bool    // runs with an elevated (admin) token
 	ClearTest()
 	Logf(format string, args ...any)
 }
@@ -137,15 +139,21 @@ func (e *Engine) DecideInstant(pid uint32, path string) bool {
 		return false
 	}
 	image, err := e.Ops.ImagePath(pid)
-	if err != nil || image == "" || !e.touchable(pid, image) || !e.Ops.UserSession(pid) {
-		return false
-	}
-	if paths.Same(image, paths.InstalledCLI()) || paths.Same(image, paths.InstalledService()) {
+	if err != nil || image == "" || !e.touchable(pid, image) {
 		return false
 	}
 	if tr := e.Ops.PendingTest(); tr != nil && tr.PID == pid {
 		e.claim(pid)
-		return true // `aba test`: always demonstrate the freeze
+		return true // `aba test`: a known process, always demonstrate the freeze
+	}
+	// Instant freeze acts on a split-second inference, so it only touches
+	// ordinary, non-elevated programs in a user session. Admin tools that inspect
+	// baits (and elevated malware, out of scope) go through the event-log path.
+	if !e.Ops.UserSession(pid) || e.Ops.Elevated(pid) {
+		return false
+	}
+	if e.Ops.IsSelf(image) {
+		return false // ABA's own CLI (e.g. `aba doctor` checking a bait's audit rule)
 	}
 	if !cfg.InstantFreeze {
 		return false
@@ -248,16 +256,15 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 			image = p
 		}
 	}
-	if paths.Same(image, paths.InstalledCLI()) || paths.Same(image, paths.InstalledService()) {
-		return // ABA itself (bait adoption by an admin); its folder is admin-only
-	}
-	createTime := e.Ops.CreateTime(oa.ProcessID)
-	ref := baitRef(baitID)
-
 	test := false
 	if tr := e.Ops.PendingTest(); tr != nil && tr.PID == oa.ProcessID {
 		test = true
 	}
+	if !test && e.Ops.IsSelf(image) {
+		return // ABA's own binary (doctor, bait adoption…), recognised by its hash
+	}
+	createTime := e.Ops.CreateTime(oa.ProcessID)
+	ref := baitRef(baitID)
 	learning := cfg.Learning(now) && !test
 	actionsFor := func(t config.Tier) []config.Action {
 		if test {

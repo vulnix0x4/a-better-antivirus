@@ -30,7 +30,19 @@ function Fail($m) {
     exit 1
 }
 function Check($cond, $m) { if ($cond) { Ok $m } else { Fail $m } }
-function Aba { & $Aba @args 2>&1 | Out-Host; if ($LASTEXITCODE) { Fail "aba $($args -join ' ') exited $LASTEXITCODE" } }
+# Every aba call gets a deadline: a hang fails fast with the service log.
+function Aba {
+    $argline = ($args | ForEach-Object { if ("$_" -match '\s') { '"' + $_ + '"' } else { "$_" } }) -join ' '
+    $p = Start-Process -FilePath $Aba -ArgumentList $argline -NoNewWindow -PassThru
+    $null = $p.Handle
+    if (-not $p.WaitForExit(120000)) {
+        Write-Host "  aba $argline is still running after 2 minutes; frozen processes:" -ForegroundColor Red
+        if (Test-Path "$data\state.json") { (Get-Content "$data\state.json" -Raw | ConvertFrom-Json).frozen | Format-Table | Out-Host }
+        $p.Kill()
+        Fail "aba $argline hung"
+    }
+    if ($p.ExitCode) { Fail "aba $argline exited $($p.ExitCode)" }
+}
 
 function Alerts { if (Test-Path "$data\alerts") { Get-ChildItem "$data\alerts\*.json" | Sort-Object Name | ForEach-Object { Get-Content $_ -Raw | ConvertFrom-Json } } }
 function WaitFor([scriptblock]$cond, [int]$seconds = 20) {
@@ -48,10 +60,16 @@ function Did($alert, $action) { [bool]($alert.actions | Where-Object { $_.action
 
 # A fake stealer: a copy of aba.exe in Temp (unsigned, user-writable -> critical)
 # that reads a bait and then waits around.
+# Like real stealers it runs with a normal, non-admin token (runas /trustlevel),
+# and a few random bytes make its hash differ from ABA's, so it isn't "ABA".
 function Stealer([string]$name, [string]$bait) {
     $exe = Join-Path $env:TEMP "$name.exe"
     Copy-Item $Aba $exe -Force
-    $p = Start-Process -FilePath $exe -ArgumentList 'test-reader', "`"$bait`"" -PassThru -WindowStyle Hidden
+    [IO.File]::AppendAllText($exe, [guid]::NewGuid().ToString())
+    $before = @(Get-Process -Name $name -ErrorAction SilentlyContinue | ForEach-Object Id)
+    & runas.exe /trustlevel:0x20000 "`"$exe`" test-reader `"$bait`"" | Out-Null
+    $p = WaitFor { Get-Process -Name $name -ErrorAction SilentlyContinue | Where-Object { $before -notcontains $_.Id } | Select-Object -First 1 } 10
+    if (-not $p) { Fail "fake stealer $name didn't start" }
     return $p
 }
 function IsSuspended([int]$procId) {
@@ -108,7 +126,13 @@ Check (Did $a1 'block-program') 'blocked its internet'
 Check (WaitFor { IsSuspended $s1.Id } 5) 'process really is suspended'
 Check ((WfpRules) -gt 0) 'WFP block rules present'
 Check ((State).frozen.pid -contains $s1.Id) 'state lists it as frozen'
-Check ($a1.instant -eq $true) "instant freeze: caught the moment it opened the bait (frozen $($a1.latencyMs) ms after the open)"
+$sess = (Get-Process -Id $s1.Id -ErrorAction SilentlyContinue).SessionId
+Ok "stealer ran in session $sess with a non-admin token"
+if ($sess -eq 0) {
+    Ok 'instant freeze deliberately skips session 0 (services); caught via the event log instead'
+} else {
+    Check ($a1.instant -eq $true) "instant freeze: caught the moment it opened the bait (frozen $($a1.latencyMs) ms after the open)"
+}
 $tree = @($s1.Id) + @(Get-CimInstance Win32_Process -Filter "ParentProcessId=$($s1.Id)" | ForEach-Object ProcessId)
 $innocent = @((State).frozen | Where-Object { $tree -notcontains $_.pid })
 Check ($innocent.Count -eq 0) "no innocent process frozen (frozen: $(((State).frozen.image) -join ', '))"

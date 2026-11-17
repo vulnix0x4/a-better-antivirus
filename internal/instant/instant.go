@@ -358,7 +358,12 @@ func (w *Watcher) guard(path string, stop windows.Handle) {
 			return
 		}
 		tick0, at := Tick(), time.Now()
-		if access, known := g.OpenerAccess(); known && !WantsContents(access) {
+		// Only opens that can read the contents count. Windows reports the
+		// requested access for some opens (e.g. delete) but not for plain reads,
+		// so "unknown" is treated as a possible read.
+		access, known := g.OpenerAccess()
+		if known && !WantsContents(access) {
+			w.logf("instant: %s opened for 0x%x (known=%v): not a read, let through", path, access, known)
 			if w.OnOther != nil {
 				w.OnOther(path, access)
 			}
@@ -371,6 +376,7 @@ func (w *Watcher) guard(path string, stop windows.Handle) {
 		stuck := FindStuck(tick0, w.Self, settle)
 		g.Release()
 		pids := Woke(stuck, w.Self, 3*time.Millisecond)
+		w.logf("instant: %s opened for read (0x%x); %d thread(s) got stuck, woke on release: %v", path, access, len(stuck), pids)
 		if w.OnOpen != nil {
 			func() {
 				defer func() {

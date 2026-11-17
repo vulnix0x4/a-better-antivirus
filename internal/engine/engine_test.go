@@ -59,6 +59,8 @@ func (f *fakeOps) RetireDecoy(id, why string)                     { f.retired = 
 func (f *fakeOps) PendingTest() *TestRequest                      { return f.test }
 func (f *fakeOps) ClearTest()                                     { f.test = nil }
 func (f *fakeOps) UserSession(uint32) bool                        { return true }
+func (f *fakeOps) Elevated(pid uint32) bool                       { return pid == 777 }
+func (f *fakeOps) IsSelf(img string) bool                         { return strings.HasSuffix(strings.ToLower(img), `\aba.exe`) }
 func (f *fakeOps) Logf(string, ...any)                            {}
 func (f *fakeOps) UpdateState(fn func(*config.State) error) error { return fn(f.state) }
 
@@ -269,5 +271,21 @@ func TestEventLogPathDoesNotDoubleFreezeInstantCatch(t *testing.T) {
 	e.HandleAccess(ev(101, img, desktopBait, 1))
 	if len(f.suspended) != 1 {
 		t.Fatalf("unclaimed process should be frozen by the normal path: %v", f.suspended)
+	}
+}
+
+func TestInstantSkipsSelfAndElevated(t *testing.T) {
+	e, f := setup("balanced")
+	f.images[100] = `D:\a\build\dist\aba.exe` // ABA's own CLI run from a build folder (CI hang)
+	f.images[777] = `C:\Users\bob\Downloads\admin-tool.exe`
+	if e.DecideInstant(100, desktopBait) {
+		t.Error("ABA must never instant-freeze itself (e.g. `aba doctor`)")
+	}
+	if e.DecideInstant(777, desktopBait) {
+		t.Error("elevated programs are left to the event-log path")
+	}
+	f.test = &TestRequest{PID: 100}
+	if !e.DecideInstant(100, desktopBait) {
+		t.Error("`aba test` reader (a copy of ABA) must still be frozen")
 	}
 }
