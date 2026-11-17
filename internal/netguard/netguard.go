@@ -14,6 +14,7 @@ import (
 	"syscall"
 
 	"github.com/tailscale/wf"
+	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
 	"golang.org/x/sys/windows"
 )
 
@@ -125,7 +126,7 @@ func Isolate(selfExe string) error {
 		return err
 	}
 	defer s.Close()
-	appID, err := wf.AppID(selfExe)
+	appID, err := appIDFor(selfExe)
 	if err != nil {
 		return fmt.Errorf("app id for %s: %w", selfExe, err)
 	}
@@ -157,7 +158,7 @@ func Unisolate() error {
 func programRuleIDs(path string) []wf.RuleID {
 	var ids []wf.RuleID
 	for _, l := range allLayers {
-		ids = append(ids, ruleID("block", strings.ToLower(path), l.String()))
+		ids = append(ids, ruleID("block", paths.Key(path), l.String()))
 	}
 	return ids
 }
@@ -169,7 +170,7 @@ func BlockProgram(path string) error {
 		return err
 	}
 	defer s.Close()
-	appID, err := wf.AppID(path)
+	appID, err := appIDFor(path)
 	if err != nil {
 		return fmt.Errorf("app id for %s: %w", path, err)
 	}
@@ -287,4 +288,11 @@ func powershell(script string) (string, error) {
 		return string(b), fmt.Errorf("%v: %s", err, strings.TrimSpace(string(b)))
 	}
 	return string(b), nil
+}
+
+// appIDFor returns WFP's application ID for an executable. WFP matches the
+// running program by its full long path, so 8.3 short names
+// (C:\Users\RUNNER~1\...) must be expanded first or the rule never applies.
+func appIDFor(exe string) (string, error) {
+	return wf.AppID(paths.Long(exe))
 }
