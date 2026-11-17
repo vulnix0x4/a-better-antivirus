@@ -68,15 +68,21 @@ Infostealers (Lumma, RedLine, Vidar, StealC…) are the most common malware on p
 
 ## Install
 
-**One command** (PowerShell): downloads v0.1.0, checks its SHA-256 against the published value, and only then runs the installer. It asks for admin and walks you through setup.
+In PowerShell:
 
 ```powershell
-$u='https://github.com/vulnix0x4/a-better-antivirus/releases/download/v0.1.0'; $f="$env:TEMP\aba.exe"; iwr "$u/aba_v0.1.0_windows_amd64.exe" -OutFile $f -UseBasicParsing; if ((Get-FileHash $f -A SHA256).Hash -ne '7612BF1120C66E17DCFF1DAC6D798C1B7B32CFC475D4B30E951A5723190A4DF9') { throw 'checksum mismatch: do not run this file' }; & $f install
+irm https://raw.githubusercontent.com/vulnix0x4/a-better-antivirus/main/install.ps1 | iex
 ```
 
-**Or by hand:** download `aba_v0.1.0_windows_amd64.exe` from [Releases](../../releases), check its SHA-256 against `SHA256SUMS.txt`, then double-click it (or run `.\aba_v0.1.0_windows_amd64.exe install`). Releases aren't code-signed yet, so SmartScreen may warn you: verify the hash first, then use *More info → Run anyway*.
+It downloads the latest release for your PC, checks it against the release's `SHA256SUMS.txt`, and runs the guided setup (it asks for admin). [Read the script first](install.ps1) if you like; it's 40 lines. For a test VM with no questions asked:
 
-> Why not the usual `irm … | iex`? That runs whatever a URL serves, unchecked, and pasting it into PowerShell is exactly how many stealers get installed. The command above downloads a fixed file and refuses to run it unless its fingerprint matches.
+```powershell
+$env:ABA_ARGS = 'install --yes --preset strict --learning 0'; irm https://raw.githubusercontent.com/vulnix0x4/a-better-antivirus/main/install.ps1 | iex
+```
+
+**Or by hand:** download `aba_<version>_windows_amd64.exe` from [Releases](../../releases), check its SHA-256 against `SHA256SUMS.txt`, and run it with `install`. Releases aren't code-signed yet, so SmartScreen may warn you: verify the hash first, then use *More info → Run anyway*.
+
+> Only ever paste `irm … | iex` commands from sources you trust: it's also how many stealers get installed ("paste this to fix your PC"). This one is in the open, short, and refuses to run a download whose checksum doesn't match.
 
 ## Everyday use
 
