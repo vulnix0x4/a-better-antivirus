@@ -319,11 +319,17 @@ func plantBaits(cfg *config.Config, sec *config.Secrets) (string, error) {
 			if !ok {
 				continue
 			}
-			if old := st.Baits[b.ID]; old != nil && old.Status != "retired" {
+			if old := st.Baits[b.ID]; old != nil {
+				if old.Status == "retired" {
+					continue // the real app moved in: never plant fake data over it again
+				}
 				if probs := baits.Check(old); len(probs) > 0 {
 					baits.Repair(old, spec, cfg.User, g, probs)
 				}
 				continue
+			}
+			if baits.InstalledMarker(spec, cfg.User) != "" {
+				continue // installed since the plan was made
 			}
 			bs, err := baits.Create(spec, cfg.User, g)
 			if err != nil {
