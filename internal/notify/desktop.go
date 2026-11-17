@@ -38,7 +38,10 @@ $id = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.
 	}
 	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-EncodedCommand", base64.StdEncoding.EncodeToString(b))
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW}
-	cmd.Start()
+	// PowerShell may print progress records; only a failed run is an error.
+	if out, err := toastRun(cmd); err != nil {
+		lastToastErr = fmt.Sprintf("%v %s", err, out)
+	}
 }
 
 const (
@@ -166,3 +169,8 @@ func procBase(p string) string {
 	}
 	return p
 }
+
+// toastRun is swapped in tests to capture PowerShell's output.
+var toastRun = func(cmd *exec.Cmd) ([]byte, error) { return nil, cmd.Start() }
+
+var lastToastErr string
