@@ -12,8 +12,8 @@
   seconds and changes system settings. It's meant for CI runners.
 #>
 param(
-    [string]$Aba = (Join-Path $PSScriptRoot '..distba.exe'),
-    [string]$Medium = (Join-Path $PSScriptRoot '..distmedium.exe')
+    [string]$Aba = (Join-Path $PSScriptRoot '..\dist\aba.exe'),
+    [string]$Medium = (Join-Path $PSScriptRoot '..\dist\medium.exe')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -139,7 +139,8 @@ if ($sess -eq 0) {
     Check ($a1.instant -eq $true) "instant freeze: caught the moment it opened the bait (frozen $($a1.latencyMs) ms after the open)"
 }
 $tree = @($s1.Id) + @(Get-CimInstance Win32_Process -Filter "ParentProcessId=$($s1.Id)" | ForEach-Object ProcessId)
-$innocent = @((State).frozen | Where-Object { $tree -notcontains $_.pid })
+# Only processes that still exist count (the `aba test` reader is killed by design).
+$innocent = @((State).frozen | Where-Object { $tree -notcontains $_.pid -and (Get-Process -Id $_.pid -ErrorAction SilentlyContinue) })
 Check ($innocent.Count -eq 0) "no innocent process frozen (frozen: $(((State).frozen.image) -join ', '))"
 Select-String -Path "$data\service.log" -Pattern 'instant' | ForEach-Object { "  log: " + $_.Line } | Out-Host
 Aba alerts show $a1.id

@@ -289,3 +289,12 @@ func TestInstantSkipsSelfAndElevated(t *testing.T) {
 		t.Error("`aba test` reader (a copy of ABA) must still be frozen")
 	}
 }
+
+func TestTestReaderLeavesFrozenList(t *testing.T) {
+	e, f := setup("balanced")
+	f.test = &TestRequest{PID: 500}
+	e.HandleAccess(ev(500, `C:\Users\bob\AppData\Local\Temp\aba-test-1.exe`, desktopBait, 1))
+	if len(f.killed) != 1 || len(f.state.Frozen) != 0 {
+		t.Fatalf("killed=%v frozen=%+v: the killed test reader must not stay on the frozen list", f.killed, f.state.Frozen)
+	}
+}

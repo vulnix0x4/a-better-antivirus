@@ -443,6 +443,17 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 	if test {
 		e.Ops.KillTree(oa.ProcessID)
 		e.Ops.ClearTest()
+		// The test reader is gone: don't leave it on the frozen list.
+		e.Ops.UpdateState(func(st *config.State) error {
+			var keep []config.FrozenProcess
+			for _, f := range st.Frozen {
+				if f.AlertID != a.ID {
+					keep = append(keep, f)
+				}
+			}
+			st.Frozen = keep
+			return nil
+		})
 	}
 	e.Ops.Logf("alert %s: %s [%s] actions=%d latency=%dms (delivery %dms)", a.ID, a.Title, a.Tier, len(a.Actions), a.LatencyMS, a.DeliveryMS)
 }
