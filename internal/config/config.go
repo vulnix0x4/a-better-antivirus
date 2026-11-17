@@ -274,3 +274,45 @@ func writeFileAtomic(path string, b []byte) error {
 	}
 	return nil
 }
+
+// Verb is the bare action ("freeze it"), for "Couldn't …" messages.
+func (a Action) Verb() string {
+	switch a {
+	case ActionFreeze:
+		return "freeze it"
+	case ActionBlockProgram:
+		return "cut its internet"
+	case ActionKill:
+		return "kill it"
+	case ActionIsolate:
+		return "isolate this PC"
+	case ActionDisableAdapters:
+		return "turn off the network adapters"
+	}
+	return string(a)
+}
+
+// Done describes a completed action in plain words, e.g. "Froze it (2 processes)".
+func (a Action) Done(detail string) string {
+	switch a {
+	case ActionFreeze:
+		n := 0
+		fmt.Sscanf(detail, "%d", &n)
+		if n > 1 {
+			return fmt.Sprintf("Froze it and %d process(es) it started", n-1)
+		}
+		return "Froze it"
+	case ActionBlockProgram:
+		return "Cut its internet"
+	case ActionKill:
+		return "Killed it"
+	case ActionIsolate:
+		return "Isolated this PC from the network (ABA's own alerts still get out)"
+	case ActionDisableAdapters:
+		if detail != "" {
+			return "Turned off network adapters: " + detail
+		}
+		return "Turned off network adapters"
+	}
+	return string(a)
+}

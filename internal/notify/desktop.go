@@ -80,38 +80,31 @@ func quoteAll(args []string) []string {
 
 // Details renders the long form of an alert for the popup.
 func Details(a *alerts.Alert) string {
+	// Message boxes use a proportional font, so no column alignment: one
+	// labelled line per fact, long paths on their own line.
 	var b strings.Builder
 	fmt.Fprintln(&b, a.Summary)
-	fmt.Fprintln(&b)
-	for _, h := range a.Baits {
-		fmt.Fprintf(&b, "Bait:      %s\n           %s\n", h.Name, h.Path)
-	}
 	if p := a.Process; p != nil {
-		fmt.Fprintf(&b, "Process:   %s (pid %d)\n", a.ExeName(), p.PID)
+		fmt.Fprintf(&b, "\nProgram: %s (pid %d)\n", a.ExeName(), p.PID)
 		if p.Image != "" {
-			fmt.Fprintf(&b, "Path:      %s\n", p.Image)
+			fmt.Fprintln(&b, p.Image)
 		}
 		fmt.Fprintf(&b, "Signature: %s\n", p.Signature)
-		if len(p.Parents) > 0 {
-			par := p.Parents[0]
-			name := par.Image
-			if name == "" {
-				name = "(exited)"
-			}
-			fmt.Fprintf(&b, "Parent:    %s (pid %d)\n", name, par.PID)
+		if len(p.Parents) > 0 && !p.Parents[0].Exited {
+			fmt.Fprintf(&b, "Started by: %s\n", procBase(p.Parents[0].Image))
 		}
 	}
-	if len(a.Verdict.Reasons) > 0 {
-		fmt.Fprintf(&b, "Why:       %s\n", a.Verdict.Reasons[0])
+	for _, h := range a.Baits {
+		fmt.Fprintf(&b, "\nIt %s: %s\n%s\n", accessVerb(h.Access), h.Name, h.Path)
 	}
 	if len(a.Actions) > 0 {
-		fmt.Fprintln(&b)
+		fmt.Fprintln(&b, "\nWhat ABA did:")
 		for _, r := range a.Actions {
-			mark := "✓"
-			if !r.OK {
-				mark = "✗ FAILED:"
+			if r.OK {
+				fmt.Fprintf(&b, "✓ %s\n", config.Action(r.Action).Done(r.Detail))
+			} else {
+				fmt.Fprintf(&b, "✗ Couldn't %s: %s\n", config.Action(r.Action).Verb(), r.Detail)
 			}
-			fmt.Fprintf(&b, "%s %s %s\n", mark, config.Action(r.Action).Describe(), r.Detail)
 		}
 	}
 	if a.Learning {
@@ -158,4 +151,18 @@ func ShowPopup(a *alerts.Alert, cli string) {
 	default:
 		messageBox(title, body, mbOK|mbIconWarning)
 	}
+}
+
+func accessVerb(access string) string {
+	if access == "delete" {
+		return "deleted"
+	}
+	return "read"
+}
+
+func procBase(p string) string {
+	if i := strings.LastIndexAny(p, `\/`); i >= 0 {
+		return p[i+1:]
+	}
+	return p
 }

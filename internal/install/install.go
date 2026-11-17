@@ -366,9 +366,15 @@ func copyFile(src, dst string) error {
 	}
 	// The old binary may be running (e.g. this is `aba install` from PATH);
 	// Windows lets us rename a running exe out of the way.
+	// Old copies can still be in use (e.g. an alert popup nobody clicked), so
+	// each gets a unique name and is deleted now or at the next reboot.
+	if olds, _ := filepath.Glob(dst + ".old*"); len(olds) > 0 {
+		for _, o := range olds {
+			os.Remove(o)
+		}
+	}
 	if _, err := os.Stat(dst); err == nil {
-		old := dst + ".old"
-		os.Remove(old)
+		old := fmt.Sprintf("%s.old-%d", dst, time.Now().UnixNano())
 		if err := os.Rename(dst, old); err != nil {
 			return err
 		}
