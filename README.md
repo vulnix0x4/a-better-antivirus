@@ -11,7 +11,7 @@
  Reads bait    C:\Users\you\Desktop\passwords.txt
 
  ✓ Detected: critical (unsigned program running from a user-writable folder)
- ✓ Frozen 4 ms after the read
+ ✓ Frozen 192 ms after the read (Windows delivered the event after 181 ms)
  ✓ Popup shown on your desktop
  ✓ Phone alert sent via ntfy
 ```
@@ -32,7 +32,7 @@ Infostealers (Lumma, RedLine, Vidar, StealC…) are the most common malware on p
  stealer opens a bait
         │
         ▼
- NTFS audit rule ──► Security event 4663 ──► ABA service (SYSTEM) gets it in <1 ms
+ NTFS audit rule ──► Security event 4663 ──► ABA service (SYSTEM), typically within ~0.2 s
                                                 │
            1. instant verdict from path/name ───┤ unsigned + Temp/AppData/Downloads? script host?
            2. freeze the process tree ──────────┤ (before it can upload)
@@ -113,7 +113,7 @@ ntfy (free, no account), Discord webhook, Pushover or email (SMTP with TLS). Sec
 ## Honest limitations
 
 - **It's a tripwire, not a shield.** It catches stealers that go looking for files. A stealer that only grabs your real browser data and never touches a bait won't trip it.
-- **Speed.** Detection takes about a millisecond, but a stealer that uploads each item the moment it reads it may get something out first. Freezing stops whatever it hasn't sent yet.
+- **Speed.** Windows hands ABA the read event in roughly 0.2 s (measured in CI: 181 ms), and ABA freezes the reader about 10 ms later. A stealer that uploads each item the moment it reads it may get something out first. Freezing stops whatever it hasn't sent yet.
 - **Admin malware.** Malware running as administrator can stop the service, clear the audit policy or remove filters. ABA alerts if auditing is switched off, but it can't defend against an attacker who already owns the machine.
 - **Desktop popups need you to be signed in.** Detections are always logged and phone alerts always go out, and responses happen either way.
 - **Some legit software reads files** (backup, sync, search tools). Learning mode and ignore rules handle that.

@@ -28,7 +28,7 @@ jobs:
       - name: Integration tests (admin)
         env:
           ABA_INTEGRATION: "1"
-        run: go test -v ./internal/integration/
+        run: go test -count=1 -v ./internal/integration/
 
       - name: Build
         run: go build -ldflags "-s -w -X main.version=ci-${{ github.sha }}" -o dist/aba.exe ./cmd/aba
