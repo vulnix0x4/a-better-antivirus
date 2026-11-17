@@ -70,6 +70,7 @@ type Engine struct {
 	index      map[string]string // lower path -> bait id
 	baitNames  map[string]string
 	incidents  map[uint32]*incident
+	claimed    map[uint32]time.Time // PIDs the instant path is handling
 }
 
 type incident struct {
@@ -82,7 +83,7 @@ type incident struct {
 const window = 2 * time.Minute
 
 func New(ops Ops, selfPID uint32) *Engine {
-	return &Engine{Ops: ops, SelfPID: selfPID, incidents: map[uint32]*incident{}}
+	return &Engine{Ops: ops, SelfPID: selfPID, incidents: map[uint32]*incident{}, claimed: map[uint32]time.Time{}}
 }
 
 // Configure (re)loads config and the bait index.
@@ -143,6 +144,7 @@ func (e *Engine) DecideInstant(pid uint32, path string) bool {
 		return false
 	}
 	if tr := e.Ops.PendingTest(); tr != nil && tr.PID == pid {
+		e.claim(pid)
 		return true // `aba test`: always demonstrate the freeze
 	}
 	if !cfg.InstantFreeze {
@@ -152,7 +154,27 @@ func (e *Engine) DecideInstant(pid uint32, path string) bool {
 	if v.Ignored || v.DecoyOwner {
 		return false
 	}
-	return config.Has(cfg.ActionsFor(v.Tier, time.Now()), config.ActionFreeze)
+	if !config.Has(cfg.ActionsFor(v.Tier, time.Now()), config.ActionFreeze) {
+		return false
+	}
+	e.claim(pid)
+	return true
+}
+
+// claim marks pid as handled by the instant path, so the event-log path (which
+// fires a moment later for the same read) doesn't freeze it a second time:
+// Windows stacks suspensions, so a double freeze would need two unfreezes.
+func (e *Engine) claim(pid uint32) {
+	e.mu.Lock()
+	e.claimed[pid] = time.Now()
+	e.mu.Unlock()
+}
+
+// Unclaim releases a claim (e.g. the instant freeze itself failed).
+func (e *Engine) Unclaim(pid uint32) {
+	e.mu.Lock()
+	delete(e.claimed, pid)
+	e.mu.Unlock()
 }
 
 // HandleOpen raises the alert (and runs the remaining responses) for a reader
@@ -173,9 +195,17 @@ func baitRef(id string) classify.Bait {
 func (e *Engine) HandleAccess(oa *evtlog.ObjectAccess) { e.handle(oa, nil) }
 
 // handle processes a bait access. preFrozen is non-nil when the reader was
-// already frozen mid-open by the instant path, before it could read.
+// already frozen by the instant path, the moment it opened the bait.
 func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
-	beforeRead := preFrozen != nil
+	instant := preFrozen != nil
+	if !instant {
+		e.mu.Lock()
+		t, ok := e.claimed[oa.ProcessID]
+		e.mu.Unlock()
+		if ok && time.Since(t) < window {
+			return // the instant path already caught and is reporting this process
+		}
+	}
 	received := time.Now()
 	baitID, ok := e.IsBait(oa.ObjectName)
 	if !ok || oa.ProcessID == e.SelfPID {
@@ -241,14 +271,14 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 
 	// 1-2. Instant verdict, freeze first.
 	pre := cls.Prelim(image, oa.ProcessID, ref)
-	if pre.Ignored && !beforeRead {
+	if pre.Ignored && !instant {
 		e.Ops.Logf("ignored %s of %s by %s (%s)", access, oa.ObjectName, image, strings.Join(pre.Reasons, "; "))
 		return
 	}
 	frozen := preFrozen
 	var latency time.Duration
 	canTouch := e.touchable(oa.ProcessID, image)
-	if beforeRead {
+	if instant {
 		latency = time.Since(oa.Time)
 	} else if canTouch && config.Has(actionsFor(pre.Tier), config.ActionFreeze) {
 		frozen, _ = e.Ops.SuspendTree(oa.ProcessID)
@@ -284,7 +314,7 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 		Baits:   []alerts.BaitHit{hit},
 		Process: &alerts.Process{PID: oa.ProcessID, Image: image, User: oa.User, Signature: sig},
 	}
-	a.BeforeRead = beforeRead && len(frozen) > 0
+	a.Instant = instant && len(frozen) > 0
 	if access == "delete" {
 		a.Kind = alerts.KindDelete
 	}
@@ -294,8 +324,8 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 	if config.Has(acts, config.ActionFreeze) {
 		if len(frozen) > 0 {
 			detail := fmt.Sprintf("%d process(es) frozen", len(frozen))
-			if beforeRead {
-				detail += " before it read anything"
+			if instant {
+				detail += " the moment it opened the bait"
 			}
 			a.AddAction(config.ActionFreeze, nil, detail)
 		} else if !canTouch {
@@ -404,12 +434,12 @@ func (e *Engine) describe(a *alerts.Alert, v classify.Verdict) {
 	if a.Kind == alerts.KindDelete {
 		what = "deleted"
 	}
-	if a.BeforeRead {
-		what = "tried to open"
+	if a.Instant {
+		what = "opened"
 	}
 	switch {
-	case a.Test && a.BeforeRead:
-		a.Title = "Test detection: " + exe + " was frozen opening a bait, before reading it"
+	case a.Test && a.Instant:
+		a.Title = "Test detection: " + exe + " was frozen the moment it opened a bait"
 	case a.Test:
 		a.Title = "Test detection: " + exe + " read a bait"
 	case v.DecoyOwner:
@@ -424,8 +454,8 @@ func (e *Engine) describe(a *alerts.Alert, v classify.Verdict) {
 	if len(v.Reasons) > 0 {
 		a.Summary = v.Reasons[0]
 	}
-	if a.BeforeRead {
-		a.Summary = "Frozen while opening the bait, before it could read anything. " + a.Summary
+	if a.Instant {
+		a.Summary = "Caught the moment it opened the bait (instant freeze). " + a.Summary
 	}
 }
 

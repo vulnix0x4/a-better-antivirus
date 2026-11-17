@@ -1,17 +1,20 @@
-// Package instant freezes a bait reader *before it reads anything*.
+// Package instant catches a bait reader the moment it opens a bait.
 //
 // How it works, without a kernel driver:
 //
 //  1. ABA holds an exclusive opportunistic lock (oplock) on every bait file.
 //  2. When another program opens the bait, Windows pauses that program inside
 //     its "open file" call and tells ABA immediately (an oplock break).
-//  3. Windows doesn't say who opened it, so ABA looks for the thread that just
-//     got stuck: a thread whose kernel wait began at the moment of the break
-//     and is still stuck a few milliseconds later. (Measured: the opener is
-//     reliably among the newest waits; the stability check drops the rest.)
-//  4. The service decides (same rules as everything else) and freezes it.
-//  5. ABA lets go of the oplock. A frozen opener is suspended mid-open and
-//     never receives a single byte; anyone else simply carries on.
+//  3. Windows doesn't say who opened it, so ABA notes the threads whose kernel
+//     wait began at that moment and are still stuck a few ms later.
+//  4. ABA lets go. The opener wakes at that exact instant; an innocent thread
+//     that happened to get stuck at the same time (e.g. reading a pipe) does
+//     not. Whoever woke is the opener, identified precisely.
+//  5. The service applies the usual verdict and freezes it a few ms after it
+//     opened the bait, without waiting for the event log (0.2-1 s).
+//
+// (An earlier version froze candidates *before* releasing, so the reader got 0
+// bytes, but CI showed that can freeze an innocent bystander. Precision wins.)
 //
 // The regular audit-log detection keeps running as a backup in case the
 // opener couldn't be pinpointed.
@@ -191,9 +194,11 @@ var sharedTickAddr = uintptr(0x7FFE0320) // KUSER_SHARED_DATA.TickCount (low par
 // Tick returns the kernel tick count (~15.6 ms per tick).
 func Tick() uint32 { return **(**uint32)(unsafe.Pointer(&sharedTickAddr)) }
 
-// FindOpeners returns PIDs whose thread got stuck at tick0 (the break) and is
-// still stuck after settle: almost always exactly the program opening the bait.
-func FindOpeners(tick0 uint32, skip uint32, settle time.Duration) []uint32 {
+// FindStuck returns threads that got stuck at tick0 (the break) and are still
+// stuck after settle. The opener is always among them, but so may be an
+// innocent thread that happened to start a long wait (e.g. a pipe read) at the
+// same moment, which is why Woke is used to tell them apart.
+func FindStuck(tick0 uint32, skip uint32, settle time.Duration) []Thread {
 	time.Sleep(settle / 3)
 	s1, err := StuckThreads(skip)
 	if err != nil {
@@ -208,14 +213,40 @@ func FindOpeners(tick0 uint32, skip uint32, settle time.Duration) []uint32 {
 	for _, t := range s2 {
 		later[[2]uint32{t.PID, t.TID}] = t
 	}
-	pids := map[uint32]bool{}
+	var out []Thread
 	for _, t := range s1 {
 		if t.WaitTime+3 < tick0 || t.WaitTime > tick0+2 {
 			continue // started waiting well before or after the open
 		}
 		if t2, ok := later[[2]uint32{t.PID, t.TID}]; ok && t2.WaitTime == t.WaitTime && t2.CtxSwitches == t.CtxSwitches {
-			pids[t.PID] = true // still stuck in the very same wait
+			out = append(out, t) // still stuck in the very same wait
 		}
+	}
+	return out
+}
+
+// Woke returns the PIDs of stuck threads that left their wait right after we
+// released the oplock: the opener wakes at that exact moment, while innocent
+// threads stuck on something else keep waiting.
+func Woke(stuck []Thread, skip uint32, after time.Duration) []uint32 {
+	if len(stuck) == 0 {
+		return nil
+	}
+	time.Sleep(after)
+	now, err := StuckThreads(skip)
+	if err != nil {
+		return nil
+	}
+	still := map[[2]uint32]Thread{}
+	for _, t := range now {
+		still[[2]uint32{t.PID, t.TID}] = t
+	}
+	pids := map[uint32]bool{}
+	for _, t := range stuck {
+		if n, ok := still[[2]uint32{t.PID, t.TID}]; ok && n.WaitTime == t.WaitTime && n.CtxSwitches == t.CtxSwitches {
+			continue // still in the same wait: not the opener
+		}
+		pids[t.PID] = true
 	}
 	var out []uint32
 	for p := range pids {
@@ -229,8 +260,8 @@ func FindOpeners(tick0 uint32, skip uint32, settle time.Duration) []uint32 {
 
 // Watcher keeps a guard on every bait and reports openers while they're paused.
 type Watcher struct {
-	// OnOpen runs while the opener is still paused. It must be quick and must
-	// not wait on anything that might itself be opening a bait.
+	// OnOpen gets the program(s) that opened the bait, identified by waking up
+	// exactly when ABA let go. It runs a few ms after the open.
 	OnOpen func(path string, at time.Time, pids []uint32)
 	// OnOther runs for opens that don't read contents (delete, security checks).
 	OnOther func(path string, access uint32)
@@ -337,7 +368,9 @@ func (w *Watcher) guard(path string, stop windows.Handle) {
 			}
 			continue
 		}
-		pids := FindOpeners(tick0, w.Self, settle)
+		stuck := FindStuck(tick0, w.Self, settle)
+		g.Release()
+		pids := Woke(stuck, w.Self, 3*time.Millisecond)
 		if w.OnOpen != nil {
 			func() {
 				defer func() {
@@ -348,7 +381,6 @@ func (w *Watcher) guard(path string, stop windows.Handle) {
 				w.OnOpen(path, at, pids)
 			}()
 		}
-		g.Release()
 		// Give the opener time to finish before re-arming (a trusted reader may
 		// still hold the file; Arm just retries until it's free).
 		if stopped(150 * time.Millisecond) {

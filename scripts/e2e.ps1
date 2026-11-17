@@ -108,10 +108,11 @@ Check (Did $a1 'block-program') 'blocked its internet'
 Check (WaitFor { IsSuspended $s1.Id } 5) 'process really is suspended'
 Check ((WfpRules) -gt 0) 'WFP block rules present'
 Check ((State).frozen.pid -contains $s1.Id) 'state lists it as frozen'
-Check ($a1.beforeRead -eq $true) "instant freeze: frozen while opening the bait, before reading ($($a1.latencyMs) ms after it tried)"
+Check ($a1.instant -eq $true) "instant freeze: caught the moment it opened the bait (frozen $($a1.latencyMs) ms after the open)"
 $tree = @($s1.Id) + @(Get-CimInstance Win32_Process -Filter "ParentProcessId=$($s1.Id)" | ForEach-Object ProcessId)
 $innocent = @((State).frozen | Where-Object { $tree -notcontains $_.pid })
 Check ($innocent.Count -eq 0) "no innocent process frozen (frozen: $(((State).frozen.image) -join ', '))"
+Select-String -Path "$data\service.log" -Pattern 'instant' | ForEach-Object { "  log: " + $_.Line } | Out-Host
 Aba alerts show $a1.id
 Aba kill $a1.id
 Check (WaitFor { -not (Get-Process -Id $s1.Id -ErrorAction SilentlyContinue) } 10) 'killed'

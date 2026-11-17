@@ -4,89 +4,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sync"
 	"testing"
 	"time"
-
-	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
 )
-
-// The full trick on a throwaway file, no admin needed: a reader opens the
-// bait, the watcher pinpoints it while it's paused, we freeze it, release
-// the oplock, and it must have read nothing.
-func TestFreezeBeforeRead(t *testing.T) {
-	const runs = 10
-	exact, found := 0, 0
-	for i := 0; i < runs; i++ {
-		dir := t.TempDir()
-		bait := filepath.Join(dir, "passwords.txt")
-		stolen := filepath.Join(dir, "stolen.txt")
-		os.WriteFile(bait, []byte("email / hunter2\r\n"), 0o644)
-
-		var mu sync.Mutex
-		var reader *exec.Cmd
-		var gotPIDs []uint32
-		frozen := map[uint32]bool{}
-		opened := make(chan struct{}, 4)
-
-		w := &Watcher{Self: uint32(os.Getpid())}
-		w.OnOpen = func(path string, at time.Time, pids []uint32) {
-			mu.Lock()
-			defer mu.Unlock()
-			gotPIDs = pids
-			if reader != nil {
-				for _, p := range pids {
-					if p == uint32(reader.Process.Pid) { // in ABA: "is it suspicious?"
-						procinfo.Suspend(p)
-						frozen[p] = true
-					}
-				}
-			}
-			opened <- struct{}{}
-		}
-		w.Sync([]string{bait})
-		time.Sleep(100 * time.Millisecond) // let the guard arm
-
-		mu.Lock()
-		reader = exec.Command("cmd.exe", "/c", "type", bait, ">", stolen)
-		if err := reader.Start(); err != nil {
-			mu.Unlock()
-			t.Fatal(err)
-		}
-		mu.Unlock()
-		rpid := uint32(reader.Process.Pid)
-
-		select {
-		case <-opened:
-		case <-time.After(10 * time.Second):
-			t.Fatal("watcher never saw the open")
-		}
-		time.Sleep(400 * time.Millisecond)
-		b, _ := os.ReadFile(stolen)
-
-		mu.Lock()
-		hit := frozen[rpid]
-		pids := gotPIDs
-		mu.Unlock()
-		if hit {
-			found++
-			if len(pids) == 1 {
-				exact++
-			}
-			if len(b) != 0 {
-				t.Fatalf("run %d: reader was frozen but still got %d bytes", i, len(b))
-			}
-			procinfo.Resume(rpid)
-		}
-		reader.Wait()
-		w.Stop()
-		t.Logf("run %d: candidates %v, reader %d pinpointed: %v, bytes before release: %d", i, pids, rpid, hit, len(b))
-	}
-	t.Logf("pinpointed the reader in %d/%d runs (%d with no other candidate)", found, runs, exact)
-	if found < runs*8/10 {
-		t.Fatalf("pinpointed the reader in only %d/%d runs", found, runs)
-	}
-}
 
 func TestStuckThreadsAndTick(t *testing.T) {
 	ts, err := StuckThreads(0)
@@ -131,5 +51,59 @@ func TestNonReadOpensAreLetThrough(t *testing.T) {
 	}
 	if !WantsContents(0x80000000) || !WantsContents(0x1) || WantsContents(0x00110080) {
 		t.Fatal("WantsContents mask logic")
+	}
+}
+
+// The CI hang taught us an innocent thread can start a long wait at the same
+// moment as the opener (e.g. a runner reading a pipe). Only the opener wakes
+// when ABA lets go, so only it may be reported.
+func TestPinpointsOpenerNotBystander(t *testing.T) {
+	const runs = 10
+	exact := 0
+	for i := 0; i < runs; i++ {
+		dir := t.TempDir()
+		bait := filepath.Join(dir, "passwords.txt")
+		os.WriteFile(bait, []byte("email / hunter2\r\n"), 0o644)
+
+		got := make(chan []uint32, 4)
+		w := &Watcher{Self: uint32(os.Getpid()), OnOpen: func(_ string, _ time.Time, pids []uint32) { got <- pids }}
+		w.Sync([]string{bait})
+		time.Sleep(100 * time.Millisecond)
+
+		// Bystander: blocks reading an empty pipe, started together with the reader.
+		pr, pw, _ := os.Pipe()
+		by := exec.Command("findstr.exe", "x")
+		by.Stdin = pr
+		reader := exec.Command("cmd.exe", "/c", "type", bait, ">", filepath.Join(dir, "out.txt"))
+		by.Start()
+		reader.Start()
+
+		var pids []uint32
+		select {
+		case pids = <-got:
+		case <-time.After(10 * time.Second):
+			t.Fatal("watcher never saw the open")
+		}
+		rpid, bpid := uint32(reader.Process.Pid), uint32(by.Process.Pid)
+		hasReader, hasBystander := false, false
+		for _, p := range pids {
+			hasReader = hasReader || p == rpid
+			hasBystander = hasBystander || p == bpid
+		}
+		if hasBystander {
+			t.Fatalf("run %d: innocent bystander %d reported as the opener (%v)", i, bpid, pids)
+		}
+		if hasReader && len(pids) == 1 {
+			exact++
+		}
+		t.Logf("run %d: reported %v (reader %d, bystander %d)", i, pids, rpid, bpid)
+		reader.Wait()
+		pw.Close()
+		by.Wait()
+		w.Stop()
+	}
+	t.Logf("reported exactly the reader in %d/%d runs; never the bystander", exact, runs)
+	if exact < runs*7/10 {
+		t.Fatalf("pinpointed the reader alone in only %d/%d runs", exact, runs)
 	}
 }

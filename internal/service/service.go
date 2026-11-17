@@ -416,8 +416,8 @@ func (s *server) UserSession(pid uint32) bool {
 	return sid != 0
 }
 
-// onOpen runs while a bait opener is paused inside Windows (package instant).
-// Freeze what deserves it now; raise the alert after the oplock is released.
+// onOpen gets the program(s) that just opened a bait, identified precisely by
+// package instant. Freeze what deserves it; the alert is raised asynchronously.
 func (s *server) onOpen(path string, at time.Time, pids []uint32) {
 	for _, pid := range pids {
 		if !s.eng.DecideInstant(pid, path) {
@@ -425,10 +425,12 @@ func (s *server) onOpen(path string, at time.Time, pids []uint32) {
 		}
 		frozen, err := procinfo.SuspendTree(pid)
 		if err != nil && len(frozen) == 0 {
+			s.eng.Unclaim(pid)
 			s.log.Printf("instant freeze of pid %d failed: %v", pid, err)
 			continue
 		}
-		s.log.Printf("instant freeze: pid %d opened %s; frozen before reading (%d ms after the open)", pid, path, time.Since(at).Milliseconds())
+		img, _ := procinfo.ImagePath(pid)
+		s.log.Printf("instant freeze: %s (pid %d) opened %s; frozen %d ms after the open", img, pid, path, time.Since(at).Milliseconds())
 		go s.eng.HandleOpen(pid, path, at, frozen)
 	}
 }

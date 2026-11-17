@@ -235,7 +235,7 @@ func TestHandleOpenUsesThePreFreeze(t *testing.T) {
 	f.images[100] = `C:\Users\bob\AppData\Local\Temp\x\stealer.exe`
 	e.HandleOpen(100, desktopBait, time.Now().Add(-70*time.Millisecond), []uint32{100})
 	a := only(f)
-	if a == nil || !a.BeforeRead || a.Tier != config.TierCritical || !a.Did(config.ActionFreeze) || !a.Did(config.ActionBlockProgram) {
+	if a == nil || !a.Instant || a.Tier != config.TierCritical || !a.Did(config.ActionFreeze) || !a.Did(config.ActionBlockProgram) {
 		t.Fatalf("alert: %+v", a)
 	}
 	if len(f.suspended) != 0 {
@@ -244,7 +244,30 @@ func TestHandleOpenUsesThePreFreeze(t *testing.T) {
 	if len(f.state.Frozen) != 1 || f.state.Frozen[0].PID != 100 {
 		t.Fatalf("state should record the pre-frozen pid: %+v", f.state.Frozen)
 	}
-	if !strings.Contains(a.Title, "tried to open") || !strings.Contains(a.Summary, "before it could read") {
+	if !strings.Contains(a.Title, "opened") || !strings.Contains(a.Summary, "instant freeze") {
 		t.Fatalf("title/summary: %q / %q", a.Title, a.Summary)
+	}
+}
+
+func TestEventLogPathDoesNotDoubleFreezeInstantCatch(t *testing.T) {
+	e, f := setup("balanced")
+	img := `C:\Users\bob\AppData\Local\Temp\x\stealer.exe`
+	f.images[100] = img
+	if !e.DecideInstant(100, desktopBait) {
+		t.Fatal("should be claimed and frozen by the instant path")
+	}
+	e.HandleOpen(100, desktopBait, time.Now(), []uint32{100})
+	// The same read then arrives through the event log.
+	e.HandleAccess(ev(100, img, desktopBait, 1))
+	if len(f.suspended) != 0 || len(f.saved) != 1 {
+		t.Fatalf("double handling: suspended=%v alerts=%d", f.suspended, len(f.saved))
+	}
+	// A failed instant freeze must hand the process back to the normal path.
+	f.images[101] = img
+	e.DecideInstant(101, desktopBait)
+	e.Unclaim(101)
+	e.HandleAccess(ev(101, img, desktopBait, 1))
+	if len(f.suspended) != 1 {
+		t.Fatalf("unclaimed process should be frozen by the normal path: %v", f.suspended)
 	}
 }

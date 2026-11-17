@@ -317,8 +317,8 @@ func runTest() error {
 	}
 	fmt.Println(ui.Check(true, "Detected: ") + ui.TierWord(found.Tier) + ui.Dim.Render(" ("+found.Summary+")"))
 	if found.Did(config.ActionFreeze) {
-		if found.BeforeRead {
-			fmt.Println(ui.Check(true, "Frozen while opening the bait, before it read a single byte") + ui.Dim.Render(fmt.Sprintf(" (instant freeze, %d ms after it tried)", found.LatencyMS)))
+		if found.Instant {
+			fmt.Println(ui.Check(true, fmt.Sprintf("Frozen %d ms after it opened the bait", found.LatencyMS)) + ui.Dim.Render(" (instant freeze: no waiting for the event log)"))
 		} else {
 			fmt.Println(ui.Check(true, fmt.Sprintf("Frozen %d ms after the read", found.LatencyMS)) + ui.Dim.Render(fmt.Sprintf(" (Windows delivered the event after %d ms)", found.DeliveryMS)))
 		}
@@ -832,7 +832,7 @@ func demoAlert() *alerts.Alert {
 func instantCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "instant [on|off]",
-		Short: "Instant freeze: stop readers before they read a single byte",
+		Short: "Instant freeze: catch readers the moment they open a bait",
 		Long: "Instant freeze holds every bait with a Windows oplock. When a program opens one, Windows\n" +
 			"pauses it inside the open; ABA works out who it is and, if it's suspicious, freezes it\n" +
 			"before it reads anything. The normal detection keeps running as a backup.",
