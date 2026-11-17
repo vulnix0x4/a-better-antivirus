@@ -27,6 +27,20 @@ checksum:
   algorithm: sha256
 
 release:
+  header: |
+    ## A Better Antivirus {{ .Tag }}
+
+    > It's not an antivirus. It's a better one.
+
+    Plants fake passwords, wallets and app data that only malware would read, and freezes
+    whatever touches them. Windows 10/11, 64-bit.
+
+    **Install:** download `aba_{{ .Tag }}_windows_amd64.exe`, check its hash (below), then run
+    `.ba_{{ .Tag }}_windows_amd64.exe install` (it asks for admin). Try it with `aba test`.
+
+    Highlights: instant freeze (caught ~0.1 s after opening a bait), decoys for 18 apps,
+    phone alerts (ntfy, Discord, Pushover, email), strict-mode network isolation, canary
+    tokens, learning mode, full uninstall.
   footer: |
     **Verify your download** before running it:
     ```powershell
