@@ -26,10 +26,38 @@ $topic = 'aba-ci-' + [guid]::NewGuid().ToString('N').Substring(0, 16)
 $started = Get-Date
 $script:failures = 0
 
-function Step($n) { Write-Host "`n=== $n ===" -ForegroundColor Cyan }
-function Ok($m)   { Write-Host "  ok  $m" -ForegroundColor Green }
+# Live progress outside the machine: if the runner becomes unreachable (it has,
+# twice, with no log), the last steps and service log lines are still readable
+# at https://ntfy.sh/<progress topic>. Test output only; nothing secret.
+$progress = if ($env:GITHUB_RUN_ID) { "aba-ci-progress-$($env:GITHUB_RUN_ID)" } else { $null }
+function Report([string]$m) {
+    if (-not $progress) { return }
+    try { Invoke-RestMethod -Method Post -Uri "https://ntfy.sh/$progress" -Body $m -TimeoutSec 5 | Out-Null } catch {}
+}
+if ($progress) {
+    Write-Host "Live progress: https://ntfy.sh/$progress"
+    # Background reporter: ships new service.log lines every 3 s.
+    Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList '-NoProfile', '-Command', @"
+`$seen = 0
+while (`$true) {
+  Start-Sleep 3
+  `$f = '$data\service.log'
+  if (Test-Path `$f) {
+    `$lines = @(Get-Content `$f)
+    if (`$lines.Count -gt `$seen) {
+      `$new = (`$lines[`$seen..(`$lines.Count - 1)] | Where-Object { `$_ -notmatch 'woke at once' }) -join "`n"
+      try { Invoke-RestMethod -Method Post -Uri 'https://ntfy.sh/$progress' -Body ('LOG ' + `$new) -TimeoutSec 5 | Out-Null; `$seen = `$lines.Count } catch {}
+    }
+  }
+}
+"@ | Out-Null
+}
+
+function Step($n) { Write-Host "`n=== $n ===" -ForegroundColor Cyan; Report "=== $n" }
+function Ok($m)   { Write-Host "  ok  $m" -ForegroundColor Green; Report "ok $m" }
 function Fail($m) {
     Write-Host "  FAIL $m" -ForegroundColor Red
+    Report "FAIL $m"
     # Never leave the runner isolated or anything frozen: it would go offline
     # and GitHub could neither cancel the job nor show its log.
     $r = Start-Process -FilePath $Aba -ArgumentList 'release' -NoNewWindow -PassThru
