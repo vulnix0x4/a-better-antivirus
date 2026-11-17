@@ -30,8 +30,18 @@ function Step($n) { Write-Host "`n=== $n ===" -ForegroundColor Cyan }
 function Ok($m)   { Write-Host "  ok  $m" -ForegroundColor Green }
 function Fail($m) {
     Write-Host "  FAIL $m" -ForegroundColor Red
-    if (Test-Path "$data\service.log") { Write-Host '--- service.log (tail) ---'; Get-Content "$data\service.log" -Tail 80 }
+    # Never leave the runner isolated or anything frozen: it would go offline
+    # and GitHub could neither cancel the job nor show its log.
+    $r = Start-Process -FilePath $Aba -ArgumentList 'release' -NoNewWindow -PassThru
+    if (-not $r.WaitForExit(60000)) { $r.Kill() }
+    if (Test-Path "$data\service.log") { Write-Host '--- service.log (tail) ---'; Get-Content "$data\service.log" -Tail 120 }
     exit 1
+}
+
+# Safety net while the machine is isolated: a separate process that runs
+# `aba release` after $seconds even if this script dies or hangs.
+function ReleaseWatchdog([int]$seconds) {
+    Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList '-NoProfile', '-Command', "Start-Sleep $seconds; & '$Aba' release" -PassThru
 }
 function Check($cond, $m) { if ($cond) { Ok $m } else { Fail $m } }
 # Every aba call gets a deadline: a hang fails fast with the service log.
@@ -153,9 +163,14 @@ $legit = Join-Path $env:TEMP 'legit-curl.exe'   # Microsoft-signed (catalog), so
 Copy-Item "$env:SystemRoot\System32\curl.exe" $legit -Force
 $legitOut = Join-Path $env:TEMP 'legit-out.txt'
 $sw = [Diagnostics.Stopwatch]::StartNew()
-& $legit -s -o $legitOut ("file:///" + ($desktopBait -replace '\\', '/'))
+$c = Start-Process -FilePath $legit -ArgumentList '-s', '-o', "`"$legitOut`"", ("file:///" + ($desktopBait -replace '\\', '/')) -NoNewWindow -PassThru
+$null = $c.Handle
+if (-not $c.WaitForExit(20000)) {
+    $verdict = Alerts | Where-Object { $_.process.pid -eq $c.Id } | Select-Object -Last 1
+    Fail "signed curl was still stuck after 20 s; ABA's verdict: $($verdict.tier) / $($verdict.process.signature | ConvertTo-Json -Compress) / $($verdict.summary)"
+}
 $sw.Stop()
-Check ($LASTEXITCODE -eq 0 -and (Get-Item $legitOut).Length -gt 0) "it got the file ($((Get-Item $legitOut).Length) bytes, paused $($sw.ElapsedMilliseconds) ms in total)"
+Check ($c.ExitCode -eq 0 -and (Get-Item $legitOut).Length -gt 0) "it got the file ($((Get-Item $legitOut).Length) bytes, paused $($sw.ElapsedMilliseconds) ms in total)"
 Check (-not ((State).frozen | Where-Object { $_.image -like '*legit-curl*' })) 'it was not frozen'
 
 Step 'False positive: resume + ignore'
@@ -182,6 +197,7 @@ Check ((WfpRules) -eq 0) 'all WFP rules gone'
 
 Step 'Strict mode: isolation, with the phone alert sent while isolated'
 Aba install --yes --preset strict --learning 0 --ntfy-topic $topic
+$watchdog = ReleaseWatchdog 90   # network comes back even if this script dies
 $s3 = Stealer 'stealer3' $desktopBait
 $a3 = AlertFor $s3.Id
 Check ($a3 -and (Did $a3 'isolate')) 'PC isolated'
@@ -190,6 +206,7 @@ Check (-not (Online)) 'other programs are offline'
 Start-Sleep -Seconds 4   # let the service push the phone alert through the isolation
 Aba release
 Check (WaitFor { Online } 20) 'back online after release'
+Stop-Process -Id $watchdog.Id -Force -ErrorAction SilentlyContinue
 Check (WaitFor { NtfyMessages | Where-Object { $_.message -match $a3.id } } 30) 'phone alert got out while isolated'
 Stop-Process -Id $s3.Id -Force -ErrorAction SilentlyContinue
 
