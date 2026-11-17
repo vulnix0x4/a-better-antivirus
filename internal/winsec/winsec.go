@@ -89,12 +89,10 @@ func ClearAudit(path string) error {
 	if err := EnablePrivilege(SeSecurityPrivilege); err != nil {
 		return err
 	}
-	empty, err := windows.ACLFromEntries(nil, nil)
-	if err != nil {
-		return err
-	}
+	// ACLFromEntries(nil, nil) dereferences a NULL ACL, so build an empty one
+	// by hand: an 8-byte header with revision 2 and zero entries.
 	return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT,
-		windows.SACL_SECURITY_INFORMATION|windows.UNPROTECTED_SACL_SECURITY_INFORMATION, nil, nil, nil, empty)
+		windows.SACL_SECURITY_INFORMATION|windows.UNPROTECTED_SACL_SECURITY_INFORMATION, nil, nil, nil, EmptyACL())
 }
 
 // HasBaitAudit reports whether the file's SACL still audits ReadData.
@@ -211,4 +209,13 @@ func CurrentUserSID() (string, string, error) {
 		name = domain + `\` + account
 	}
 	return u.User.Sid.String(), name, nil
+}
+
+// EmptyACL returns a valid ACL with no entries.
+func EmptyACL() *windows.ACL {
+	b := make([]uint64, 1) // 8 bytes, 8-aligned
+	hdr := (*[8]byte)(unsafe.Pointer(&b[0]))
+	hdr[0] = 2                              // ACL_REVISION
+	*(*uint16)(unsafe.Pointer(&hdr[2])) = 8 // AclSize
+	return (*windows.ACL)(unsafe.Pointer(&b[0]))
 }
