@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"time"
 	"unsafe"
 
@@ -134,27 +135,47 @@ func UpdateState(fn func(*State) error) error {
 	return writeJSONAtomic(paths.StateFile(), s)
 }
 
+// stateLockName is a machine-wide mutex shared by the service and the CLI.
+var stateLockName = `Global\ABAStateLock`
+
+// inProcess serialises goroutines within one process. Needed because a Windows
+// mutex belongs to an OS *thread* and is re-entrant per thread: two goroutines
+// that happen to run on the same thread would both "acquire" it.
+var inProcess sync.Mutex
+
 func lockState() (func(), error) {
-	name, _ := windows.UTF16PtrFromString(`Global\ABAStateLock`)
+	inProcess.Lock()
+	// Pin this goroutine to its OS thread while holding the mutex: Go may
+	// otherwise move it, and ReleaseMutex from a different thread fails
+	// silently, leaving the lock stuck until every other caller times out.
+	runtime.LockOSThread()
+	fail := func(err error) (func(), error) {
+		runtime.UnlockOSThread()
+		inProcess.Unlock()
+		return nil, err
+	}
+	name, _ := windows.UTF16PtrFromString(stateLockName)
 	// Explicit DACL: whichever of SYSTEM (service) or an elevated admin (CLI)
 	// creates the mutex first, the other must be able to open it.
-	sd, err := windows.SecurityDescriptorFromString("D:(A;;GA;;;SY)(A;;GA;;;BA)")
+	sd, err := windows.SecurityDescriptorFromString("D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;OW)")
 	if err != nil {
-		return nil, err
+		return fail(err)
 	}
 	sa := &windows.SecurityAttributes{Length: uint32(unsafe.Sizeof(windows.SecurityAttributes{})), SecurityDescriptor: sd}
 	h, err := windows.CreateMutex(sa, false, name)
 	if err != nil && h == 0 {
-		return nil, fmt.Errorf("state lock: %w", err)
+		return fail(fmt.Errorf("state lock: %w", err))
 	}
 	ev, err := windows.WaitForSingleObject(h, 30_000)
 	if err != nil || (ev != windows.WAIT_OBJECT_0 && ev != windows.WAIT_ABANDONED) {
 		windows.CloseHandle(h)
-		return nil, fmt.Errorf("state lock: timed out")
+		return fail(fmt.Errorf("state lock: timed out"))
 	}
 	return func() {
 		windows.ReleaseMutex(h)
 		windows.CloseHandle(h)
+		runtime.UnlockOSThread()
+		inProcess.Unlock()
 	}, nil
 }
 
