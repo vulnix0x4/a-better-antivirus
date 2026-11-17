@@ -42,7 +42,14 @@ func (s *server) healthCheck(startup bool) {
 	var raised []func()
 	g := (*baits.Gen)(nil)
 	ok, total := 0, 0
-	config.UpdateState(func(st *config.State) error {
+	// Work on a snapshot: checking and repairing ~40 files is slow (each open
+	// also passes through instant freeze), and holding the state lock that long
+	// once made `aba release` time out. Results are saved briefly at the end.
+	st, err := config.LoadState()
+	if err != nil {
+		st = config.NewState()
+	}
+	{
 		g = baits.GenFromPersona(st.Persona)
 		if sec != nil {
 			for _, t := range sec.Canary.Tokens {
@@ -103,6 +110,15 @@ func (s *server) healthCheck(startup bool) {
 		}
 		for _, id := range retire {
 			baits.Retire(st, cfg.User, id, "real app installed")
+		}
+	}
+	checked := st
+	config.UpdateState(func(st *config.State) error {
+		for id, bs := range checked.Baits {
+			// Skip baits added, removed or replaced while we were checking.
+			if cur := st.Baits[id]; cur != nil && cur.CreatedAt.Equal(bs.CreatedAt) {
+				st.Baits[id] = bs
+			}
 		}
 		// Forget frozen processes that no longer exist.
 		var live []config.FrozenProcess

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"runtime"
 	"time"
 	"unsafe"
 
@@ -105,12 +107,23 @@ func LoadState() (*State, error) {
 
 // UpdateState runs fn on the current state under a machine-wide mutex and
 // saves the result. Requires admin (the data dir is admin-write-only).
+// SlowLock, if set, is told whenever the state lock is held for more than 2 s
+// (the service logs it). Long holds block `aba release` and friends.
+var SlowLock func(held time.Duration, caller string)
+
 func UpdateState(fn func(*State) error) error {
 	unlock, err := lockState()
 	if err != nil {
 		return err
 	}
-	defer unlock()
+	start := time.Now()
+	defer func() {
+		unlock()
+		if d := time.Since(start); d > 2*time.Second && SlowLock != nil {
+			_, file, line, _ := runtime.Caller(2)
+			SlowLock(d, fmt.Sprintf("%s:%d", filepath.Base(file), line))
+		}
+	}()
 	s, err := LoadState()
 	if err != nil {
 		return err

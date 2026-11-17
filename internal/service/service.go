@@ -115,6 +115,9 @@ func newServer(echo bool) *server {
 	}
 	s.eng = engine.New(s, uint32(os.Getpid()))
 	s.watch = &instant.Watcher{Self: uint32(os.Getpid()), OnOpen: s.onOpen, Logf: s.log.Printf}
+	config.SlowLock = func(d time.Duration, caller string) {
+		s.log.Printf("state lock held %v by %s", d.Round(time.Millisecond), caller)
+	}
 	return s
 }
 
