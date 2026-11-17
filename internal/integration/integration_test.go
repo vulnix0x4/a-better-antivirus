@@ -114,7 +114,13 @@ func TestBlockProgram(t *testing.T) {
 	if err := netguard.UnblockProgram(curl); err != nil {
 		t.Fatal(err)
 	}
-	if err := get(); err != nil {
-		t.Fatalf("unblocked program still can't connect: %v", err)
+	// The internet itself can hiccup on CI runners: allow a few attempts.
+	var lastErr error
+	for i := 0; i < 3; i++ {
+		if lastErr = get(); lastErr == nil {
+			return
+		}
+		time.Sleep(2 * time.Second)
 	}
+	t.Fatalf("unblocked program still can't connect after 3 tries: %v", lastErr)
 }
