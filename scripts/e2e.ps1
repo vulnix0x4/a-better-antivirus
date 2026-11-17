@@ -108,10 +108,24 @@ Check (Did $a1 'block-program') 'blocked its internet'
 Check (WaitFor { IsSuspended $s1.Id } 5) 'process really is suspended'
 Check ((WfpRules) -gt 0) 'WFP block rules present'
 Check ((State).frozen.pid -contains $s1.Id) 'state lists it as frozen'
+Check ($a1.beforeRead -eq $true) "instant freeze: frozen while opening the bait, before reading ($($a1.latencyMs) ms after it tried)"
+$tree = @($s1.Id) + @(Get-CimInstance Win32_Process -Filter "ParentProcessId=$($s1.Id)" | ForEach-Object ProcessId)
+$innocent = @((State).frozen | Where-Object { $tree -notcontains $_.pid })
+Check ($innocent.Count -eq 0) "no innocent process frozen (frozen: $(((State).frozen.image) -join ', '))"
 Aba alerts show $a1.id
 Aba kill $a1.id
 Check (WaitFor { -not (Get-Process -Id $s1.Id -ErrorAction SilentlyContinue) } 10) 'killed'
 Check (WaitFor { NtfyMessages | Where-Object { $_.message -match $a1.id } } 30) 'critical alert reached the phone (ntfy)'
+
+Step 'A signed, legit program reading a bait is let through'
+$legit = Join-Path $env:TEMP 'legit-curl.exe'   # Microsoft-signed (catalog), so "warn": notify only
+Copy-Item "$env:SystemRoot\System32\curl.exe" $legit -Force
+$legitOut = Join-Path $env:TEMP 'legit-out.txt'
+$sw = [Diagnostics.Stopwatch]::StartNew()
+& $legit -s -o $legitOut ("file:///" + ($desktopBait -replace '\\', '/'))
+$sw.Stop()
+Check ($LASTEXITCODE -eq 0 -and (Get-Item $legitOut).Length -gt 0) "it got the file ($((Get-Item $legitOut).Length) bytes, paused $($sw.ElapsedMilliseconds) ms in total)"
+Check (-not ((State).frozen | Where-Object { $_.image -like '*legit-curl*' })) 'it was not frozen'
 
 Step 'False positive: resume + ignore'
 $s2 = Stealer 'mytool' $desktopBait

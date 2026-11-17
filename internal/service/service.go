@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/alerts"
@@ -21,6 +22,7 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/engine"
 	"github.com/vulnix0x4/a-better-antivirus/internal/evtlog"
+	"github.com/vulnix0x4/a-better-antivirus/internal/instant"
 	"github.com/vulnix0x4/a-better-antivirus/internal/logx"
 	"github.com/vulnix0x4/a-better-antivirus/internal/netguard"
 	"github.com/vulnix0x4/a-better-antivirus/internal/notify"
@@ -101,6 +103,7 @@ type server struct {
 	cliExe  string
 	selfExe string
 	sub     *evtlog.Subscription
+	watch   *instant.Watcher
 }
 
 func newServer(echo bool) *server {
@@ -111,6 +114,7 @@ func newServer(echo bool) *server {
 		s.cliExe = exe // dev builds: one binary
 	}
 	s.eng = engine.New(s, uint32(os.Getpid()))
+	s.watch = &instant.Watcher{Self: uint32(os.Getpid()), OnOpen: s.onOpen, Logf: s.log.Printf}
 	return s
 }
 
@@ -135,6 +139,20 @@ func (s *server) reload() error {
 	}
 	s.mu.Unlock()
 	s.eng.Configure(cfg, st)
+	var guarded []string
+	if cfg.InstantFreeze {
+		for _, bs := range st.Baits {
+			if bs.Status == "retired" {
+				continue
+			}
+			for _, f := range bs.Files {
+				if f.Audit {
+					guarded = append(guarded, f.Path)
+				}
+			}
+		}
+	}
+	s.watch.Sync(guarded)
 	return nil
 }
 
@@ -190,6 +208,7 @@ func (s *server) run(ctx context.Context, ctl <-chan svc.Cmd) error {
 		select {
 		case <-ctx.Done():
 			s.saveBookmark()
+			s.watch.Stop()
 			s.log.Printf("service stopping")
 			return nil
 		case x := <-events:
@@ -373,6 +392,7 @@ func (s *server) PendingTest() *engine.TestRequest {
 func (s *server) ClearTest() { os.Remove(paths.TestFile()) }
 
 func (s *server) RetireDecoy(id, why string) {
+	s.watch.Sync(nil) // let go of every bait while files are removed; reload re-arms the rest
 	err := config.UpdateState(func(st *config.State) error {
 		s.mu.Lock()
 		u := s.cfg.User
@@ -384,4 +404,31 @@ func (s *server) RetireDecoy(id, why string) {
 		s.log.Printf("retire %s: %v", id, err)
 	}
 	s.reload()
+}
+
+// UserSession reports whether pid runs in an interactive session (not the
+// services session 0). Stealers run as the user; system processes don't.
+func (s *server) UserSession(pid uint32) bool {
+	var sid uint32
+	if err := windows.ProcessIdToSessionId(pid, &sid); err != nil {
+		return false
+	}
+	return sid != 0
+}
+
+// onOpen runs while a bait opener is paused inside Windows (package instant).
+// Freeze what deserves it now; raise the alert after the oplock is released.
+func (s *server) onOpen(path string, at time.Time, pids []uint32) {
+	for _, pid := range pids {
+		if !s.eng.DecideInstant(pid, path) {
+			continue
+		}
+		frozen, err := procinfo.SuspendTree(pid)
+		if err != nil && len(frozen) == 0 {
+			s.log.Printf("instant freeze of pid %d failed: %v", pid, err)
+			continue
+		}
+		s.log.Printf("instant freeze: pid %d opened %s; frozen before reading (%d ms after the open)", pid, path, time.Since(at).Milliseconds())
+		go s.eng.HandleOpen(pid, path, at, frozen)
+	}
 }

@@ -74,6 +74,7 @@ type Alert struct {
 	Actions    []ActionResult   `json:"actions,omitempty"`
 	LatencyMS  int64            `json:"latencyMs,omitempty"`  // event logged -> first response
 	DeliveryMS int64            `json:"deliveryMs,omitempty"` // event logged -> ABA received it
+	BeforeRead bool             `json:"beforeRead,omitempty"` // frozen while opening the bait, before reading anything
 	Status     string           `json:"status"`               // open | resolved
 	Note       string           `json:"note,omitempty"`
 }

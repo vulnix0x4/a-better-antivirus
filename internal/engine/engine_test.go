@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -26,15 +27,21 @@ type fakeOps struct {
 	retired   []string
 	state     *config.State
 	test      *TestRequest
+	images    map[uint32]string
 }
 
 func newFake() *fakeOps {
-	return &fakeOps{sigs: map[string]authenticode.Result{}, saved: map[string]*alerts.Alert{}, state: config.NewState()}
+	return &fakeOps{images: map[uint32]string{}, sigs: map[string]authenticode.Result{}, saved: map[string]*alerts.Alert{}, state: config.NewState()}
 }
 
-func (f *fakeOps) ImagePath(pid uint32) (string, error) { return "", fmt.Errorf("n/a") }
-func (f *fakeOps) CreateTime(pid uint32) int64          { return 1 }
-func (f *fakeOps) Verify(p string) authenticode.Result  { return f.sigs[p] }
+func (f *fakeOps) ImagePath(pid uint32) (string, error) {
+	if img, ok := f.images[pid]; ok {
+		return img, nil
+	}
+	return "", fmt.Errorf("n/a")
+}
+func (f *fakeOps) CreateTime(pid uint32) int64         { return 1 }
+func (f *fakeOps) Verify(p string) authenticode.Result { return f.sigs[p] }
 func (f *fakeOps) SuspendTree(pid uint32) ([]uint32, error) {
 	f.suspended = append(f.suspended, pid)
 	return []uint32{pid, pid + 1}, nil
@@ -51,6 +58,7 @@ func (f *fakeOps) NotifyPhone(a *alerts.Alert)                    { f.phone = ap
 func (f *fakeOps) RetireDecoy(id, why string)                     { f.retired = append(f.retired, id) }
 func (f *fakeOps) PendingTest() *TestRequest                      { return f.test }
 func (f *fakeOps) ClearTest()                                     { f.test = nil }
+func (f *fakeOps) UserSession(uint32) bool                        { return true }
 func (f *fakeOps) Logf(string, ...any)                            {}
 func (f *fakeOps) UpdateState(fn func(*config.State) error) error { return fn(f.state) }
 
@@ -179,5 +187,64 @@ func TestProtectedProcessesNeverFrozen(t *testing.T) {
 	e.HandleAccess(ev(700, `C:\Windows\explorer.exe`, desktopBait, 1))
 	if len(f.suspended) != 0 {
 		t.Fatalf("froze explorer: %v", f.suspended)
+	}
+}
+
+func TestInstantFreezeDecisions(t *testing.T) {
+	e, f := setup("balanced")
+	e.cfg.InstantFreeze = true
+	stealer := `C:\Users\bob\AppData\Local\Temp\x\stealer.exe`
+	code := `C:\Users\bob\AppData\Local\Programs\Microsoft VS Code\Code.exe`
+	f.images[100] = stealer
+	f.images[200] = code
+	f.images[300] = `C:\Windows\explorer.exe`
+	f.sigs[code] = authenticode.Result{Signed: true, Valid: true, Signer: "Microsoft Corporation"}
+
+	if !e.DecideInstant(100, desktopBait) {
+		t.Error("unsigned program in Temp should be frozen mid-open")
+	}
+	if e.DecideInstant(200, desktopBait) {
+		t.Error("signed app should be let through (warn = notify only on balanced)")
+	}
+	if e.DecideInstant(300, desktopBait) {
+		t.Error("explorer must never be frozen")
+	}
+	if e.DecideInstant(100, `C:\not\a\bait.txt`) {
+		t.Error("only baits")
+	}
+	if e.DecideInstant(999, desktopBait) {
+		t.Error("never ourselves")
+	}
+	e.cfg.LearningUntil = time.Now().Add(time.Hour)
+	if e.DecideInstant(100, desktopBait) {
+		t.Error("learning mode must not freeze")
+	}
+	e.cfg.LearningUntil = time.Time{}
+	e.cfg.InstantFreeze = false
+	if e.DecideInstant(100, desktopBait) {
+		t.Error("instant freeze switched off")
+	}
+	f.test = &TestRequest{PID: 100}
+	if !e.DecideInstant(100, desktopBait) {
+		t.Error("`aba test` always demonstrates the freeze")
+	}
+}
+
+func TestHandleOpenUsesThePreFreeze(t *testing.T) {
+	e, f := setup("balanced")
+	f.images[100] = `C:\Users\bob\AppData\Local\Temp\x\stealer.exe`
+	e.HandleOpen(100, desktopBait, time.Now().Add(-70*time.Millisecond), []uint32{100})
+	a := only(f)
+	if a == nil || !a.BeforeRead || a.Tier != config.TierCritical || !a.Did(config.ActionFreeze) || !a.Did(config.ActionBlockProgram) {
+		t.Fatalf("alert: %+v", a)
+	}
+	if len(f.suspended) != 0 {
+		t.Fatalf("already frozen mid-open; must not suspend again (suspend counts stack): %v", f.suspended)
+	}
+	if len(f.state.Frozen) != 1 || f.state.Frozen[0].PID != 100 {
+		t.Fatalf("state should record the pre-frozen pid: %+v", f.state.Frozen)
+	}
+	if !strings.Contains(a.Title, "tried to open") || !strings.Contains(a.Summary, "before it could read") {
+		t.Fatalf("title/summary: %q / %q", a.Title, a.Summary)
 	}
 }

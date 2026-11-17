@@ -124,6 +124,11 @@ func (s *server) healthCheck(startup bool) {
 		s.reload()
 	}
 	add("Baits", ok == total, fmt.Sprintf("%d of %d healthy", ok, total))
+	if cfg.InstantFreeze {
+		add("Instant freeze", s.watch.Count() > 0, fmt.Sprintf("on, holding %d bait files", s.watch.Count()))
+	} else {
+		add("Instant freeze", true, "off")
+	}
 
 	// 3. Recent files: shortcuts to baits invite apps like Copilot to read them.
 	if cfg.CleanRecent {

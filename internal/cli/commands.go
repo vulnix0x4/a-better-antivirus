@@ -317,7 +317,11 @@ func runTest() error {
 	}
 	fmt.Println(ui.Check(true, "Detected: ") + ui.TierWord(found.Tier) + ui.Dim.Render(" ("+found.Summary+")"))
 	if found.Did(config.ActionFreeze) {
-		fmt.Println(ui.Check(true, fmt.Sprintf("Frozen %d ms after the read", found.LatencyMS)) + ui.Dim.Render(fmt.Sprintf(" (Windows delivered the event after %d ms)", found.DeliveryMS)))
+		if found.BeforeRead {
+			fmt.Println(ui.Check(true, "Frozen while opening the bait, before it read a single byte") + ui.Dim.Render(fmt.Sprintf(" (instant freeze, %d ms after it tried)", found.LatencyMS)))
+		} else {
+			fmt.Println(ui.Check(true, fmt.Sprintf("Frozen %d ms after the read", found.LatencyMS)) + ui.Dim.Render(fmt.Sprintf(" (Windows delivered the event after %d ms)", found.DeliveryMS)))
+		}
 	} else {
 		fmt.Println(ui.Check(false, "Not frozen") + ui.Dim.Render(" (check the alert for why)"))
 	}
@@ -821,4 +825,48 @@ func demoAlert() *alerts.Alert {
 	a.AddAction(config.ActionFreeze, nil, "1 process(es) frozen")
 	a.AddAction(config.ActionBlockProgram, nil, "")
 	return a
+}
+
+// ---- instant freeze ----
+
+func instantCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "instant [on|off]",
+		Short: "Instant freeze: stop readers before they read a single byte",
+		Long: "Instant freeze holds every bait with a Windows oplock. When a program opens one, Windows\n" +
+			"pauses it inside the open; ABA works out who it is and, if it's suspicious, freezes it\n" +
+			"before it reads anything. The normal detection keeps running as a backup.",
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := mustConfig()
+			if err != nil {
+				return err
+			}
+			if len(args) == 0 {
+				state := ui.Bad.Render("off")
+				if cfg.InstantFreeze {
+					state = ui.Good.Render("on")
+				}
+				fmt.Println("Instant freeze is " + state + ".  " + ui.Hint("Change:", "aba instant on|off"))
+				return nil
+			}
+			if err := requireAdmin(); err != nil {
+				return err
+			}
+			switch strings.ToLower(args[0]) {
+			case "on":
+				cfg.InstantFreeze = true
+			case "off":
+				cfg.InstantFreeze = false
+			default:
+				return exitf("use `aba instant on` or `aba instant off`")
+			}
+			if err := config.SaveConfig(cfg); err != nil {
+				return err
+			}
+			fmt.Println(ui.Good.Render(ui.IconOK) + " Instant freeze " + args[0])
+			return install.Reload()
+		},
+	}
+	return c
 }

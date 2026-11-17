@@ -146,6 +146,7 @@ type Config struct {
 	PhoneMinTier  Tier              `json:"phoneMinTier"`
 	CleanRecent   bool              `json:"cleanRecent"`
 	CanaryEnabled bool              `json:"canaryEnabled"`
+	InstantFreeze bool              `json:"instantFreeze"` // freeze readers mid-open, before they read (oplocks)
 	InstalledAt   time.Time         `json:"installedAt"`
 	Extra         map[string]any    `json:"extra,omitempty"`
 }
@@ -153,11 +154,12 @@ type Config struct {
 func Default() *Config {
 	p, _ := PresetByID("balanced")
 	return &Config{
-		Version:      1,
-		Preset:       p.ID,
-		Responses:    cloneResponses(p.Responses),
-		PhoneMinTier: TierWarn,
-		CleanRecent:  true,
+		Version:       1,
+		Preset:        p.ID,
+		Responses:     cloneResponses(p.Responses),
+		PhoneMinTier:  TierWarn,
+		CleanRecent:   true,
+		InstantFreeze: true,
 	}
 }
 

@@ -47,6 +47,7 @@ type Ops interface {
 	NotifyPhone(a *alerts.Alert)
 	RetireDecoy(baitID string, why string)
 	PendingTest() *TestRequest
+	UserSession(pid uint32) bool // runs in an interactive user session (not session 0)
 	ClearTest()
 	Logf(format string, args ...any)
 }
@@ -110,6 +111,8 @@ var neverTouch = map[string]bool{
 	"system": true, "csrss.exe": true, "lsass.exe": true, "wininit.exe": true, "winlogon.exe": true,
 	"services.exe": true, "smss.exe": true, "svchost.exe": true, "explorer.exe": true, "dwm.exe": true,
 	"msmpeng.exe": true, "fontdrvhost.exe": true, "lsaiso.exe": true, "registry": true,
+	"memory compression": true, "secure system": true, "sihost.exe": true, "ctfmon.exe": true,
+	"audiodg.exe": true, "conhost.exe": true, "runtimebroker.exe": true, "searchhost.exe": true,
 }
 
 func (e *Engine) touchable(pid uint32, image string) bool {
@@ -117,6 +120,45 @@ func (e *Engine) touchable(pid uint32, image string) bool {
 		return false
 	}
 	return !neverTouch[strings.ToLower(filepath.Base(image))]
+}
+
+// DecideInstant runs while a bait opener is paused inside Windows (see package
+// instant). It reports whether pid should be frozen right now, before it can
+// read. It's deliberately conservative: only ordinary programs in a user
+// session whose verdict calls for freezing. Everything else is let through
+// and handled by the normal audit-log path if it actually reads.
+func (e *Engine) DecideInstant(pid uint32, path string) bool {
+	e.mu.Lock()
+	cfg, cls := e.cfg, e.classifier
+	baitID, isBait := e.index[paths.Key(path)]
+	e.mu.Unlock()
+	if cfg == nil || !isBait || pid == e.SelfPID {
+		return false
+	}
+	image, err := e.Ops.ImagePath(pid)
+	if err != nil || image == "" || !e.touchable(pid, image) || !e.Ops.UserSession(pid) {
+		return false
+	}
+	if paths.Same(image, paths.InstalledCLI()) || paths.Same(image, paths.InstalledService()) {
+		return false
+	}
+	if tr := e.Ops.PendingTest(); tr != nil && tr.PID == pid {
+		return true // `aba test`: always demonstrate the freeze
+	}
+	if !cfg.InstantFreeze {
+		return false
+	}
+	v := cls.Final(image, pid, baitRef(baitID), e.Ops.Verify(image))
+	if v.Ignored || v.DecoyOwner {
+		return false
+	}
+	return config.Has(cfg.ActionsFor(v.Tier, time.Now()), config.ActionFreeze)
+}
+
+// HandleOpen raises the alert (and runs the remaining responses) for a reader
+// that DecideInstant froze mid-open. frozen is what was suspended.
+func (e *Engine) HandleOpen(pid uint32, path string, at time.Time, frozen []uint32) {
+	e.handle(&evtlog.ObjectAccess{ProcessID: pid, ObjectName: path, AccessMask: 1, Time: at}, frozen)
 }
 
 func baitRef(id string) classify.Bait {
@@ -128,7 +170,12 @@ func baitRef(id string) classify.Bait {
 }
 
 // HandleAccess processes one 4663 event.
-func (e *Engine) HandleAccess(oa *evtlog.ObjectAccess) {
+func (e *Engine) HandleAccess(oa *evtlog.ObjectAccess) { e.handle(oa, nil) }
+
+// handle processes a bait access. preFrozen is non-nil when the reader was
+// already frozen mid-open by the instant path, before it could read.
+func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
+	beforeRead := preFrozen != nil
 	received := time.Now()
 	baitID, ok := e.IsBait(oa.ObjectName)
 	if !ok || oa.ProcessID == e.SelfPID {
@@ -194,14 +241,16 @@ func (e *Engine) HandleAccess(oa *evtlog.ObjectAccess) {
 
 	// 1-2. Instant verdict, freeze first.
 	pre := cls.Prelim(image, oa.ProcessID, ref)
-	if pre.Ignored {
+	if pre.Ignored && !beforeRead {
 		e.Ops.Logf("ignored %s of %s by %s (%s)", access, oa.ObjectName, image, strings.Join(pre.Reasons, "; "))
 		return
 	}
-	var frozen []uint32
+	frozen := preFrozen
 	var latency time.Duration
 	canTouch := e.touchable(oa.ProcessID, image)
-	if canTouch && config.Has(actionsFor(pre.Tier), config.ActionFreeze) {
+	if beforeRead {
+		latency = time.Since(oa.Time)
+	} else if canTouch && config.Has(actionsFor(pre.Tier), config.ActionFreeze) {
 		frozen, _ = e.Ops.SuspendTree(oa.ProcessID)
 		latency = time.Since(oa.Time)
 	}
@@ -235,6 +284,7 @@ func (e *Engine) HandleAccess(oa *evtlog.ObjectAccess) {
 		Baits:   []alerts.BaitHit{hit},
 		Process: &alerts.Process{PID: oa.ProcessID, Image: image, User: oa.User, Signature: sig},
 	}
+	a.BeforeRead = beforeRead && len(frozen) > 0
 	if access == "delete" {
 		a.Kind = alerts.KindDelete
 	}
@@ -243,7 +293,11 @@ func (e *Engine) HandleAccess(oa *evtlog.ObjectAccess) {
 	}
 	if config.Has(acts, config.ActionFreeze) {
 		if len(frozen) > 0 {
-			a.AddAction(config.ActionFreeze, nil, fmt.Sprintf("%d process(es) frozen", len(frozen)))
+			detail := fmt.Sprintf("%d process(es) frozen", len(frozen))
+			if beforeRead {
+				detail += " before it read anything"
+			}
+			a.AddAction(config.ActionFreeze, nil, detail)
 		} else if !canTouch {
 			a.AddAction(config.ActionFreeze, fmt.Errorf("refused"), "protected system process")
 		} else {
@@ -350,7 +404,12 @@ func (e *Engine) describe(a *alerts.Alert, v classify.Verdict) {
 	if a.Kind == alerts.KindDelete {
 		what = "deleted"
 	}
+	if a.BeforeRead {
+		what = "tried to open"
+	}
 	switch {
+	case a.Test && a.BeforeRead:
+		a.Title = "Test detection: " + exe + " was frozen opening a bait, before reading it"
 	case a.Test:
 		a.Title = "Test detection: " + exe + " read a bait"
 	case v.DecoyOwner:
@@ -364,6 +423,9 @@ func (e *Engine) describe(a *alerts.Alert, v classify.Verdict) {
 	}
 	if len(v.Reasons) > 0 {
 		a.Summary = v.Reasons[0]
+	}
+	if a.BeforeRead {
+		a.Summary = "Frozen while opening the bait, before it could read anything. " + a.Summary
 	}
 }
 

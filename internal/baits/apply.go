@@ -218,8 +218,18 @@ func Remove(bs *config.BaitState) error {
 			}
 		}
 	}
+	// A just-deleted file can linger for a moment while another handle on it
+	// closes (e.g. ABA's own instant-freeze guard letting go), so retry briefly.
 	for i := len(bs.CreatedDirs) - 1; i >= 0; i-- {
-		removeEmptyTree(bs.CreatedDirs[i])
+		for try := 0; try < 5; try++ {
+			if removeEmptyTree(bs.CreatedDirs[i]) {
+				break
+			}
+			if _, err := os.Stat(bs.CreatedDirs[i]); err != nil || !onlyPendingDeletes(bs.CreatedDirs[i], bs) {
+				break
+			}
+			time.Sleep(150 * time.Millisecond)
+		}
 	}
 	return firstErr
 }
@@ -298,4 +308,23 @@ func Retire(st *config.State, u config.UserInfo, id, why string) []string {
 	Remove(bs)
 	bs.Status, bs.StatusNote = "retired", why
 	return append(out, id)
+}
+
+// onlyPendingDeletes reports whether everything left under dir is one of our
+// own bait files (i.e. waiting to vanish), so it's worth retrying.
+func onlyPendingDeletes(dir string, bs *config.BaitState) bool {
+	ours := map[string]bool{}
+	for _, f := range bs.Files {
+		if f.Created {
+			ours[paths.Key(f.Path)] = true
+		}
+	}
+	only := true
+	filepath.Walk(dir, func(p string, fi os.FileInfo, err error) error {
+		if err == nil && !fi.IsDir() && !ours[paths.Key(p)] && fi.Name() != "LOCK" {
+			only = false
+		}
+		return nil
+	})
+	return only
 }
