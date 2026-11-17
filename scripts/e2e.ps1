@@ -69,7 +69,20 @@ function Fail($m) {
 # Safety net while the machine is isolated: a separate process that runs
 # `aba release` after $seconds even if this script dies or hangs.
 function ReleaseWatchdog([int]$seconds) {
-    Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList '-NoProfile', '-Command', "Start-Sleep $seconds; & '$Aba' release" -PassThru
+    $topicArg = if ($progress) { $progress } else { '' }
+    $script = @"
+Start-Sleep $seconds
+function Say(`$m) { if ('$topicArg') { try { Invoke-RestMethod -Method Post -Uri 'https://ntfy.sh/$topicArg' -Body ('WATCHDOG ' + `$m) -TimeoutSec 5 | Out-Null } catch {} } }
+for (`$i = 1; `$i -le 4; `$i++) {
+  `$out = & '$Aba' release 2>&1 | Out-String
+  & curl.exe -s -o NUL --max-time 8 https://www.microsoft.com
+  if (`$LASTEXITCODE -eq 0) { Say "release attempt `$i restored the network: `$out"; exit }
+  if (`$i -eq 2) { sc.exe stop FileAccessMonitor | Out-Null; Start-Sleep 5 }
+  Start-Sleep 10
+}
+Say 'could not restore the network'
+"@
+    Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList '-NoProfile', '-Command', $script -PassThru
 }
 function Check($cond, $m) { if ($cond) { Ok $m } else { Fail $m } }
 # Every aba call gets a deadline: a hang fails fast with the service log.

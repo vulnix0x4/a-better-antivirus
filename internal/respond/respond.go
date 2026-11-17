@@ -25,31 +25,45 @@ func (r *Report) bad(f string, a ...any) { r.Errors = append(r.Errors, fmt.Sprin
 // or only what belongs to one alert.
 func Release(alertID string) (*Report, error) {
 	rep := &Report{}
+
+	// 1. Network first, without the state lock. Getting the user back online
+	// must never depend on the service being responsive: if it's busy or
+	// stuck holding the lock, isolation would otherwise stay in place.
+	snap, _ := config.LoadState() // lock-free read (writes are atomic renames)
+	ours := alertID == "" || (snap != nil && snap.Isolation != nil && snap.Isolation.AlertID == alertID)
+	if ours {
+		if err := netguard.Unisolate(); err != nil {
+			rep.bad("remove isolation: %v", err)
+		} else if snap == nil || snap.Isolation != nil || alertID == "" {
+			rep.ok("network isolation removed")
+		}
+		if snap != nil && len(snap.DisabledAdapters) > 0 {
+			if err := netguard.EnableAdapters(snap.DisabledAdapters); err != nil {
+				rep.bad("re-enable adapters: %v", err)
+			} else {
+				rep.ok("re-enabled adapters: %s", strings.Join(snap.DisabledAdapters, ", "))
+			}
+		}
+	}
+
+	// 2. Unfreeze and unblock, and record it all, under the lock.
 	err := config.UpdateState(func(st *config.State) error {
-		if alertID == "" || (st.Isolation != nil && st.Isolation.AlertID == alertID) {
-			if st.Isolation != nil || alertID == "" {
-				if err := netguard.Unisolate(); err != nil {
-					rep.bad("remove isolation: %v", err)
-				} else if st.Isolation != nil {
-					rep.ok("network isolation removed")
-				}
-			}
-			if len(st.DisabledAdapters) > 0 {
-				if err := netguard.EnableAdapters(st.DisabledAdapters); err != nil {
-					rep.bad("re-enable adapters: %v", err)
-				} else {
-					rep.ok("re-enabled adapters: %s", strings.Join(st.DisabledAdapters, ", "))
-					st.DisabledAdapters = nil
-				}
-			}
+		if ours {
 			st.Isolation = nil
+			st.DisabledAdapters = nil
 		}
 		st.Frozen = resumeWhere(st.Frozen, alertID, rep)
 		st.Blocked = unblockWhere(st.Blocked, alertID, rep)
 		return nil
 	})
 	if err != nil {
-		return rep, err
+		// Still undo what we can without the bookkeeping.
+		if snap != nil {
+			resumeWhere(snap.Frozen, alertID, rep)
+			unblockWhere(snap.Blocked, alertID, rep)
+		}
+		rep.bad("couldn't update ABA's records (%v); the network was restored anyway", err)
+		return rep, nil
 	}
 	markResolved(alertID, "released")
 	return rep, nil
