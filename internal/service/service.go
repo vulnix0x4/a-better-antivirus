@@ -9,6 +9,7 @@ import (
 	"hash/fnv"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -202,7 +203,7 @@ func (s *server) run(ctx context.Context, ctl <-chan svc.Cmd) error {
 		s.log.Printf("event log subscription not ready after 10 s; continuing")
 	}
 	s.markReady()
-	s.healthCheck(true)
+	s.safe("startup health check", func() { s.healthCheck(true) })
 
 	// Per-PID workers: events from one process are handled in order (so they
 	// aggregate into one alert) while different processes don't wait on each other.
@@ -215,7 +216,7 @@ func (s *server) run(ctx context.Context, ctl <-chan svc.Cmd) error {
 				func() {
 					defer func() {
 						if r := recover(); r != nil {
-							s.log.Printf("panic handling event: %v", r)
+							s.log.Printf("PANIC handling event: %v\n%s", r, debug.Stack())
 						}
 					}()
 					s.eng.HandleAccess(oa)
@@ -262,9 +263,9 @@ func (s *server) run(ctx context.Context, ctl <-chan svc.Cmd) error {
 					s.log.Printf("configuration reloaded")
 				}
 			}
-			s.healthCheck(false)
+			s.safe("health check", func() { s.healthCheck(false) })
 		case <-health.C:
-			s.healthCheck(false)
+			s.safe("health check", func() { s.healthCheck(false) })
 		case <-beat.C:
 			s.saveBookmark()
 		case <-dialRefresh.C:
@@ -462,7 +463,7 @@ func (s *server) onOpen(path string, at time.Time, pids []uint32) {
 		}
 		img, _ := procinfo.ImagePath(pid)
 		s.log.Printf("instant freeze: %s (pid %d) opened %s; frozen %d ms after the open", img, pid, path, time.Since(at).Milliseconds())
-		go s.eng.HandleOpen(pid, path, at, frozen)
+		go s.safe("instant-freeze alert", func() { s.eng.HandleOpen(pid, path, at, frozen) })
 	}
 }
 
@@ -508,3 +509,14 @@ func (s *server) Elevated(pid uint32) bool {
 }
 
 func (s *server) markReady() { s.once2.Do(func() { close(s.ready) }) }
+
+// safe runs fn and, if it panics, logs the panic with its stack instead of
+// crashing the service (which would drop the alert or response in progress).
+func (s *server) safe(name string, fn func()) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.log.Printf("PANIC in %s: %v\n%s", name, r, debug.Stack())
+		}
+	}()
+	fn()
+}

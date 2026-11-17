@@ -199,7 +199,14 @@ type Status struct {
 	Rules    int
 }
 
-func GetStatus() (Status, error) {
+func GetStatus() (st Status, err error) {
+	// Enumerating every filter on the system parses third-party rules too;
+	// never let an unexpected one crash the caller.
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("reading firewall rules: %v", r)
+		}
+	}()
 	s, err := wf.New(&wf.Options{Name: "ABA status"})
 	if err != nil {
 		return Status{}, err
@@ -213,7 +220,6 @@ func GetStatus() (Status, error) {
 	for _, id := range isolationRuleIDs() {
 		iso[id] = true
 	}
-	var st Status
 	for _, r := range rules {
 		if r.Provider != providerID {
 			continue
