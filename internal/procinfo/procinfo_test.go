@@ -77,3 +77,11 @@ func TestConnections(t *testing.T) {
 	}
 	t.Fatalf("listener %s not found in %+v", want, conns)
 }
+
+func TestIntegrityLevel(t *testing.T) {
+	lvl, err := IntegrityLevel(uint32(os.Getpid()))
+	if err != nil || lvl < IntegrityLow || lvl > IntegritySystem+0x100 {
+		t.Fatalf("IntegrityLevel = 0x%x, %v", lvl, err)
+	}
+	t.Logf("this test runs at integrity 0x%x", lvl)
+}

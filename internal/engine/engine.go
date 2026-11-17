@@ -131,42 +131,54 @@ func (e *Engine) touchable(pid uint32, image string) bool {
 // session whose verdict calls for freezing. Everything else is let through
 // and handled by the normal audit-log path if it actually reads.
 func (e *Engine) DecideInstant(pid uint32, path string) bool {
+	ok, _ := e.DecideInstantWhy(pid, path)
+	return ok
+}
+
+// DecideInstantWhy is DecideInstant plus the reason, for the service log.
+func (e *Engine) DecideInstantWhy(pid uint32, path string) (bool, string) {
 	e.mu.Lock()
 	cfg, cls := e.cfg, e.classifier
 	baitID, isBait := e.index[paths.Key(path)]
 	e.mu.Unlock()
 	if cfg == nil || !isBait || pid == e.SelfPID {
-		return false
+		return false, "not a bait / ABA itself"
 	}
 	image, err := e.Ops.ImagePath(pid)
-	if err != nil || image == "" || !e.touchable(pid, image) {
-		return false
+	if err != nil || image == "" {
+		return false, "can't see its executable"
+	}
+	if !e.touchable(pid, image) {
+		return false, image + " is a protected system process"
 	}
 	if tr := e.Ops.PendingTest(); tr != nil && tr.PID == pid {
 		e.claim(pid)
-		return true // `aba test`: a known process, always demonstrate the freeze
+		return true, image + " is the `aba test` reader"
 	}
 	// Instant freeze acts on a split-second inference, so it only touches
 	// ordinary, non-elevated programs in a user session. Admin tools that inspect
 	// baits (and elevated malware, out of scope) go through the event-log path.
-	if !e.Ops.UserSession(pid) || e.Ops.Elevated(pid) {
-		return false
+	if !e.Ops.UserSession(pid) {
+		return false, image + " runs in session 0 (system/service)"
+	}
+	if e.Ops.Elevated(pid) {
+		return false, image + " runs as administrator"
 	}
 	if e.Ops.IsSelf(image) {
-		return false // ABA's own CLI (e.g. `aba doctor` checking a bait's audit rule)
+		return false, image + " is ABA itself"
 	}
 	if !cfg.InstantFreeze {
-		return false
+		return false, "instant freeze is off"
 	}
 	v := cls.Final(image, pid, baitRef(baitID), e.Ops.Verify(image))
 	if v.Ignored || v.DecoyOwner {
-		return false
+		return false, image + " is ignored or the real app"
 	}
 	if !config.Has(cfg.ActionsFor(v.Tier, time.Now()), config.ActionFreeze) {
-		return false
+		return false, fmt.Sprintf("%s is %s; that tier doesn't freeze right now", image, v.Tier)
 	}
 	e.claim(pid)
-	return true
+	return true, fmt.Sprintf("%s is %s", image, v.Tier)
 }
 
 // claim marks pid as handled by the instant path, so the event-log path (which

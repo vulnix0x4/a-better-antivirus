@@ -420,7 +420,9 @@ func (s *server) UserSession(pid uint32) bool {
 // package instant. Freeze what deserves it; the alert is raised asynchronously.
 func (s *server) onOpen(path string, at time.Time, pids []uint32) {
 	for _, pid := range pids {
-		if !s.eng.DecideInstant(pid, path) {
+		ok, why := s.eng.DecideInstantWhy(pid, path)
+		if !ok {
+			s.log.Printf("instant: pid %d let through: %s", pid, why)
 			continue
 		}
 		frozen, err := procinfo.SuspendTree(pid)
@@ -465,17 +467,13 @@ func (s *server) IsSelf(image string) bool {
 	return h == selfHash
 }
 
-// Elevated reports whether pid runs with an elevated (administrator) token.
+// Elevated reports whether pid runs at high (admin) or system integrity, the
+// same line UAC draws. (TokenIsElevated isn't enough: restricted tokens made
+// from an admin, e.g. by `runas /trustlevel`, can still claim to be elevated.)
 func (s *server) Elevated(pid uint32) bool {
-	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	lvl, err := procinfo.IntegrityLevel(pid)
 	if err != nil {
-		return true // can't inspect it: treat as elevated, i.e. don't instant-freeze
+		return true // can't inspect it: don't instant-freeze
 	}
-	defer windows.CloseHandle(h)
-	var tok windows.Token
-	if err := windows.OpenProcessToken(h, windows.TOKEN_QUERY, &tok); err != nil {
-		return true
-	}
-	defer tok.Close()
-	return tok.IsElevated()
+	return lvl >= procinfo.IntegrityHigh
 }

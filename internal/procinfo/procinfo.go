@@ -310,3 +310,41 @@ func BaseName(p string) string {
 	}
 	return filepath.Base(strings.ReplaceAll(p, "/", `\`))
 }
+
+// Integrity levels (the RID of the token's mandatory label).
+const (
+	IntegrityLow    = 0x1000
+	IntegrityMedium = 0x2000
+	IntegrityHigh   = 0x3000
+	IntegritySystem = 0x4000
+)
+
+// IntegrityLevel returns the process token's integrity RID.
+func IntegrityLevel(pid uint32) (uint32, error) {
+	h, err := open(pid, windows.PROCESS_QUERY_LIMITED_INFORMATION)
+	if err != nil {
+		return 0, err
+	}
+	defer windows.CloseHandle(h)
+	var tok windows.Token
+	if err := windows.OpenProcessToken(h, windows.TOKEN_QUERY, &tok); err != nil {
+		return 0, err
+	}
+	defer tok.Close()
+	var n uint32
+	windows.GetTokenInformation(tok, windows.TokenIntegrityLevel, nil, 0, &n)
+	if n == 0 {
+		return 0, fmt.Errorf("no integrity level")
+	}
+	buf := make([]byte, n)
+	if err := windows.GetTokenInformation(tok, windows.TokenIntegrityLevel, &buf[0], n, &n); err != nil {
+		return 0, err
+	}
+	label := (*windows.Tokenmandatorylabel)(unsafe.Pointer(&buf[0]))
+	sid := label.Label.Sid
+	c := sid.SubAuthorityCount()
+	if c == 0 {
+		return 0, fmt.Errorf("bad integrity SID")
+	}
+	return sid.SubAuthority(uint32(c) - 1), nil
+}
