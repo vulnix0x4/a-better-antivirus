@@ -132,7 +132,7 @@ func Run() []Result {
 		if entries, err := os.ReadDir(recent); err == nil {
 			for _, e := range entries {
 				if b, err := os.ReadFile(filepath.Join(recent, e.Name())); err == nil {
-					if _, hit := idx[strings.ToLower(filepath.Clean(baits.LnkTarget(b)))]; hit {
+					if _, hit := idx[paths.Key(baits.LnkTarget(b))]; hit {
 						n++
 					}
 				}

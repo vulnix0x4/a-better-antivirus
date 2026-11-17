@@ -101,7 +101,7 @@ func (e *Engine) Configure(cfg *config.Config, st *config.State) {
 func (e *Engine) IsBait(path string) (string, bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	id, ok := e.index[strings.ToLower(filepath.Clean(path))]
+	id, ok := e.index[paths.Key(path)]
 	return id, ok
 }
 

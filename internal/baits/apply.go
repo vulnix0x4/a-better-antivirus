@@ -11,6 +11,7 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
+	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
 	"github.com/vulnix0x4/a-better-antivirus/internal/winsec"
 )
 
@@ -256,7 +257,7 @@ func Index(st *config.State) map[string]string {
 		}
 		for _, f := range bs.Files {
 			if f.Audit {
-				m[strings.ToLower(filepath.Clean(f.Path))] = id
+				m[paths.Key(f.Path)] = id
 			}
 		}
 	}

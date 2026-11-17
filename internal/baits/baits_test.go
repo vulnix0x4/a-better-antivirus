@@ -3,12 +3,14 @@ package baits
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
+	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
 )
 
 func testUser(t *testing.T) config.UserInfo {
@@ -112,32 +114,52 @@ func TestEverySpecHasFiles(t *testing.T) {
 	}
 }
 
-func TestLnkTargetRealRecentFile(t *testing.T) {
-	recent := filepath.Join(os.Getenv("APPDATA"), `Microsoft\Windows\Recent`)
-	entries, _ := os.ReadDir(recent)
-	n := 0
-	for _, e := range entries {
-		if !strings.HasSuffix(strings.ToLower(e.Name()), ".lnk") {
-			continue
-		}
-		b, err := os.ReadFile(filepath.Join(recent, e.Name()))
-		if err != nil {
-			continue
-		}
-		if tgt := LnkTarget(b); tgt != "" {
-			n++
-			if !strings.Contains(tgt, `\`) {
-				t.Errorf("%s -> %q doesn't look like a path", e.Name(), tgt)
-			}
-			if strings.EqualFold(e.Name(), "passwords.lnk") {
-				t.Logf("passwords.lnk -> %s", tgt)
-			}
+// makeShortcut creates a real .lnk with Windows' own shell, like Explorer does.
+func makeShortcut(t *testing.T, lnk, target string) {
+	t.Helper()
+	script := "$s=(New-Object -ComObject WScript.Shell).CreateShortcut('" + lnk + "'); $s.TargetPath='" + target + "'; $s.Save()"
+	if out, err := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script).CombinedOutput(); err != nil {
+		t.Skipf("can't create shortcuts here: %v %s", err, out)
+	}
+}
+
+// The Copilot false alarm came from a Recent-files shortcut to a bait:
+// CleanRecent must find and delete exactly those, and nothing else.
+func TestCleanRecentRemovesOnlyBaitShortcuts(t *testing.T) {
+	root := t.TempDir()
+	bait := filepath.Join(root, "Desktop", "passwords.txt")
+	other := filepath.Join(root, "Desktop", "holiday.txt")
+	os.MkdirAll(filepath.Dir(bait), 0o755)
+	os.WriteFile(bait, []byte("x"), 0o644)
+	os.WriteFile(other, []byte("x"), 0o644)
+	recent := filepath.Join(root, "Roaming", `Microsoft\Windows\Recent`)
+	os.MkdirAll(recent, 0o755)
+	baitLnk, otherLnk := filepath.Join(recent, "passwords.lnk"), filepath.Join(recent, "holiday.lnk")
+	makeShortcut(t, baitLnk, bait)
+	makeShortcut(t, otherLnk, other)
+
+	b, _ := os.ReadFile(baitLnk)
+	if got := LnkTarget(b); paths.Key(got) != paths.Key(bait) {
+		t.Fatalf("LnkTarget = %q, want %q", got, bait)
+	}
+	removed := CleanRecent(filepath.Join(root, "Roaming"), map[string]string{strings.ToLower(bait): "desktop-passwords"})
+	if len(removed) != 1 {
+		t.Fatalf("removed %v", removed)
+	}
+	if _, err := os.Stat(baitLnk); !os.IsNotExist(err) {
+		t.Error("shortcut to the bait was not removed")
+	}
+	if _, err := os.Stat(otherLnk); err != nil {
+		t.Error("unrelated shortcut was removed")
+	}
+}
+
+func TestLnkTargetIgnoresGarbage(t *testing.T) {
+	for _, b := range [][]byte{nil, []byte("not a shortcut"), make([]byte, 0x4C)} {
+		if got := LnkTarget(b); got != "" {
+			t.Errorf("LnkTarget(%q) = %q", b, got)
 		}
 	}
-	if len(entries) > 0 && n == 0 {
-		t.Fatal("could not parse any Recent shortcut")
-	}
-	t.Logf("parsed %d Recent shortcuts", n)
 }
 
 func TestMetamaskFollowsHostBrowser(t *testing.T) {

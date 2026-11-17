@@ -83,3 +83,26 @@ func Under(p, dir string) bool {
 	}
 	return strings.HasPrefix(p, dir)
 }
+
+// Long expands 8.3 short names (C:\Users\VULNIX~1 -> C:\Users\vulnix0x4) so
+// the same file always compares equal. It only queries directory entries,
+// never file contents, so it's safe to call on baits. Paths that don't exist
+// are returned unchanged.
+func Long(p string) string {
+	if !strings.Contains(p, "~") {
+		return p
+	}
+	u, err := windows.UTF16PtrFromString(p)
+	if err != nil {
+		return p
+	}
+	buf := make([]uint16, windows.MAX_LONG_PATH)
+	n, err := windows.GetLongPathName(u, &buf[0], uint32(len(buf)))
+	if err != nil || n == 0 || int(n) > len(buf) {
+		return p
+	}
+	return windows.UTF16ToString(buf[:n])
+}
+
+// Key is the canonical form used to look paths up in maps.
+func Key(p string) string { return Clean(Long(p)) }
