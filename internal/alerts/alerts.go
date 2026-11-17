@@ -60,21 +60,22 @@ type ActionResult struct {
 }
 
 type Alert struct {
-	ID        string           `json:"id"`
-	Time      time.Time        `json:"time"`
-	Kind      string           `json:"kind"`
-	Tier      config.Tier      `json:"tier"`
-	Title     string           `json:"title"`
-	Summary   string           `json:"summary,omitempty"`
-	Learning  bool             `json:"learning,omitempty"`
-	Test      bool             `json:"test,omitempty"`
-	Baits     []BaitHit        `json:"baits,omitempty"`
-	Process   *Process         `json:"process,omitempty"`
-	Verdict   classify.Verdict `json:"verdict"`
-	Actions   []ActionResult   `json:"actions,omitempty"`
-	LatencyMS int64            `json:"latencyMs,omitempty"` // event logged -> first response
-	Status    string           `json:"status"`              // open | resolved
-	Note      string           `json:"note,omitempty"`
+	ID         string           `json:"id"`
+	Time       time.Time        `json:"time"`
+	Kind       string           `json:"kind"`
+	Tier       config.Tier      `json:"tier"`
+	Title      string           `json:"title"`
+	Summary    string           `json:"summary,omitempty"`
+	Learning   bool             `json:"learning,omitempty"`
+	Test       bool             `json:"test,omitempty"`
+	Baits      []BaitHit        `json:"baits,omitempty"`
+	Process    *Process         `json:"process,omitempty"`
+	Verdict    classify.Verdict `json:"verdict"`
+	Actions    []ActionResult   `json:"actions,omitempty"`
+	LatencyMS  int64            `json:"latencyMs,omitempty"`  // event logged -> first response
+	DeliveryMS int64            `json:"deliveryMs,omitempty"` // event logged -> ABA received it
+	Status     string           `json:"status"`               // open | resolved
+	Note       string           `json:"note,omitempty"`
 }
 
 // NewID returns a sortable, unique alert ID.

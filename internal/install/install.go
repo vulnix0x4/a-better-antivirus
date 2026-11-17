@@ -26,6 +26,7 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/netguard"
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
+	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
 	"github.com/vulnix0x4/a-better-antivirus/internal/respond"
 	"github.com/vulnix0x4/a-better-antivirus/internal/svcctl"
 	"github.com/vulnix0x4/a-better-antivirus/internal/winsec"
@@ -513,7 +514,29 @@ func UninstallSteps(purge bool) []Step {
 				cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW | windows.DETACHED_PROCESS}
 				return "finishes after this window closes", cmd.Start()
 			}
-			return "", os.RemoveAll(paths.InstallDir())
+			// Close leftover ABA processes (e.g. an alert popup nobody clicked).
+			if snap, err := procinfo.Snapshot(); err == nil {
+				for pid := range snap {
+					if img, err := procinfo.ImagePath(pid); err == nil && paths.Under(img, paths.InstallDir()) && pid != uint32(os.Getpid()) {
+						procinfo.Kill(pid)
+					}
+				}
+				time.Sleep(500 * time.Millisecond)
+			}
+			if err := os.RemoveAll(paths.InstallDir()); err != nil {
+				// Something still holds a file: delete what's left at next reboot.
+				// Register children before their folders so the folders are empty by then.
+				var left []string
+				filepath.Walk(paths.InstallDir(), func(p string, _ os.FileInfo, _ error) error {
+					left = append(left, p)
+					return nil
+				})
+				for i := len(left) - 1; i >= 0; i-- {
+					scheduleDelete(left[i])
+				}
+				return "some files were in use; they'll be deleted at the next restart", nil
+			}
+			return "", nil
 		}},
 		{Name: "Cleaning up data", Run: func() (string, error) {
 			if purge {

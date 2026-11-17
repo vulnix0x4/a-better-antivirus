@@ -129,6 +129,7 @@ func baitRef(id string) classify.Bait {
 
 // HandleAccess processes one 4663 event.
 func (e *Engine) HandleAccess(oa *evtlog.ObjectAccess) {
+	received := time.Now()
 	baitID, ok := e.IsBait(oa.ObjectName)
 	if !ok || oa.ProcessID == e.SelfPID {
 		return
@@ -252,6 +253,7 @@ func (e *Engine) HandleAccess(oa *evtlog.ObjectAccess) {
 	if latency > 0 {
 		a.LatencyMS = latency.Milliseconds()
 	}
+	a.DeliveryMS = received.Sub(oa.Time).Milliseconds()
 
 	// 5. Forensics while frozen.
 	e.Ops.Forensics(oa.ProcessID, a.Process)
@@ -339,7 +341,7 @@ func (e *Engine) HandleAccess(oa *evtlog.ObjectAccess) {
 		e.Ops.KillTree(oa.ProcessID)
 		e.Ops.ClearTest()
 	}
-	e.Ops.Logf("alert %s: %s [%s] actions=%d latency=%dms", a.ID, a.Title, a.Tier, len(a.Actions), a.LatencyMS)
+	e.Ops.Logf("alert %s: %s [%s] actions=%d latency=%dms (delivery %dms)", a.ID, a.Title, a.Tier, len(a.Actions), a.LatencyMS, a.DeliveryMS)
 }
 
 func (e *Engine) describe(a *alerts.Alert, v classify.Verdict) {

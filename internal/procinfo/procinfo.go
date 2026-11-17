@@ -238,6 +238,16 @@ func SuspendTree(pid uint32) ([]uint32, error) {
 	var frozen []uint32
 	done := map[uint32]bool{}
 	var firstErr error
+	// Freeze the reader itself immediately: every millisecond counts, and the
+	// process snapshot below takes a while on a busy machine.
+	if pid != 0 && pid != 4 && pid != uint32(os.Getpid()) {
+		done[pid] = true
+		if err := Suspend(pid); err != nil {
+			firstErr = err
+		} else {
+			frozen = append(frozen, pid)
+		}
+	}
 	for pass := 0; pass < 2; pass++ {
 		snap, err := Snapshot()
 		if err != nil {

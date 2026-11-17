@@ -317,11 +317,11 @@ func runTest() error {
 	}
 	fmt.Println(ui.Check(true, "Detected: ") + ui.TierWord(found.Tier) + ui.Dim.Render(" ("+found.Summary+")"))
 	if found.Did(config.ActionFreeze) {
-		fmt.Println(ui.Check(true, fmt.Sprintf("Frozen %d ms after the read", found.LatencyMS)))
+		fmt.Println(ui.Check(true, fmt.Sprintf("Frozen %d ms after the read", found.LatencyMS)) + ui.Dim.Render(fmt.Sprintf(" (Windows delivered the event after %d ms)", found.DeliveryMS)))
 	} else {
 		fmt.Println(ui.Check(false, "Not frozen") + ui.Dim.Render(" (check the alert for why)"))
 	}
-	fmt.Println(ui.Check(true, "Popup shown on your desktop"))
+	fmt.Println(ui.Check(true, "Desktop alert sent (shows if you're signed in)"))
 	fmt.Println(ui.Check(true, "Test process killed and removed"))
 	if sec, err := config.LoadSecrets(); err == nil && sec.Phone.Enabled() {
 		fmt.Println(ui.Check(true, "Phone alert sent via "+sec.Phone.Describe()))
