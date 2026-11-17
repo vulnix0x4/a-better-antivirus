@@ -186,7 +186,13 @@ func (e *Engine) DecideInstantWhy(pid uint32, path string) (bool, string) {
 // Windows stacks suspensions, so a double freeze would need two unfreezes.
 func (e *Engine) claim(pid uint32) {
 	e.mu.Lock()
-	e.claimed[pid] = time.Now()
+	now := time.Now()
+	for p, t := range e.claimed {
+		if now.Sub(t) > window {
+			delete(e.claimed, p) // expired claims
+		}
+	}
+	e.claimed[pid] = now
 	e.mu.Unlock()
 }
 
@@ -242,7 +248,10 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 	e.mu.Lock()
 	cfg, cls, name := e.cfg, e.classifier, e.baitNames[baitID]
 	hit := alerts.BaitHit{ID: baitID, Name: name, Path: oa.ObjectName, Access: access, Time: oa.Time}
-	if inc := e.incidents[oa.ProcessID]; inc != nil && time.Since(inc.last) < window &&
+	// Aggregate repeat hits into the open alert, except for instant catches: a
+	// new freeze always gets its own alert and its own record in state (the
+	// earlier alert may already be resolved, e.g. the user resumed the process).
+	if inc := e.incidents[oa.ProcessID]; !instant && inc != nil && time.Since(inc.last) < window &&
 		(inc.createTime == 0 || inc.createTime == e.Ops.CreateTime(oa.ProcessID)) {
 		inc.last = time.Now()
 		a := inc.alert

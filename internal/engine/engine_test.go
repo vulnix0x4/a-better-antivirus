@@ -298,3 +298,19 @@ func TestTestReaderLeavesFrozenList(t *testing.T) {
 		t.Fatalf("killed=%v frozen=%+v: the killed test reader must not stay on the frozen list", f.killed, f.state.Frozen)
 	}
 }
+
+// Resume a frozen process, it opens another bait within the aggregation
+// window: the new instant freeze must get its own alert and state record,
+// or `aba release` would never know about it.
+func TestInstantRefreezeIsTracked(t *testing.T) {
+	e, f := setup("balanced")
+	f.images[100] = `C:\Users\bob\AppData\Local\Temp\x\stealer.exe`
+	e.DecideInstant(100, desktopBait)
+	e.HandleOpen(100, desktopBait, time.Now(), []uint32{100})
+	f.state.Frozen = nil // user resumed it (`aba resume`)
+	e.DecideInstant(100, desktopBait)
+	e.HandleOpen(100, `C:\Users\bob\AppData\Roaming\discord\Local Storage\leveldb\000005.ldb`, time.Now(), []uint32{100})
+	if len(f.saved) != 2 || len(f.state.Frozen) != 1 {
+		t.Fatalf("second freeze untracked: alerts=%d frozen=%+v", len(f.saved), f.state.Frozen)
+	}
+}

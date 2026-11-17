@@ -11,8 +11,8 @@
  Reads bait    C:\Users\you\Desktop\passwords.txt
 
  ✓ Detected: critical (unsigned program running from a user-writable folder)
- ✓ Frozen 192 ms after the read (Windows delivered the event after 181 ms)
- ✓ Popup shown on your desktop
+ ✓ Frozen 72 ms after it opened the bait (instant freeze: no waiting for the event log)
+ ✓ Desktop alert sent (shows if you're signed in)
  ✓ Phone alert sent via ntfy
 ```
 
@@ -31,9 +31,11 @@ Infostealers (Lumma, RedLine, Vidar, StealC…) are the most common malware on p
 ```
  stealer opens a bait
         │
-        ▼
- NTFS audit rule ──► Security event 4663 ──► ABA service (SYSTEM), typically within ~0.2 s
-                                                │
+        ├─► instant freeze: ABA holds every bait with an oplock, so Windows tells it
+        │   the moment the file is opened (see below). Typically frozen in ~0.1 s.
+        │
+        └─► backup: NTFS audit rule ──► Security event 4663 ──► ABA service (SYSTEM)
+            (Windows delivers these in a few ms to ~1 s)        │
            1. instant verdict from path/name ───┤ unsigned + Temp/AppData/Downloads? script host?
            2. freeze the process tree ──────────┤ (before it can upload)
            3. verify the code signature ────────┤ signed legit app? → unfreeze, just note it
@@ -42,7 +44,8 @@ Infostealers (Lumma, RedLine, Vidar, StealC…) are the most common malware on p
            6. alert ────────────────────────────┘ desktop popup + toast + phone
 ```
 
-- **Detection** uses Windows' own file auditing (an audit rule on each bait, read through the Security event log). No kernel driver, no background scanning, no CPU use while idle. Malware running as you can neither see nor remove the audit rules.
+- **Instant freeze** (on by default, `aba instant on|off`): ABA holds an exclusive *opportunistic lock* on every bait. When a program opens one, Windows pauses it inside the open and tells ABA immediately. ABA notes which threads just got stuck, lets go, and the one that wakes at that exact instant is the opener: identified precisely, never guessed. If it's suspicious it's frozen right away, typically ~0.1 s after the open (72–151 ms in CI), instead of waiting for the event log. To stay safe it only ever acts on ordinary non-admin programs in your session, never on system processes or on ABA itself, and if more than one program wakes at once it doesn't guess.
+- **Detection backup** uses Windows' own file auditing (an audit rule on each bait, read through the Security event log). No kernel driver, no background scanning, no CPU use while idle. Malware running as you can neither see nor remove the audit rules.
 - **Severity** is automatic. Malware without admin rights can't write to `Program Files` or `Windows`, and stealers are almost always unsigned binaries in user-writable folders or abuse script hosts like PowerShell or mshta. So:
 
   | Reader | Severity |
@@ -96,6 +99,7 @@ Setup:
 aba configure    change baits, response, learning mode, phone alerts, canary tokens
 aba bait list | show <id> | add <path> | remove <id> | catalog
 aba ignore list | add <pattern> [--signer X] | remove <n>
+aba instant [on|off]
 aba phone test
 aba uninstall [--purge]
 ```
@@ -113,7 +117,8 @@ ntfy (free, no account), Discord webhook, Pushover or email (SMTP with TLS). Sec
 ## Honest limitations
 
 - **It's a tripwire, not a shield.** It catches stealers that go looking for files. A stealer that only grabs your real browser data and never touches a bait won't trip it.
-- **Speed.** Windows hands ABA the read event in roughly 0.2 s (measured in CI: 181 ms), and ABA freezes the reader about 10 ms later. A stealer that uploads each item the moment it reads it may get something out first. Freezing stops whatever it hasn't sent yet.
+- **Speed.** With instant freeze a stealer is frozen about 0.1 s after it opens a bait (it gets the fake bait contents, not your real data). Without it, ABA waits for the event log: a few ms to about 1 s. A stealer that uploads each item the moment it reads it may get something out first; freezing stops whatever it hasn't sent yet.
+- **Instant freeze is deliberately cautious.** It skips programs running as administrator and anything it can't pinpoint with certainty; those are still caught by the event-log path, just a little later.
 - **Admin malware.** Malware running as administrator can stop the service, clear the audit policy or remove filters. ABA alerts if auditing is switched off, but it can't defend against an attacker who already owns the machine.
 - **Desktop popups need you to be signed in.** Detections are always logged and phone alerts always go out, and responses happen either way.
 - **Some legit software reads files** (backup, sync, search tools). Learning mode and ignore rules handle that.

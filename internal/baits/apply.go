@@ -241,16 +241,15 @@ func removeEmptyTree(dir string) bool {
 	if err != nil {
 		return false
 	}
+	// Our own files (including fake leveldb LOCK files) were already deleted by
+	// Remove; anything left belongs to someone else (e.g. the real app) and
+	// keeps the folder.
 	empty := true
 	for _, e := range entries {
 		if e.IsDir() && removeEmptyTree(filepath.Join(dir, e.Name())) {
 			continue
 		}
-		if e.IsDir() || e.Name() != "LOCK" {
-			empty = false
-		} else {
-			os.Remove(filepath.Join(dir, e.Name())) // our zero-byte leveldb LOCK
-		}
+		empty = false
 	}
 	if empty {
 		return os.Remove(dir) == nil
@@ -321,7 +320,7 @@ func onlyPendingDeletes(dir string, bs *config.BaitState) bool {
 	}
 	only := true
 	filepath.Walk(dir, func(p string, fi os.FileInfo, err error) error {
-		if err == nil && !fi.IsDir() && !ours[paths.Key(p)] && fi.Name() != "LOCK" {
+		if err == nil && !fi.IsDir() && !ours[paths.Key(p)] {
 			only = false
 		}
 		return nil

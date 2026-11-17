@@ -363,7 +363,7 @@ func (w *Watcher) guard(path string, stop windows.Handle) {
 		// so "unknown" is treated as a possible read.
 		access, known := g.OpenerAccess()
 		if known && !WantsContents(access) {
-			w.logf("instant: %s opened for 0x%x (known=%v): not a read, let through", path, access, known)
+
 			if w.OnOther != nil {
 				w.OnOther(path, access)
 			}
@@ -376,7 +376,14 @@ func (w *Watcher) guard(path string, stop windows.Handle) {
 		stuck := FindStuck(tick0, w.Self, settle)
 		g.Release()
 		pids := Woke(stuck, w.Self, 3*time.Millisecond)
-		w.logf("instant: %s opened for read (0x%x); %d thread(s) got stuck, woke on release: %v", path, access, len(stuck), pids)
+		if len(pids) > 1 {
+			// More than one program woke at that instant: don't guess. The
+			// event-log path still catches whichever one actually reads.
+			w.logf("instant: %s opened, but %v all woke at once; leaving it to the event log", path, pids)
+			pids = nil
+		} else if len(pids) == 1 {
+			w.logf("instant: %s opened by pid %d", path, pids[0])
+		}
 		if w.OnOpen != nil {
 			func() {
 				defer func() {

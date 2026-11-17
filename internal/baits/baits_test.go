@@ -242,3 +242,25 @@ func TestRetireTakesDependentsWithIt(t *testing.T) {
 		t.Fatal("metamask decoy file left behind inside the real browser's folder")
 	}
 }
+
+// A real app that moved into a decoy's folder keeps its files, including its
+// own database LOCK file, when the decoy is removed.
+func TestRemoveKeepsTheRealAppsLockFile(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "discord", "Local Storage", "leveldb")
+	os.MkdirAll(dir, 0o755)
+	ours := filepath.Join(dir, "000005.ldb")
+	os.WriteFile(ours, []byte("fake"), 0o644)
+	fi, _ := os.Stat(ours)
+	bs := &config.BaitState{Files: []config.BaitFile{{Path: ours, Created: true, Size: fi.Size(), ModTime: fi.ModTime()}},
+		CreatedDirs: []string{filepath.Dir(filepath.Dir(dir))}}
+	theirLock := filepath.Join(dir, "LOCK") // created by the real Discord, not us
+	os.WriteFile(theirLock, nil, 0o644)
+
+	Remove(bs)
+	if _, err := os.Stat(theirLock); err != nil {
+		t.Fatal("deleted the real app's LOCK file")
+	}
+	if _, err := os.Stat(ours); !os.IsNotExist(err) {
+		t.Fatal("our decoy file should be gone")
+	}
+}
