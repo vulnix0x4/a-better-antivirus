@@ -114,7 +114,7 @@ function AuditFS { (auditpol /get /subcategory:"$fsGuid" /r | ConvertFrom-Csv).'
 Step 'Baseline'
 $auditBefore = AuditFS
 Ok "audit policy before install: $auditBefore"
-Check (Online) 'machine is online'
+Check (WaitFor { Online } 45) 'machine is online'
 
 Step 'Install (balanced, no learning, ntfy phone alerts)'
 Aba install --yes --preset balanced --learning 0 --ntfy-topic $topic
