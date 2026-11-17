@@ -61,6 +61,18 @@ func (h *handler) Execute(args []string, req <-chan svc.ChangeRequest, status ch
 	done := make(chan error, 1)
 	ctl := make(chan svc.Cmd, 4)
 	go func() { done <- s.run(ctx, ctl) }()
+	// Report "running" only once bait access is actually being watched, so
+	// `aba install` returns when protection is live, not before.
+	select {
+	case <-s.ready:
+	case err := <-done:
+		if err != nil {
+			s.log.Printf("service failed to start: %v", err)
+			return false, 1
+		}
+		return false, 0
+	case <-time.After(25 * time.Second):
+	}
 	status <- svc.Status{State: svc.Running, Accepts: accepts}
 	for {
 		select {
@@ -94,22 +106,27 @@ func (h *handler) Execute(args []string, req <-chan svc.ChangeRequest, status ch
 }
 
 type server struct {
-	log     *logx.Logger
-	eng     *engine.Engine
-	mu      sync.Mutex
-	cfg     *config.Config
-	secrets *config.Secrets
-	dial    *notify.DialCache
-	cliExe  string
-	selfExe string
-	sub     *evtlog.Subscription
-	watch   *instant.Watcher
+	log       *logx.Logger
+	eng       *engine.Engine
+	mu        sync.Mutex
+	cfg       *config.Config
+	secrets   *config.Secrets
+	dial      *notify.DialCache
+	cliExe    string
+	selfExe   string
+	sub       *evtlog.Subscription
+	watch     *instant.Watcher
+	listening chan struct{} // closed once the event-log subscription is live
+	ready     chan struct{} // closed when the service is protecting (reported to Windows)
+	once1     sync.Once
+	once2     sync.Once
 }
 
 func newServer(echo bool) *server {
 	os.MkdirAll(paths.DataDir(), 0o755)
 	exe, _ := os.Executable()
-	s := &server{log: logx.New(paths.LogFile(), echo), selfExe: exe, cliExe: filepath.Join(filepath.Dir(exe), paths.CLIExe)}
+	s := &server{log: logx.New(paths.LogFile(), echo), selfExe: exe, cliExe: filepath.Join(filepath.Dir(exe), paths.CLIExe),
+		listening: make(chan struct{}), ready: make(chan struct{})}
 	if _, err := os.Stat(s.cliExe); err != nil {
 		s.cliExe = exe // dev builds: one binary
 	}
@@ -172,12 +189,20 @@ func (s *server) run(ctx context.Context, ctl <-chan svc.Cmd) error {
 		st.Heartbeat = time.Now()
 		return nil
 	})
-	s.healthCheck(true)
-
+	// Start listening for bait access BEFORE anything slow (the startup health
+	// check takes seconds): otherwise reads right after a restart or reconfigure
+	// were missed. The service only reports "running" once this is live.
 	events := make(chan string, 1024)
 	subCtx, subCancel := context.WithCancel(ctx)
 	defer subCancel()
 	go s.subscribeLoop(subCtx, events)
+	select {
+	case <-s.listening:
+	case <-time.After(10 * time.Second):
+		s.log.Printf("event log subscription not ready after 10 s; continuing")
+	}
+	s.markReady()
+	s.healthCheck(true)
 
 	// Per-PID workers: events from one process are handled in order (so they
 	// aggregate into one alert) while different processes don't wait on each other.
@@ -265,6 +290,7 @@ func (s *server) subscribeLoop(ctx context.Context, out chan<- string) {
 		s.sub = sub
 		s.mu.Unlock()
 		s.log.Printf("watching Security log for bait access (resume=%v)", bm != "")
+		s.once1.Do(func() { close(s.listening) })
 		err = sub.Run(ctx, func(x string) {
 			select {
 			case out <- x:
@@ -480,3 +506,5 @@ func (s *server) Elevated(pid uint32) bool {
 	}
 	return lvl >= procinfo.IntegrityHigh
 }
+
+func (s *server) markReady() { s.once2.Do(func() { close(s.ready) }) }
