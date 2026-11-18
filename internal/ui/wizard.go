@@ -142,6 +142,8 @@ func RunWizard(in WizardInput) (install.Options, bool, error) {
 	canaryEmail := sec.Canary.Email
 
 	cleanRecent := o.CleanRecent
+	// Configs from before auto-update existed haven't chosen yet: suggest on.
+	autoUpdate := in.Existing == nil || in.Existing.Version < config.CurrentConfigVersion || in.Existing.AutoUpdate
 	confirm := true
 
 	notEmpty := func(s string) error {
@@ -242,6 +244,13 @@ func RunWizard(in WizardInput) (install.Options, bool, error) {
 			huh.NewConfirm().Title("Keep baits out of your Recent files?").
 				Description("If you open a bait, Windows lists it under Recent files and apps like Copilot then read it.\nABA removes those shortcuts automatically.").
 				Affirmative("Yes").Negative("No").Value(&cleanRecent),
+		),
+		huh.NewGroup(
+			huh.NewConfirm().Title("Keep A Better Antivirus up to date automatically?").
+				Description("Once a day it checks GitHub for a new version and installs it, but only if the release is\n"+
+					"signed with ABA's release key and the download matches its signed checksum.\n"+
+					"Change this any time with `aba configure`, or update by hand with `aba update`.").
+				Affirmative("Yes, keep it updated").Negative("No, I'll update myself").Value(&autoUpdate),
 			huh.NewConfirm().Title("Ready to install?").Affirmative("Install").Negative("Cancel").Value(&confirm),
 		),
 	).WithTheme(Theme()).WithShowHelp(true)
@@ -273,6 +282,7 @@ func RunWizard(in WizardInput) (install.Options, bool, error) {
 	}
 	o.PhoneMinTier = config.Tier(minTier)
 	o.CleanRecent = cleanRecent
+	o.AutoUpdate = autoUpdate
 	o.Phone = config.PhoneConfig{Kind: phoneKind}
 	switch phoneKind {
 	case "ntfy":

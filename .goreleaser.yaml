@@ -26,6 +26,17 @@ checksum:
   name_template: "SHA256SUMS.txt"
   algorithm: sha256
 
+# Sign the checksum list with the release key (ed25519). ABA's auto-updater
+# refuses any release whose SHA256SUMS.txt signature doesn't verify.
+signs:
+  - id: checksums
+    artifacts: checksum
+    cmd: go
+    args: ["run", "./scripts/sign", "${artifact}", "${signature}"]
+    signature: "${artifact}.sig"
+    env:
+      - ABA_SIGNING_KEY={{ .Env.ABA_SIGNING_KEY }}
+
 release:
   header: |
     ## A Better Antivirus {{ .Tag }}

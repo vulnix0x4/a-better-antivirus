@@ -31,6 +31,16 @@ type State struct {
 	ServiceVersion   string                `json:"serviceVersion,omitempty"`
 	Health           []HealthItem          `json:"health,omitempty"`
 	Persona          map[string]string     `json:"persona,omitempty"` // fake identity shared by all baits
+	Update           *UpdateStatus         `json:"update,omitempty"`
+}
+
+// UpdateStatus records what the auto-updater last did.
+type UpdateStatus struct {
+	LastCheck  time.Time `json:"lastCheck,omitempty"`
+	Latest     string    `json:"latest,omitempty"`     // newest release seen
+	LastResult string    `json:"lastResult,omitempty"` // human-readable outcome of the last check/apply
+	UpdatedAt  time.Time `json:"updatedAt,omitempty"`
+	UpdatedTo  string    `json:"updatedTo,omitempty"`
 }
 
 type BaitState struct {

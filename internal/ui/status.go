@@ -101,6 +101,19 @@ func RenderStatus(d StatusData) string {
 	if st != nil && !st.Heartbeat.IsZero() {
 		prot = append(prot, Dim.Render("last check "+Ago(st.Heartbeat)))
 	}
+	ver := "version unknown"
+	if st != nil && st.ServiceVersion != "" {
+		ver = "version " + st.ServiceVersion
+	}
+	if cfg.AutoUpdate {
+		ver += " · auto-update on"
+		if st != nil && st.Update != nil && !st.Update.UpdatedAt.IsZero() && time.Since(st.Update.UpdatedAt) < 7*24*time.Hour {
+			ver += " (updated " + Ago(st.Update.UpdatedAt) + ")"
+		}
+	} else {
+		ver += " · auto-update off"
+	}
+	prot = append(prot, Dim.Render(ver))
 
 	// Response card.
 	resp := []string{Bold.Render(cfg.PresetName())}

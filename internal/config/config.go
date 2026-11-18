@@ -147,14 +147,20 @@ type Config struct {
 	CleanRecent   bool              `json:"cleanRecent"`
 	CanaryEnabled bool              `json:"canaryEnabled"`
 	InstantFreeze bool              `json:"instantFreeze"` // freeze readers mid-open, before they read (oplocks)
+	AutoUpdate    bool              `json:"autoUpdate"`    // install signed releases automatically (config v2+)
 	InstalledAt   time.Time         `json:"installedAt"`
 	Extra         map[string]any    `json:"extra,omitempty"`
 }
 
+// CurrentConfigVersion 2 added AutoUpdate. Configs written by v1 have no
+// opinion on updates, so they load with AutoUpdate=false and setup asks.
+const CurrentConfigVersion = 2
+
 func Default() *Config {
 	p, _ := PresetByID("balanced")
 	return &Config{
-		Version:       1,
+		Version:       CurrentConfigVersion,
+		AutoUpdate:    true,
 		Preset:        p.ID,
 		Responses:     cloneResponses(p.Responses),
 		PhoneMinTier:  TierWarn,
@@ -229,6 +235,7 @@ func loadConfigFrom(path string) (*Config, error) {
 		return nil, err
 	}
 	c := Default()
+	c.AutoUpdate = false // never switch updates on for a config that didn't choose them
 	if err := json.Unmarshal(b, c); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}

@@ -232,6 +232,7 @@ func (s *server) run(ctx context.Context, ctl <-chan svc.Cmd) error {
 	defer beat.Stop()
 	defer dialRefresh.Stop()
 	s.refreshDial(ctx)
+	go s.updateLoop(ctx)
 
 	for {
 		select {

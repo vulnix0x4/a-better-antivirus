@@ -44,6 +44,7 @@ type Options struct {
 	CanaryEmail  string // non-empty: create canary tokens
 	CleanRecent  bool
 	KeepLearning bool // reconfigure: don't reset an active learning period
+	AutoUpdate   bool // install signed releases automatically
 }
 
 // Step is one unit of work, shown with a spinner by the UI.
@@ -114,7 +115,7 @@ func Steps(o Options) []Step {
 				if paths.Same(self, dst) {
 					continue
 				}
-				if err := copyFile(self, dst); err != nil {
+				if err := CopyFile(self, dst); err != nil {
 					return "", fmt.Errorf("%s: %w", dst, err)
 				}
 			}
@@ -155,6 +156,8 @@ func Steps(o Options) []Step {
 				cfg.PhoneMinTier = o.PhoneMinTier
 			}
 			cfg.CleanRecent = o.CleanRecent
+			cfg.AutoUpdate = o.AutoUpdate
+			cfg.Version = config.CurrentConfigVersion
 			cfg.Baits = nil
 			selected := map[string]bool{}
 			for _, id := range o.Baits {
@@ -178,7 +181,11 @@ func Steps(o Options) []Step {
 			if err := config.SaveSecrets(sec); err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("%s, %d baits", cfg.PresetName(), len(cfg.Baits)), config.SaveConfig(cfg)
+			upd := "auto-update off"
+			if cfg.AutoUpdate {
+				upd = "auto-update on"
+			}
+			return fmt.Sprintf("%s, %d baits, %s", cfg.PresetName(), len(cfg.Baits), upd), config.SaveConfig(cfg)
 		}},
 		{Name: "Turning on Windows file auditing", Run: func() (string, error) {
 			err := config.UpdateState(func(st *config.State) error {
@@ -352,7 +359,8 @@ func plantBaits(cfg *config.Config, sec *config.Secrets) (string, error) {
 	return fmt.Sprintf("%d planted, %d removed", created, removed), nil
 }
 
-func copyFile(src, dst string) error {
+// CopyFile installs src at dst, moving a running dst out of the way first.
+func CopyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return err

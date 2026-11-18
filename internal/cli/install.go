@@ -20,6 +20,7 @@ type installFlags struct {
 	canaryEmail string
 	ntfyTopic   string
 	baits       []string
+	autoUpdate  bool
 }
 
 func theme() *huh.Theme { return ui.Theme() }
@@ -32,7 +33,8 @@ func installCmd() *cobra.Command {
 		Long:  "Installs A Better Antivirus with a guided setup. Run it again any time to change settings.",
 		Example: "  aba install\n" +
 			"  aba install --yes --preset balanced --learning 3\n" +
-			"  aba install --yes --preset strict --ntfy-topic my-secret-topic",
+			"  aba install --yes --preset strict --ntfy-topic my-secret-topic\n" +
+			"  aba install --yes --auto-update=false",
 		RunE: func(cmd *cobra.Command, args []string) error { return runInstall(false, f) },
 	}
 	c.Flags().BoolVarP(&f.yes, "yes", "y", false, "non-interactive: use defaults and flags")
@@ -41,6 +43,7 @@ func installCmd() *cobra.Command {
 	c.Flags().StringVar(&f.canaryEmail, "canary-email", "", "create canary tokens that email this address")
 	c.Flags().StringVar(&f.ntfyTopic, "ntfy-topic", "", "send phone alerts to this ntfy.sh topic")
 	c.Flags().StringSliceVar(&f.baits, "baits", nil, "bait IDs to plant (default: recommended); see `aba bait catalog`")
+	c.Flags().BoolVar(&f.autoUpdate, "auto-update", true, "install new signed releases automatically (--auto-update=false to turn off)")
 	return c
 }
 
@@ -76,7 +79,7 @@ func runInstall(reconfigure bool, f installFlags) error {
 
 	var o install.Options
 	if f.yes {
-		o = install.Options{Preset: f.preset, LearningDays: f.learning, CanaryEmail: f.canaryEmail, CleanRecent: true, PhoneMinTier: config.TierWarn}
+		o = install.Options{Preset: f.preset, LearningDays: f.learning, CanaryEmail: f.canaryEmail, CleanRecent: true, PhoneMinTier: config.TierWarn, AutoUpdate: f.autoUpdate}
 		if f.ntfyTopic != "" {
 			o.Phone = config.PhoneConfig{Kind: "ntfy", Ntfy: config.NtfyConfig{Server: "https://ntfy.sh", Topic: f.ntfyTopic}}
 		} else if sec, err := config.LoadSecrets(); err == nil {

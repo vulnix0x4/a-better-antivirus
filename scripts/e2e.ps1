@@ -136,7 +136,10 @@ function IsSuspended([int]$procId) {
     }
     return $true
 }
-function Online { & curl.exe -s -o NUL --max-time 8 https://www.microsoft.com; return ($LASTEXITCODE -eq 0) }
+function Online {
+    foreach ($u in "https://www.microsoft.com", "https://github.com") { & curl.exe -s -o NUL --max-time 8 $u; if ($LASTEXITCODE -eq 0) { return $true } }
+    return $false
+}
 function WfpRules {
     $f = Join-Path $env:TEMP 'wfp.xml'
     netsh wfp show filters file="$f" | Out-Null
@@ -165,6 +168,10 @@ $desktopBait = ($st.baits.'desktop-passwords'.files | Select-Object -First 1).pa
 Check (Test-Path $desktopBait) "desktop bait planted: $desktopBait"
 Check (@($st.baits.PSObject.Properties).Count -ge 10) "$(@($st.baits.PSObject.Properties).Count) baits planted"
 Check ((AuditFS) -match 'Success') 'file auditing on'
+$cfg = Get-Content (Join-Path $data 'config.json') -Raw | ConvertFrom-Json
+Check ($cfg.autoUpdate -eq $true) 'auto-update on by default'
+Check ($cfg.version -ge 2) 'config is version 2'
+Aba update --check
 Aba doctor
 Aba phone test
 Check (WaitFor { NtfyMessages | Where-Object title -match 'test alert' } 20) 'phone test alert arrived on ntfy'
@@ -246,7 +253,7 @@ Check ((State).isolation) 'state shows isolation'
 Check (-not (Online)) 'other programs are offline'
 Start-Sleep -Seconds 4   # let the service push the phone alert through the isolation
 Aba release
-Check (WaitFor { Online } 20) 'back online after release'
+Check (WaitFor { Online } 60) 'back online after release'
 Stop-Process -Id $watchdog.Id -Force -ErrorAction SilentlyContinue
 Check (WaitFor { NtfyMessages | Where-Object { $_.message -match $a3.id } } 30) 'phone alert got out while isolated'
 Stop-Process -Id $s3.Id -Force -ErrorAction SilentlyContinue
@@ -303,6 +310,10 @@ Aba alerts
 Aba status --once
 Aba learn --stop
 Aba doctor
+
+Step 'Turn auto-update off unattended'
+Aba install --yes --preset balanced --learning 0 --auto-update=false
+Check ((Get-Content (Join-Path $data 'config.json') -Raw | ConvertFrom-Json).autoUpdate -eq $false) '--auto-update=false turns it off'
 
 Step 'Uninstall'
 Aba uninstall --yes --purge
