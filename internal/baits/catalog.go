@@ -35,6 +35,10 @@ type Spec struct {
 	Markers   func(u config.UserInfo) []string
 	OwnerExes []string // genuine executables (lowercase)
 	Signer    string   // substring of the genuine app's signer
+	// SharedSDK: the file sits where a vendor SDK's default credential lookup
+	// reads on startup, so many legitimate signed apps touch it. Signed,
+	// non-script readers are logged but not alerted; everything else trips it.
+	SharedSDK bool
 	// RequiresAny: this bait lives inside one of these (e.g. MetaMask inside a fake browser).
 	RequiresAny []string
 	Files       func(u config.UserInfo) []FileSpec
@@ -336,6 +340,8 @@ var Catalog = []Spec{
 		Root:        func(u config.UserInfo) string { return j(u.Profile, ".aws") },
 		Markers:     func(u config.UserInfo) []string { return []string{j(pf(), `Amazon\AWSCLIV2\aws.exe`)} },
 		OwnerExes:   []string{"aws.exe"}, Signer: "Amazon",
+		// Every AWS SDK looks here on startup (OpenCode, Claude Code, VS Code, Terraform…).
+		SharedSDK: true,
 		Files: func(u config.UserInfo) []FileSpec {
 			return []FileSpec{
 				{Path: j(u.Profile, ".aws", "credentials"), Audit: true, Text: true, Gen: genAWSCredentials},

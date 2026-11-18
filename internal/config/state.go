@@ -32,6 +32,7 @@ type State struct {
 	Health           []HealthItem          `json:"health,omitempty"`
 	Persona          map[string]string     `json:"persona,omitempty"` // fake identity shared by all baits
 	Update           *UpdateStatus         `json:"update,omitempty"`
+	LearningNotice   time.Time             `json:"learningNotice,omitempty"` // LearningUntil we already announced the end of
 }
 
 // UpdateStatus records what the auto-updater last did.

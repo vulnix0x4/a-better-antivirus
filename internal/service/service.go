@@ -267,6 +267,7 @@ func (s *server) run(ctx context.Context, ctl <-chan svc.Cmd) error {
 			s.safe("health check", func() { s.healthCheck(false) })
 		case <-health.C:
 			s.safe("health check", func() { s.healthCheck(false) })
+			s.safe("learning check", s.learningCheck)
 		case <-beat.C:
 			s.saveBookmark()
 		case <-dialRefresh.C:

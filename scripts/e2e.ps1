@@ -237,6 +237,23 @@ Check (-not (IsSuspended $s2b.Id)) 'ignored program not frozen'
 Stop-Process -Id $s2b.Id -Force -ErrorAction SilentlyContinue
 Aba ignore remove 1
 
+Step 'Learning mode still stops critical; one-click trust (the popup''s "It''s mine")'
+Aba install --yes --preset balanced --learning 3 --ntfy-topic $topic
+$s5 = Stealer 'devtool' $desktopBait
+$a5 = AlertFor $s5.Id
+Check ($a5 -and (Did $a5 'freeze')) 'critical reader frozen during learning mode'
+Aba trust $a5.id
+Check (WaitFor { -not (IsSuspended $s5.Id) } 5) 'trust unfroze it'
+Check ((& $Aba ignore list | Out-String) -match 'devtool') 'trust added an ignore rule'
+Stop-Process -Id $s5.Id -Force -ErrorAction SilentlyContinue
+$before = @(Alerts).Count
+$s5b = Stealer 'devtool' $desktopBait
+Start-Sleep -Seconds 6
+Check (@(Alerts).Count -eq $before) 'trusted program no longer alerts'
+Stop-Process -Id $s5b.Id -Force -ErrorAction SilentlyContinue
+Aba ignore remove 1
+Aba install --yes --preset balanced --learning 0 --ntfy-topic $topic
+
 Step 'Release everything'
 Aba release
 $st = State

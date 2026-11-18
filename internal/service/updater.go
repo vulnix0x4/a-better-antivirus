@@ -10,6 +10,7 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
+	"github.com/vulnix0x4/a-better-antivirus/internal/session"
 	"github.com/vulnix0x4/a-better-antivirus/internal/update"
 )
 
@@ -26,6 +27,29 @@ func (s *server) updateLoop(ctx context.Context) {
 		s.safe("update check", func() { s.checkForUpdate(ctx) })
 		wait = 24*time.Hour + rand.N(2*time.Hour)
 	}
+}
+
+// learningCheck announces, once, that learning mode has ended (only when it
+// actually changes something, i.e. non-critical readers have responses).
+func (s *server) learningCheck() {
+	s.mu.Lock()
+	cfg := s.cfg
+	s.mu.Unlock()
+	if cfg == nil || cfg.LearningUntil.IsZero() || cfg.Learning(time.Now()) || !cfg.LearningMatters() {
+		return
+	}
+	st, err := config.LoadState()
+	if err != nil || st.LearningNotice.Equal(cfg.LearningUntil) {
+		return
+	}
+	if time.Since(cfg.LearningUntil) > 7*24*time.Hour {
+		// Ended long ago (service was off): just record it, no stale toast.
+	} else if n, err := session.LaunchInActiveSessions(s.cliExe, "notify", "--learning-ended"); err != nil || n == 0 {
+		return // nobody signed in yet: try again at the next check
+	}
+	until := cfg.LearningUntil
+	config.UpdateState(func(st *config.State) error { st.LearningNotice = until; return nil })
+	s.log.Printf("learning mode ended (%s); user notified", until.Format(time.RFC3339))
 }
 
 func recordUpdate(latest, result string) {

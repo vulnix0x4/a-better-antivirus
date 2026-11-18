@@ -126,7 +126,8 @@ When something trips:
 
 ```
 aba kill <id>    it's malware: kill what's frozen (it stays blocked)
-aba resume <id>  it's yours: unfreeze it, restore its internet, optionally ignore it
+aba trust <id>   it's yours: undo everything and never alert on it again
+aba resume <id>  unfreeze it and restore its internet, without trusting it
 aba release      undo all responses: network back, everything unfrozen/unblocked
 ```
 
@@ -144,9 +145,11 @@ aba uninstall [--purge]
 
 **Don't open your bait files**: that's a read. Use `aba bait show <id>` instead; it prints the content without touching the file. If you do open one, Windows adds it to *Recent files*, and apps like Copilot then read it (that's how we found out). ABA removes those shortcuts automatically.
 
-## Learning mode
+## When it's one of your apps
 
-New installs start with 3 days of learning mode: you get alerts, but nothing is frozen or blocked. Backup tools, sync clients and indexers sometimes read files, and `aba learn` turns what they did into ignore rules (pinned to the program's path *and* its code-signing publisher, so malware can't impersonate them).
+Every alert asks **"Is this program yours?"** One click on *It's mine* undoes anything ABA did (unfreezes it, restores its internet) and stops alerting on that program, with a rule pinned to its path *and* its code-signing publisher so malware can't impersonate it. The same thing from a terminal: `aba trust <alert-id>`. A program that keeps touching a bait without you answering only pops up once every 12 hours; the rest goes to `aba alerts`.
+
+**Learning mode** (Strict and custom setups, 3 days by default): critical threats are stopped from minute one, but merely suspicious programs only alert, so you can mark your own apps before Strict starts freezing them. You get a notification when it ends. `aba learn` lists everything that tripped, to trust several at once.
 
 ## Phone alerts
 
@@ -170,7 +173,8 @@ So a swapped release file, a compromised mirror or a proxy can't get code onto y
 - **Instant freeze is deliberately cautious.** It skips programs running as administrator and anything it can't pinpoint with certainty; those are still caught by the event-log path, just a little later.
 - **Admin malware.** Malware running as administrator can stop the service, clear the audit policy or remove filters. ABA alerts if auditing is switched off, but it can't defend against an attacker who already owns the machine.
 - **Desktop popups need you to be signed in.** Detections are always logged and phone alerts always go out, and responses happen either way.
-- **Some legit software reads files** (backup, sync, search tools). Learning mode and ignore rules handle that.
+- **Some legit software reads files** (backup, sync, search tools). One click on *It's mine* handles that.
+- **`~/.aws/credentials` is read by every AWS SDK** (OpenCode, Claude Code, VS Code, Terraform…), so a *signed* program reading it is only logged. Unsigned programs, script hosts and runtimes still trip it, and the other baits are unaffected.
 - **Low profile, not hidden.** The service is called "File Access Monitor" so it doesn't advertise itself to malware that checks for honeypots, but it's fully visible to you.
 
 ## What gets changed on your PC

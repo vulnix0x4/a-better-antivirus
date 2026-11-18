@@ -178,6 +178,35 @@ func resumeCmd() *cobra.Command {
 	return c
 }
 
+// trustCmd is the one-click "it's mine" from an alert: undo anything done to
+// the program and stop alerting on it (rule pinned to its path + signer).
+func trustCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "trust <alert-id>",
+		Short: "It's yours: undo any response and never alert on that program again",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireAdmin(); err != nil {
+				return err
+			}
+			a, err := alerts.Load(args[0])
+			if err != nil {
+				return err
+			}
+			if a.Process == nil || a.Process.Image == "" {
+				return exitf("alert %s has no program to trust", a.ID)
+			}
+			rep, err := respond.Resume(a.ID)
+			printReport(rep)
+			if err != nil {
+				return err
+			}
+			alerts.Update(a.ID, func(x *alerts.Alert) { x.Status, x.Note = "resolved", "you trusted this program" })
+			return addIgnore(ruleFor(a))
+		},
+	}
+}
+
 func ruleFor(a *alerts.Alert) config.IgnoreRule {
 	r := config.IgnoreRule{Path: classify.GeneralizePath(a.Process.Image), Note: "added " + time.Now().Format("2006-01-02")}
 	if a.Process.Signature.Valid {
@@ -473,7 +502,7 @@ func learnCmd() *cobra.Command {
 			fmt.Println(ui.Banner("learn"))
 			fmt.Println()
 			if cfg.Learning(time.Now()) {
-				fmt.Println(ui.Warn.Render("Learning mode: " + ui.Until(cfg.LearningUntil) + ". Nothing is blocked yet."))
+				fmt.Println(ui.Warn.Render("Learning mode: " + ui.Until(cfg.LearningUntil) + ". Critical threats are stopped; suspicious ones only alert for now."))
 			} else {
 				fmt.Println(ui.Dim.Render("Learning mode is off. ") + ui.Hint("Turn it back on:", "aba learn --extend 3"))
 			}
@@ -778,10 +807,24 @@ func phoneCmd() *cobra.Command {
 // ---- notify (runs in the user's session, started by the service) ----
 
 func notifyCmd() *cobra.Command {
-	var demo bool
+	var demo, learningEnded bool
 	c := &cobra.Command{
 		Use: "notify <alert-id>", Hidden: true, Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if learningEnded {
+				n := 0
+				if cfg, err := config.LoadConfig(); err == nil {
+					n = len(cfg.Ignore)
+				}
+				body := "From now on suspicious programs get the full response, not just critical ones."
+				if n > 0 {
+					body += fmt.Sprintf(" %d program(s) you trusted stay allowed.", n)
+				}
+				body += " Caught something of yours? Click \"It's mine\" on the alert."
+				notify.Toast("ABA: learning mode is over", body)
+				time.Sleep(3 * time.Second)
+				return nil
+			}
 			if demo {
 				// Preview the alert UI with fake data; the buttons do nothing.
 				a := demoAlert()
@@ -797,7 +840,9 @@ func notifyCmd() *cobra.Command {
 				return err
 			}
 			notify.Toast("ABA: "+a.Title, a.Summary)
-			quiet := !a.Test && (a.Tier == config.TierInfo || (a.Learning && a.Tier != config.TierCritical))
+			// Info is just noted. Everything else (learning alerts included) gets
+			// the popup, so marking an app as yours is one click.
+			quiet := !a.Test && a.Tier == config.TierInfo
 			if quiet {
 				time.Sleep(3 * time.Second) // let the toast process start before we exit
 				return nil
@@ -811,6 +856,8 @@ func notifyCmd() *cobra.Command {
 		},
 	}
 	c.Flags().BoolVar(&demo, "demo", false, "show a sample alert (nothing is installed or changed)")
+	c.Flags().BoolVar(&learningEnded, "learning-ended", false, "")
+	c.Flags().MarkHidden("learning-ended")
 	return c
 }
 

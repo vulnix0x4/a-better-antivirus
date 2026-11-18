@@ -127,8 +127,8 @@ func runInstall(reconfigure bool, f installFlags) error {
 		ui.Good.Bold(true).Render("A Better Antivirus is armed."),
 		"",
 	}
-	if cfg != nil && cfg.Learning(timeNow()) {
-		lines = append(lines, ui.Warn.Render("Learning mode is on ("+ui.Until(cfg.LearningUntil)+"): you'll get alerts, nothing gets blocked."))
+	if cfg != nil && cfg.Learning(timeNow()) && cfg.LearningMatters() {
+		lines = append(lines, ui.Warn.Render("Learning mode is on ("+ui.Until(cfg.LearningUntil)+"): critical threats are stopped, suspicious programs only alert. Answer \"It's mine\" on an alert to trust an app."))
 		lines = append(lines, "")
 	}
 	lines = append(lines,

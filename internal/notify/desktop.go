@@ -128,7 +128,7 @@ func ShowPopup(a *alerts.Alert, cli string) {
 	case a.Test:
 		messageBox(title, body+"\nThis was a test. Everything worked.", mbOK|mbIconInfo)
 	case frozen:
-		text := body + "\nWhat should happen to it?\n\nYes = Kill it (recommended if you didn't do this)\nNo = It's mine: unfreeze it and restore its internet\nCancel = Decide later (it stays frozen)"
+		text := body + "\nWhat should happen to it?\n\nYes = Kill it (recommended if you didn't do this)\nNo = It's mine: unfreeze it and trust it from now on\nCancel = Decide later (it stays frozen)"
 		if isolated {
 			text += "\n\nYour PC is isolated from the network. When it's safe, run `aba release` as admin."
 		}
@@ -139,7 +139,7 @@ func ShowPopup(a *alerts.Alert, cli string) {
 			}
 		case idNo:
 			if cli != "" {
-				RunElevated(cli, "resume", a.ID)
+				RunElevated(cli, "trust", a.ID)
 			}
 		}
 	case isolated:
@@ -149,10 +149,19 @@ func ShowPopup(a *alerts.Alert, cli string) {
 				RunElevated(cli, "release")
 			}
 		}
-	case a.Tier == config.TierCritical:
-		messageBox(title, body, mbOK|mbIconError)
+	case a.Kind == alerts.KindDecoyRetired || a.Process == nil || a.Process.Image == "":
+		messageBox(title, body, mbOK|mbIconInfo)
 	default:
-		messageBox(title, body, mbOK|mbIconWarning)
+		// Nothing was done to it: one click to say it's yours.
+		icon := uint32(mbIconWarning)
+		ask := "\nIs this program yours?\n\nYes = It's mine: trust it, no more alerts about it\nNo = Not sure: keep alerting (review later with `aba alerts`)"
+		if !a.Process.Signature.Valid {
+			icon = mbIconError
+			ask += "\n\nIt isn't signed by any publisher. Only say Yes if you built or installed it yourself."
+		}
+		if messageBox(title, body+ask, mbYesNo|icon) == idYes && cli != "" {
+			RunElevated(cli, "trust", a.ID)
+		}
 	}
 }
 

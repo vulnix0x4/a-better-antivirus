@@ -131,13 +131,61 @@ func TestStrictIsolates(t *testing.T) {
 	}
 }
 
-func TestLearningModeTakesNoAction(t *testing.T) {
+func TestLearningModeStillStopsCritical(t *testing.T) {
 	e, f := setup("strict")
 	e.cfg.LearningUntil = time.Now().Add(time.Hour)
 	e.HandleAccess(ev(300, `C:\Users\bob\Downloads\crack.exe`, desktopBait, 1))
 	a := only(f)
-	if len(f.suspended) != 0 || f.isolated != 0 || len(a.Actions) != 0 || !a.Learning {
-		t.Fatalf("learning mode acted: %+v", a)
+	if len(f.suspended) == 0 || f.isolated != 1 || a.Learning {
+		t.Fatalf("critical reader must be stopped even while learning: %+v", a)
+	}
+}
+
+func TestLearningModeHoldsBackWarn(t *testing.T) {
+	e, f := setup("strict") // strict freezes warn-tier readers
+	e.cfg.LearningUntil = time.Now().Add(time.Hour)
+	img := `C:\Users\bob\AppData\Local\Programs\SyncTool\sync.exe`
+	f.sigs[img] = authenticode.Result{Signed: true, Valid: true, Signer: "Sync Corp"}
+	e.HandleAccess(ev(300, img, desktopBait, 1))
+	a := only(f)
+	if a.Tier != config.TierWarn || len(f.state.Frozen) != 0 || len(a.Actions) != 0 || !a.Learning {
+		t.Fatalf("learning mode should only alert on warn: %+v", a)
+	}
+	if len(f.desktop) != 1 {
+		t.Fatal("learning alerts must still reach the desktop (one-click trust)")
+	}
+}
+
+func TestSignedSDKReadOfAWSIsNotAnAlert(t *testing.T) {
+	e, f := setup("balanced")
+	aws := `C:\Users\bob\.aws\credentials`
+	st := config.NewState()
+	st.Baits["aws"] = &config.BaitState{ID: "aws", Name: "AWS credentials", Files: []config.BaitFile{{Path: aws, Audit: true}}}
+	e.Configure(e.cfg, st)
+	oc := `C:\Users\bob\AppData\Roaming\npm\node_modules\@opencode\cli\bin\opencode.exe`
+	f.sigs[oc] = authenticode.Result{Signed: true, Valid: true, Signer: "Anomaly Innovations, Inc"}
+	e.HandleAccess(ev(400, oc, aws, 1))
+	if len(f.saved) != 0 {
+		t.Fatalf("signed SDK user reading ~/.aws must not alert: %+v", only(f))
+	}
+	e.HandleAccess(ev(401, `C:\Users\bob\AppData\Local\Temp\x\stealer.exe`, aws, 1))
+	if a := only(f); a == nil || a.Tier != config.TierCritical {
+		t.Fatalf("unsigned reader of ~/.aws must still be critical: %+v", a)
+	}
+}
+
+func TestRepeatAlertsDontPopUpAgain(t *testing.T) {
+	e, f := setup("balanced") // warn = alert only
+	img := `C:\Users\bob\AppData\Local\Programs\Tool\tool.exe`
+	f.sigs[img] = authenticode.Result{Signed: true, Valid: true, Signer: "Tool Inc"}
+	e.HandleAccess(ev(500, img, desktopBait, 1))
+	e.HandleAccess(ev(501, img, desktopBait, 1))
+	if len(f.saved) != 2 || len(f.desktop) != 1 {
+		t.Fatalf("want 2 alerts saved, 1 notified; got %d saved, %d notified", len(f.saved), len(f.desktop))
+	}
+	e.HandleAccess(ev(502, `C:\Users\bob\AppData\Local\Temp\x\stealer.exe`, desktopBait, 1))
+	if len(f.desktop) != 2 {
+		t.Fatal("a different program must still notify")
 	}
 }
 
@@ -218,8 +266,8 @@ func TestInstantFreezeDecisions(t *testing.T) {
 		t.Error("never ourselves")
 	}
 	e.cfg.LearningUntil = time.Now().Add(time.Hour)
-	if e.DecideInstant(100, desktopBait) {
-		t.Error("learning mode must not freeze")
+	if !e.DecideInstant(100, desktopBait) {
+		t.Error("learning mode must still freeze critical readers")
 	}
 	e.cfg.LearningUntil = time.Time{}
 	e.cfg.InstantFreeze = false

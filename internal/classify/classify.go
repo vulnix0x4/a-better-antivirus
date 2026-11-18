@@ -23,6 +23,7 @@ type Bait struct {
 	ID          string
 	OwnerExes   []string // genuine app executables for a decoy (lowercase)
 	OwnerSigner string   // substring of the genuine app's signer
+	SharedSDK   bool     // read by a vendor SDK's default credential lookup (see baits.Spec)
 }
 
 type Verdict struct {
@@ -168,6 +169,14 @@ func (c *Classifier) decide(image string, pid uint32, bait Bait, sig *authentico
 		strings.Contains(strings.ToLower(signer), strings.ToLower(bait.OwnerSigner)) {
 		return Verdict{Tier: config.TierInfo, DecoyOwner: true,
 			Reasons: []string{"the genuine " + signer + " app read its own (decoy) data: it looks like you installed it, so this decoy will be retired"}}
+	}
+
+	// Credential files every SDK reads on startup (~/.aws): a validly signed
+	// app doing that is normal. Unsigned programs, script hosts and runtimes
+	// still trip it, which is what stealers are.
+	if sig != nil && valid && bait.SharedSDK && !lolbins[name] && !runtimes[name] {
+		return Verdict{Tier: config.TierInfo, Ignored: true,
+			Reasons: []string{"signed program (" + signer + ") doing the standard SDK credential lookup"}}
 	}
 
 	sigNote := "signature not checked yet"

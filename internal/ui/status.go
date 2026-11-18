@@ -119,8 +119,8 @@ func RenderStatus(d StatusData) string {
 	resp := []string{Bold.Render(cfg.PresetName())}
 	resp = append(resp, Dim.Render("critical ")+actionList(cfg.Responses[config.TierCritical]))
 	resp = append(resp, Dim.Render("warn     ")+actionList(cfg.Responses[config.TierWarn]))
-	if cfg.Learning(time.Now()) {
-		resp = append(resp, Warn.Render("learning mode, "+Until(cfg.LearningUntil))+Dim.Render(": no blocking"))
+	if cfg.Learning(time.Now()) && cfg.LearningMatters() {
+		resp = append(resp, Warn.Render("learning mode, "+Until(cfg.LearningUntil))+Dim.Render(": only critical is stopped"))
 	}
 	if st != nil && st.Isolation != nil {
 		resp = append(resp, Bad.Render("network: ISOLATED"))

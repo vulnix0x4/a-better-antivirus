@@ -193,12 +193,26 @@ func (c *Config) Learning(t time.Time) bool {
 	return !c.LearningUntil.IsZero() && t.Before(c.LearningUntil)
 }
 
-// ActionsFor returns the configured actions for a tier at time t (none while learning).
+// ActionsFor returns the configured actions for a tier at time t. Learning
+// mode only holds back responses below critical: unsigned programs from user
+// folders and script hosts are almost never legit, so they're stopped from
+// minute one, and a mistake is one click to undo ("It's mine").
 func (c *Config) ActionsFor(t Tier, now time.Time) []Action {
-	if c.Learning(now) {
+	if c.Learning(now) && t != TierCritical {
 		return nil
 	}
 	return c.Responses[t]
+}
+
+// LearningMatters reports whether learning mode changes anything with the
+// current responses (only when non-critical readers have actions, e.g. Strict).
+func (c *Config) LearningMatters() bool {
+	for t, acts := range c.Responses {
+		if t != TierCritical && len(acts) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func Has(actions []Action, a Action) bool {

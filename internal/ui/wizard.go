@@ -185,9 +185,11 @@ func RunWizard(in WizardInput) (install.Options, bool, error) {
 		).WithHideFunc(func() bool { return o.Preset != "custom" }),
 		huh.NewGroup(
 			huh.NewSelect[string]().Title("Start in learning mode?").
-				Description("Learning mode alerts but never blocks, and suggests rules for legit apps that touch baits\n(backup tools, sync clients). Review with `aba learn`.").
+				Description("Critical threats (unsigned programs from Temp/Downloads, script hosts) are stopped either way.\n"+
+					"Learning mode only holds back the response to merely suspicious programs, so a legit app\n"+
+					"(backup tool, sync client) just triggers an alert you can answer with one click: \"It's mine\".").
 				Options(learnOpts...).Value(&learning),
-		),
+		).WithHideFunc(func() bool { return !warnResponds(o.Preset, warnActs) }),
 		huh.NewGroup(
 			huh.NewSelect[string]().Title("Phone alerts").
 				Description("Get alerts even when you're away. They're sent before isolation kicks in, and still\nget out while the PC is isolated.").
@@ -274,6 +276,9 @@ func RunWizard(in WizardInput) (install.Options, bool, error) {
 			o.Responses[config.TierCritical] = append(o.Responses[config.TierCritical], config.Action(a))
 		}
 	}
+	if !warnResponds(o.Preset, warnActs) && learning != "keep" {
+		learning = "0" // nothing for learning mode to hold back with this response
+	}
 	if learning == "keep" {
 		o.KeepLearning = true
 	} else {
@@ -300,6 +305,16 @@ func RunWizard(in WizardInput) (install.Options, bool, error) {
 		o.CanaryEmail = strings.TrimSpace(canaryEmail)
 	}
 	return o, true, nil
+}
+
+// warnResponds reports whether suspicious (warn) readers get any response
+// beyond an alert; only then does learning mode change anything.
+func warnResponds(preset string, customWarn []string) bool {
+	if preset == "custom" {
+		return len(customWarn) > 0
+	}
+	p, ok := config.PresetByID(preset)
+	return ok && len(p.Responses[config.TierWarn]) > 0
 }
 
 func validURL(s string) error {

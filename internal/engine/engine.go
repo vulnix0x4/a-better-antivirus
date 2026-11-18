@@ -73,6 +73,7 @@ type Engine struct {
 	baitNames  map[string]string
 	incidents  map[uint32]*incident
 	claimed    map[uint32]time.Time // PIDs the instant path is handling
+	seen       map[string]time.Time // program|bait -> last notification, for alerts with no action
 }
 
 type incident struct {
@@ -85,7 +86,7 @@ type incident struct {
 const window = 2 * time.Minute
 
 func New(ops Ops, selfPID uint32) *Engine {
-	return &Engine{Ops: ops, SelfPID: selfPID, incidents: map[uint32]*incident{}, claimed: map[uint32]time.Time{}}
+	return &Engine{Ops: ops, SelfPID: selfPID, incidents: map[uint32]*incident{}, claimed: map[uint32]time.Time{}, seen: map[string]time.Time{}}
 }
 
 // Configure (re)loads config and the bait index.
@@ -212,7 +213,7 @@ func (e *Engine) HandleOpen(pid uint32, path string, at time.Time, frozen []uint
 func baitRef(id string) classify.Bait {
 	b := classify.Bait{ID: id}
 	if s, ok := baits.ByID(id); ok {
-		b.OwnerExes, b.OwnerSigner = s.OwnerExes, s.Signer
+		b.OwnerExes, b.OwnerSigner, b.SharedSDK = s.OwnerExes, s.Signer, s.SharedSDK
 	}
 	return b
 }
@@ -338,7 +339,7 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 
 	a := &alerts.Alert{
 		ID: alerts.NewID(now), Time: now, Kind: alerts.KindRead, Tier: v.Tier, Verdict: v,
-		Learning: learning && len(cfg.Responses[v.Tier]) > 0, Test: test, Status: "open",
+		Learning: learning && v.Tier != config.TierCritical && len(cfg.Responses[v.Tier]) > 0, Test: test, Status: "open",
 		Baits:   []alerts.BaitHit{hit},
 		Process: &alerts.Process{PID: oa.ProcessID, Image: image, User: oa.User, Signature: sig},
 	}
@@ -442,6 +443,12 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 	}
 	e.mu.Unlock()
 
+	if !test && len(a.Actions) == 0 && !v.DecoyOwner && e.repeat(image, baitID, now) {
+		// Same program, same bait, nothing done about it: it's in the history,
+		// but don't pop up on every launch of an app you haven't marked yet.
+		e.Ops.Logf("alert %s: repeat of %s reading %s, not notified again", a.ID, image, baitID)
+		return
+	}
 	e.Ops.NotifyDesktop(a)
 	if test || v.Tier.Rank() >= cfg.PhoneMinTier.Rank() {
 		e.Ops.NotifyPhone(a)
@@ -465,6 +472,21 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 		})
 	}
 	e.Ops.Logf("alert %s: %s [%s] actions=%d latency=%dms (delivery %dms)", a.ID, a.Title, a.Tier, len(a.Actions), a.LatencyMS, a.DeliveryMS)
+}
+
+// repeatWindow is how long a no-action alert for the same program and bait
+// stays quiet after its first notification.
+const repeatWindow = 12 * time.Hour
+
+func (e *Engine) repeat(image, baitID string, now time.Time) bool {
+	key := strings.ToLower(image) + "|" + baitID
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if last, ok := e.seen[key]; ok && now.Sub(last) < repeatWindow {
+		return true
+	}
+	e.seen[key] = now
+	return false
 }
 
 func (e *Engine) describe(a *alerts.Alert, v classify.Verdict) {

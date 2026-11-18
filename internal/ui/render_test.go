@@ -37,6 +37,7 @@ func sampleAlert() *alerts.Alert {
 
 func TestRenderDashboardAndAlert(t *testing.T) {
 	cfg := config.Default()
+	cfg.ApplyPreset("strict") // learning mode only shows when it changes something
 	cfg.LearningUntil = time.Now().Add(50 * time.Hour)
 	st := config.NewState()
 	st.Heartbeat = time.Now().Add(-40 * time.Second)
