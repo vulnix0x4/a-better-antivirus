@@ -1,8 +1,64 @@
+<div align="center">
+
 # A Better Antivirus
 
-> **It's not an antivirus. It's a better one.**
+**It's not an antivirus. It's a better one.**
 
-**Catch infostealers in the act.** A Better Antivirus (ABA) plants convincing fake passwords, crypto wallets and app data on your Windows PC: things only malware would ever read. The moment something touches them, ABA freezes it, cuts its internet and tells you, often before your real data has left the machine.
+Catch infostealers in the act. ABA plants fake passwords, wallets and app data<br>
+that only malware would ever read, and freezes whatever touches them.
+
+[![Release](https://img.shields.io/github/v/release/vulnix0x4/a-better-antivirus?style=flat-square&color=30d158)](https://github.com/vulnix0x4/a-better-antivirus/releases/latest)
+[![Tests](https://img.shields.io/github/actions/workflow/status/vulnix0x4/a-better-antivirus/ci.yml?branch=main&style=flat-square&label=tests)](https://github.com/vulnix0x4/a-better-antivirus/actions/workflows/ci.yml)
+[![Downloads](https://img.shields.io/github/downloads/vulnix0x4/a-better-antivirus/total?style=flat-square&color=blue)](https://github.com/vulnix0x4/a-better-antivirus/releases)
+[![Windows 10/11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6?style=flat-square)](#install)
+[![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)](LICENSE)
+
+<a href="docs/demo.mp4"><img src="docs/demo.gif" alt="A real Discord token stealer, Windows Defender off: ABA freezes it the moment it opens a bait" width="800"></a>
+
+<sub>A real Discord token stealer with Windows Defender off. It went for a fake Discord token and was frozen 158 ms later.<br><a href="docs/demo.mp4">Watch the full video with sound (47 s)</a></sub>
+
+</div>
+
+## Install
+
+In PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/vulnix0x4/a-better-antivirus/main/install.ps1 | iex
+```
+
+It downloads the latest release for your PC, checks it against the release's `SHA256SUMS.txt`, and runs the guided setup (it asks for admin). [Read the script first](install.ps1) if you like; it's 40 lines. Then try it safely:
+
+```powershell
+aba test
+```
+
+<details>
+<summary><b>Other ways to install</b></summary>
+
+**Test VM, no questions asked** (strict mode, no learning period):
+
+```powershell
+$env:ABA_ARGS = 'install --yes --preset strict --learning 0'; irm https://raw.githubusercontent.com/vulnix0x4/a-better-antivirus/main/install.ps1 | iex
+```
+
+**By hand:** download `aba_<version>_windows_amd64.exe` (or `arm64`) from [Releases](https://github.com/vulnix0x4/a-better-antivirus/releases/latest), check its SHA-256 against `SHA256SUMS.txt`, and run it with `install`. Releases aren't code-signed yet, so SmartScreen may warn you: verify the hash first, then use *More info → Run anyway*.
+
+> Only ever paste `irm … | iex` commands from sources you trust: it's also how many stealers get installed ("paste this to fix your PC"). This one is in the open, short, and refuses to run a download whose checksum doesn't match.
+
+</details>
+
+Despite the name, **keep Windows Defender on.** Antivirus tries to stop malware from running; ABA is the tripwire for when something gets past it, and that's the part antivirus is bad at.
+
+## Why this works
+
+Infostealers (Lumma, RedLine, Vidar, StealC…) are the most common malware on personal PCs. They sweep your browsers, wallets, Discord/Telegram sessions and documents, zip it all up and upload it, usually within seconds. Most of them **collect first and upload at the end**, and collecting means opening files in known places. ABA puts tripwires in exactly those places.
+
+- **Fake files** where file grabbers look: `passwords.txt` on the Desktop, in Documents and in your home folder, a wallet recovery phrase, 2FA backup codes, a KeePass database.
+- **Fake app data for apps you don't use**: Opera, Vivaldi and Yandex browser profiles (with saved passwords and cookies), MetaMask, Exodus, Electrum and Atomic wallets, Telegram sessions, Discord tokens, FileZilla servers, AWS keys. Nothing legitimate ever reads these, because the app isn't installed, so the signal is extremely clean. ABA checks what you actually have installed and never fakes data for those apps. If you install one later, ABA notices and quietly retires that decoy.
+- **Canary tokens** (optional): the fake AWS keys and a link in `passwords.txt` are real [canarytokens.org](https://canarytokens.org) tokens. If a stealer gets your data and someone *uses* them later, you get an email, even if your PC was never online to tell you.
+
+It catches stealers by **what they do**, not by recognising the file, so it works on brand-new ones no antivirus has a signature for yet.
 
 ```
 > aba test        (example output)
@@ -15,16 +71,6 @@
  ✓ Desktop alert sent (shows if you're signed in)
  ✓ Phone alert sent via ntfy
 ```
-
-Despite the name, it doesn't replace your antivirus: **keep Windows Defender on.** Antivirus tries to stop malware from running; ABA is the tripwire for when something gets past it, and that's the part antivirus is bad at.
-
-## Why this works
-
-Infostealers (Lumma, RedLine, Vidar, StealC…) are the most common malware on personal PCs. They don't wait around: they sweep your browsers, wallets, Discord/Telegram sessions and documents, zip it all up and upload it, usually within seconds. Most of them **collect first and upload at the end**, and collecting means opening files in known places. ABA puts tripwires in exactly those places.
-
-- **Fake files** where file grabbers look: `passwords.txt` on the Desktop, in Documents and in your home folder, a wallet recovery phrase, 2FA backup codes, a KeePass database.
-- **Fake app data for apps you don't use**: Opera, Vivaldi and Yandex browser profiles (with saved passwords and cookies), MetaMask, Exodus, Electrum and Atomic wallets, Telegram sessions, Discord tokens, FileZilla servers, AWS keys. Nothing legitimate ever reads these, because the app isn't installed, so the signal is extremely clean. ABA checks what you actually have installed and never fakes data for those apps. If you install one later, ABA notices and quietly retires that decoy.
-- **Canary tokens** (optional): the fake AWS keys and a link in `passwords.txt` are real [canarytokens.org](https://canarytokens.org) tokens. If a stealer gets your data and someone *uses* them later, you get an email, even if your PC was never online to tell you.
 
 ## How it works
 
@@ -52,7 +98,7 @@ Infostealers (Lumma, RedLine, Vidar, StealC…) are the most common malware on p
   |---|---|
   | Unsigned program in Temp, AppData, Downloads, Desktop… | **critical** |
   | PowerShell, cmd, mshta, rundll32, wscript and similar | **critical** |
-  | Signed app in a user folder, scripting runtimes (Python, Node), network share reads | **warn** |
+  | Signed app in a user folder, scripting runtimes (Python, Node, Java), network share reads | **warn** |
   | Signed, installed software (Program Files, Windows) | **info** |
   | Defender, Windows Search, your ignore rules | ignored |
 
@@ -66,28 +112,10 @@ Infostealers (Lumma, RedLine, Vidar, StealC…) are the most common malware on p
 
   Isolation uses the Windows Filtering Platform (the same engine enterprise "isolate device" uses). It survives reboots so malware can't wait it out, and it still lets ABA's own phone alert through. `aba release` undoes everything.
 
-## Install
-
-In PowerShell:
-
-```powershell
-irm https://raw.githubusercontent.com/vulnix0x4/a-better-antivirus/main/install.ps1 | iex
-```
-
-It downloads the latest release for your PC, checks it against the release's `SHA256SUMS.txt`, and runs the guided setup (it asks for admin). [Read the script first](install.ps1) if you like; it's 40 lines. For a test VM with no questions asked:
-
-```powershell
-$env:ABA_ARGS = 'install --yes --preset strict --learning 0'; irm https://raw.githubusercontent.com/vulnix0x4/a-better-antivirus/main/install.ps1 | iex
-```
-
-**Or by hand:** download `aba_<version>_windows_amd64.exe` from [Releases](../../releases), check its SHA-256 against `SHA256SUMS.txt`, and run it with `install`. Releases aren't code-signed yet, so SmartScreen may warn you: verify the hash first, then use *More info → Run anyway*.
-
-> Only ever paste `irm … | iex` commands from sources you trust: it's also how many stealers get installed ("paste this to fix your PC"). This one is in the open, short, and refuses to run a download whose checksum doesn't match.
-
 ## Everyday use
 
 ```
-aba                  live dashboard
+aba              live dashboard
 aba test         simulate a stealer safely and watch it get caught
 aba alerts       what touched your baits (aba alerts show <id> for everything)
 aba doctor       check everything is armed (--fix to repair)
@@ -105,7 +133,8 @@ aba release      undo all responses: network back, everything unfrozen/unblocked
 Setup:
 
 ```
-aba configure    change baits, response, learning mode, phone alerts, canary tokens
+aba configure    change baits, response, learning mode, phone alerts, updates, canary tokens
+aba update       check for a new version and install it (--check to only look)
 aba bait list | show <id> | add <path> | remove <id> | catalog
 aba ignore list | add <pattern> [--signer X] | remove <n>
 aba instant [on|off]
@@ -122,6 +151,17 @@ New installs start with 3 days of learning mode: you get alerts, but nothing is 
 ## Phone alerts
 
 ntfy (free, no account), Discord webhook, Pushover or email (SMTP with TLS). Secrets are stored DPAPI-encrypted in a file only SYSTEM and Administrators can read. ABA remembers the alert server's IP addresses, so alerts still get out when the PC is isolated and DNS is blocked.
+
+## Updates
+
+Setup asks whether to keep ABA up to date automatically (you can change it any time with `aba configure`, or run `aba update` yourself).
+
+When it's on, the service checks GitHub about once a day. A new version is only installed if:
+
+1. the release's `SHA256SUMS.txt` carries a valid **ed25519 signature** from ABA's release key (the public key is built into ABA), and
+2. the downloaded `.exe` matches its hash in that signed list.
+
+So a swapped release file, a compromised mirror or a proxy can't get code onto your PC. The update swaps the binaries, restarts the service, and **rolls back automatically** if the new version doesn't start. It never downgrades, ignores pre-releases, and never updates in the middle of an incident (while something is frozen or the PC is isolated).
 
 ## Honest limitations
 
@@ -145,7 +185,7 @@ ntfy (free, no account), Discord webhook, Pushover or email (SMTP with TLS). Sec
 | Firewall filters | WFP provider "A Better Antivirus" (only while responding) | ✓ |
 | PATH | adds the program folder | ✓ |
 
-Nothing leaves your PC except phone alerts you set up and, if you opt in, canary token creation (your email is sent to canarytokens.org).
+**What goes over the network:** phone alerts you set up; if you opt in, canary token creation (your email is sent to canarytokens.org); and with automatic updates on, a daily request to `api.github.com` for the latest release. Nothing else, no telemetry.
 
 ## Building
 
@@ -154,8 +194,12 @@ go test ./...
 go build -o dist/aba.exe ./cmd/aba
 ```
 
-Admin-only integration tests (real audit rules, Security log, WFP) run in CI, or locally from an elevated shell with `ABA_INTEGRATION=1 go test ./internal/integration/`.
+Admin-only integration tests (real audit rules, Security log, WFP) run in CI, or locally from an elevated shell with `ABA_INTEGRATION=1 go test ./internal/integration/`. CI also runs a full end-to-end install → fake stealers → freeze/kill/isolate → uninstall on a real Windows machine for every push. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Security
+
+Found a way to bypass or abuse ABA? Please report it privately: see [SECURITY.md](SECURITY.md).
 
 ## License
 
-MIT
+[MIT](LICENSE)

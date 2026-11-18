@@ -34,8 +34,6 @@ signs:
     cmd: go
     args: ["run", "./scripts/sign", "${artifact}", "${signature}"]
     signature: "${artifact}.sig"
-    env:
-      - ABA_SIGNING_KEY={{ .Env.ABA_SIGNING_KEY }}
 
 release:
   header: |
@@ -44,21 +42,24 @@ release:
     > It's not an antivirus. It's a better one.
 
     Plants fake passwords, wallets and app data that only malware would read, and freezes
-    whatever touches them. Windows 10/11, 64-bit.
+    whatever touches them. Windows 10/11, 64-bit (x64 and ARM).
 
-    **Install:** download `aba_{{ .Tag }}_windows_amd64.exe`, check its hash (below), then run
-    `.\aba_{{ .Tag }}_windows_amd64.exe install` (it asks for admin). Try it with `aba test`.
+    **Install** (PowerShell; downloads this release, checks its hash, runs the guided setup):
+    ```powershell
+    irm https://raw.githubusercontent.com/vulnix0x4/a-better-antivirus/main/install.ps1 | iex
+    ```
+    Then try it safely with `aba test`. Already installed with automatic updates on? You'll get
+    this version within a day, or run `aba update` now. What's new: [CHANGELOG.md](https://github.com/vulnix0x4/a-better-antivirus/blob/main/CHANGELOG.md).
 
-    Highlights: instant freeze (caught ~0.1 s after opening a bait), decoys for 18 apps,
-    phone alerts (ntfy, Discord, Pushover, email), strict-mode network isolation, canary
-    tokens, learning mode, full uninstall.
+    [Watch it catch a real Discord token stealer (47 s video)](https://github.com/vulnix0x4/a-better-antivirus/blob/main/docs/demo.mp4)
   footer: |
-    **Verify your download** before running it:
+    **Verify a manual download** before running it:
     ```powershell
     (Get-FileHash .\aba_{{ .Tag }}_windows_amd64.exe -Algorithm SHA256).Hash
     ```
-    and compare with `SHA256SUMS.txt`. Releases aren't code-signed yet, so Windows SmartScreen
-    will warn: click "More info" → "Run anyway" only if the hash matches.
+    and compare with `SHA256SUMS.txt`. `SHA256SUMS.txt.sig` is the ed25519 signature the auto-updater checks
+    before installing anything. Releases aren't code-signed yet, so Windows SmartScreen may warn: click
+    "More info" → "Run anyway" only if the hash matches.
 
 changelog:
   use: github
