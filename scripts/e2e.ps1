@@ -121,7 +121,11 @@ function Did($alert, $action) { [bool]($alert.actions | Where-Object { $_.action
 function Stealer([string]$name, [string]$bait, [switch]$Again) {
     $exe = Join-Path $env:TEMP "$name.exe"
     if (-not $Again) {   # -Again: run the same file again (same fingerprint)
-        Copy-Item $Aba $exe -Force
+        # A previous copy may still be exiting (Stop-Process doesn't wait).
+        for ($i = 0; ; $i++) {
+            try { Copy-Item $Aba $exe -Force -ErrorAction Stop; break }
+            catch { if ($i -ge 30) { throw }; Start-Sleep -Milliseconds 300 }
+        }
         [IO.File]::AppendAllText($exe, [guid]::NewGuid().ToString())
     }
     $procId = & $Medium $exe test-reader $bait
