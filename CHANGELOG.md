@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.4.0
+
+Catching stealers that hide inside other programs, and trust that malware can't reuse.
+
+- **Sweep detection.** A process that reads several different apps' baits within 2 minutes (your password
+  files count as one; browsers, Discord, wallets… each count on their own) is stopped as a stealer, whatever
+  it is: signed, trusted by you, or part of Windows. This catches stealers injected into a legitimate
+  program, which look like that program to every identity check. With instant freeze it's frozen before it
+  can open the third.
+- **Injected-code check.** When a Windows program reads a bait, ABA looks inside it for a whole program
+  running from memory that isn't backed by any file on disk, the footprint of process injection/hollowing.
+  Found: critical, even if you trusted that program.
+- **Windows programs are no longer trusted by default.** Before, any Microsoft-signed program under
+  `C:\Windows` reading a bait was only noted, so a stealer hollowed into `AppLaunch.exe` or injected into
+  `explorer.exe` raised no popup. Now Windows programs in your session are *suspicious* (Windows services and
+  the preview pane stay quiet), and the .NET tools stealers hollow out most (AppLaunch, vbc, csc, jsc,
+  aspnet_compiler, AddInProcess, cvtres, CasPol, ilasm) are critical, like RegAsm and MSBuild already were.
+- **Trust is now as narrow as possible:**
+  - covers only the bait(s) the program was seen reading;
+  - unsigned programs are pinned to that exact file (SHA-256), not just its path;
+  - script hosts and runtimes (`python.exe`, `powershell.exe`, `java.exe`…) are pinned to the exact command
+    line, so trusting one script no longer trusts every script that runtime ever runs.
+  Existing rules keep working as before (all baits).
+- **The frozen popup asks the right question.** "Did you expect it to read this? Games, mods, cheats, cracks
+  and "free" tools never need to, even ones you started yourself." Only signed programs can be trusted
+  permanently in one click from it; anything else is unfrozen that once.
+- **Repeat suppression no longer hides attacks:** script hosts/runtimes and critical alerts always notify.
+- `aba ignore list` and `aba learn` show exactly what each rule covers.
+
 ## v0.3.0
 
 - **One click to trust your own apps.** Every alert now asks "Is this program yours?". *It's mine* undoes

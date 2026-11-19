@@ -14,6 +14,7 @@ package engine
 import (
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -50,6 +51,11 @@ type Ops interface {
 	UserSession(pid uint32) bool // runs in an interactive user session (not session 0)
 	IsSelf(image string) bool    // the executable is ABA itself (same file hash as the service)
 	Elevated(pid uint32) bool    // runs with an elevated (admin) token
+	Hash(image string) string    // SHA-256 of a file (cached)
+	CommandLine(pid uint32) string
+	// InjectedCode looks inside a process for running code that isn't from any
+	// file on disk (a stealer injected into a legitimate program).
+	InjectedCode(pid uint32) (string, bool)
 	ClearTest()
 	Logf(format string, args ...any)
 }
@@ -74,7 +80,21 @@ type Engine struct {
 	incidents  map[uint32]*incident
 	claimed    map[uint32]time.Time // PIDs the instant path is handling
 	seen       map[string]time.Time // program|bait -> last notification, for alerts with no action
+	touched    map[uint32]*sweep    // baits each process opened recently
 }
+
+// sweep is what one process has opened lately. Stealers grab everything they
+// know (browsers, Discord, wallets…) in seconds; a real app only ever touches
+// its own data. So a process that reads several different apps' baits is a
+// stealer, whatever it is or claims to be: a trusted app with code injected
+// into it, a signed program, a Windows component.
+type sweep struct {
+	createTime int64
+	baits      map[string]time.Time
+}
+
+// sweepApps distinct baits within window make a sweep.
+const sweepApps = 3
 
 type incident struct {
 	alert      *alerts.Alert
@@ -86,7 +106,8 @@ type incident struct {
 const window = 2 * time.Minute
 
 func New(ops Ops, selfPID uint32) *Engine {
-	return &Engine{Ops: ops, SelfPID: selfPID, incidents: map[uint32]*incident{}, claimed: map[uint32]time.Time{}, seen: map[string]time.Time{}}
+	return &Engine{Ops: ops, SelfPID: selfPID, incidents: map[uint32]*incident{}, claimed: map[uint32]time.Time{},
+		seen: map[string]time.Time{}, touched: map[uint32]*sweep{}}
 }
 
 // Configure (re)loads config and the bait index.
@@ -94,7 +115,8 @@ func (e *Engine) Configure(cfg *config.Config, st *config.State) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.cfg = cfg
-	e.classifier = &classify.Classifier{Env: classify.DefaultEnv(), Ignore: cfg.Ignore}
+	e.classifier = &classify.Classifier{Env: classify.DefaultEnv(), Ignore: cfg.Ignore,
+		Hash: e.Ops.Hash, CommandLine: e.Ops.CommandLine, UserSession: e.Ops.UserSession}
 	e.index = baits.Index(st)
 	e.baitNames = map[string]string{}
 	for id, b := range st.Baits {
@@ -171,7 +193,11 @@ func (e *Engine) DecideInstantWhy(pid uint32, path string) (bool, string) {
 	if !cfg.InstantFreeze {
 		return false, "instant freeze is off"
 	}
-	v := cls.Final(image, pid, baitRef(baitID), e.Ops.Verify(image))
+	sig := e.Ops.Verify(image)
+	v := cls.Final(image, pid, baitRef(baitID), sig)
+	if swept := e.touch(pid, baitID, time.Now()); len(swept) >= sweepApps && !cls.SweepExempt(image, pid, &sig) {
+		v = e.sweepVerdict(v, swept)
+	}
 	if v.Ignored || v.DecoyOwner {
 		return false, image + " is ignored or the real app"
 	}
@@ -246,9 +272,22 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 		return
 	}
 
+	var swept []string
+	if access == "read" {
+		swept = e.touch(oa.ProcessID, baitID, time.Now())
+		if len(swept) >= sweepApps && !e.sweepable(oa.ProcessID) {
+			swept = nil
+		}
+	}
+
 	e.mu.Lock()
 	cfg, cls, name := e.cfg, e.classifier, e.baitNames[baitID]
 	hit := alerts.BaitHit{ID: baitID, Name: name, Path: oa.ObjectName, Access: access, Time: oa.Time}
+	if inc := e.incidents[oa.ProcessID]; !instant && inc != nil && len(swept) >= sweepApps && inc.alert.Tier != config.TierCritical {
+		// It started out looking harmless and has now read several apps' data:
+		// handle it again as a sweep, with the full response.
+		delete(e.incidents, oa.ProcessID)
+	}
 	// Aggregate repeat hits into the open alert, except for instant catches: a
 	// new freeze always gets its own alert and its own record in state (the
 	// earlier alert may already be resolved, e.g. the user resumed the process).
@@ -298,8 +337,13 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 		return cfg.ActionsFor(t, now)
 	}
 
+	isSweep := len(swept) >= sweepApps
+
 	// 1-2. Instant verdict, freeze first.
 	pre := cls.Prelim(image, oa.ProcessID, ref)
+	if isSweep && !cls.SweepExempt(image, oa.ProcessID, nil) {
+		pre = e.sweepVerdict(pre, swept)
+	}
 	if pre.Ignored && !instant {
 		e.Ops.Logf("ignored %s of %s by %s (%s)", access, oa.ObjectName, image, strings.Join(pre.Reasons, "; "))
 		return
@@ -320,6 +364,19 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 		sig = e.Ops.Verify(image)
 	}
 	v := cls.Final(image, oa.ProcessID, ref, sig)
+	if isSweep && !cls.SweepExempt(image, oa.ProcessID, &sig) {
+		v = e.sweepVerdict(v, swept)
+	}
+	// A Windows program reading app data is how injected stealers look: check
+	// whether it's running code that isn't from any file on disk. (Trust rules
+	// don't skip this; Defender and Windows Search do.)
+	if !test && !v.Builtin && !v.DecoyOwner && v.Tier != config.TierCritical && access == "read" &&
+		cls.WindowsBinary(image) && e.Ops.UserSession(oa.ProcessID) && !e.Ops.Elevated(oa.ProcessID) {
+		if detail, found := e.Ops.InjectedCode(oa.ProcessID); found {
+			v = classify.Verdict{Tier: config.TierCritical,
+				Reasons: append([]string{filepath.Base(image) + " is part of Windows, but " + detail}, v.Reasons...)}
+		}
+	}
 	if v.Ignored {
 		e.Ops.Resume(frozen)
 		e.Ops.Logf("ignored %s of %s by %s (%s)", access, oa.ObjectName, image, strings.Join(v.Reasons, "; "))
@@ -443,7 +500,10 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 	}
 	e.mu.Unlock()
 
-	if !test && len(a.Actions) == 0 && !v.DecoyOwner && e.repeat(image, baitID, now) {
+	// Script hosts and runtimes are never quieted: the next script could be a
+	// different one. Neither are critical alerts.
+	if !test && len(a.Actions) == 0 && !v.DecoyOwner && v.Tier != config.TierCritical &&
+		!classify.ScriptHost(image) && e.repeat(image, baitID, now) {
 		// Same program, same bait, nothing done about it: it's in the history,
 		// but don't pop up on every launch of an app you haven't marked yet.
 		e.Ops.Logf("alert %s: repeat of %s reading %s, not notified again", a.ID, image, baitID)
@@ -472,6 +532,83 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 		})
 	}
 	e.Ops.Logf("alert %s: %s [%s] actions=%d latency=%dms (delivery %dms)", a.ID, a.Title, a.Tier, len(a.Actions), a.LatencyMS, a.DeliveryMS)
+}
+
+// filesUnit stands for all the plain-file baits together (passwords.txt on
+// the Desktop, in Documents…).
+const filesUnit = "files"
+
+// sweepUnit is what a bait counts as in a sweep. Plain files in your folders
+// all count as one: OneDrive, a backup or zipping up Documents legitimately
+// reads them all. Each app's data (a browser, Discord, a wallet) counts on its
+// own: nothing but a backup of AppData or a stealer goes through those.
+func sweepUnit(baitID string) string {
+	if s, ok := baits.ByID(baitID); ok && s.Kind == baits.KindFile {
+		return filesUnit
+	}
+	return baitID
+}
+
+// touch records that pid opened baitID and returns every sweep unit (see
+// sweepUnit) it opened within the window, this one included.
+func (e *Engine) touch(pid uint32, baitID string, now time.Time) []string {
+	ct := e.Ops.CreateTime(pid)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for p, sw := range e.touched {
+		fresh := false
+		for _, t := range sw.baits {
+			fresh = fresh || now.Sub(t) < window
+		}
+		if !fresh {
+			delete(e.touched, p)
+		}
+	}
+	sw := e.touched[pid]
+	if sw == nil || sw.createTime != ct {
+		sw = &sweep{createTime: ct, baits: map[string]time.Time{}}
+		e.touched[pid] = sw
+	}
+	sw.baits[sweepUnit(baitID)] = now
+	var ids []string
+	for id, t := range sw.baits {
+		if now.Sub(t) < window {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+// sweepable: a sweep only counts for ordinary programs in a user session.
+// Services and admin tools (backup, antivirus) are out of reach of a
+// user-level stealer, and `aba test` is a test.
+func (e *Engine) sweepable(pid uint32) bool {
+	if tr := e.Ops.PendingTest(); tr != nil && tr.PID == pid {
+		return false
+	}
+	return e.Ops.UserSession(pid) && !e.Ops.Elevated(pid)
+}
+
+// sweepVerdict turns a verdict into a critical one: the reader went through
+// several apps' data.
+func (e *Engine) sweepVerdict(v classify.Verdict, swept []string) classify.Verdict {
+	e.mu.Lock()
+	var names []string
+	for _, id := range swept {
+		n := e.baitNames[id]
+		switch {
+		case id == filesUnit:
+			n = "your password/recovery files"
+		case n == "":
+			n = id
+		}
+		names = append(names, n)
+	}
+	e.mu.Unlock()
+	why := fmt.Sprintf("it read the data of %d different apps within %d minutes (%s): stealers sweep everything, real apps only touch their own",
+		len(swept), int(window.Minutes()), strings.Join(names, ", "))
+	return classify.Verdict{Tier: config.TierCritical, Swept: swept, Reasons: append([]string{why}, v.Reasons...)}
 }
 
 // repeatWindow is how long a no-action alert for the same program and bait

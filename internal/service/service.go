@@ -360,6 +360,8 @@ func (s *server) Verify(p string) authenticode.Result      { return authenticode
 func (s *server) SuspendTree(pid uint32) ([]uint32, error) { return procinfo.SuspendTree(pid) }
 func (s *server) KillTree(pid uint32) error                { return procinfo.KillTree(pid) }
 func (s *server) Forensics(pid uint32, p *alerts.Process)  { engine.ProcessDetails(pid, p) }
+func (s *server) CommandLine(pid uint32) string            { c, _ := procinfo.CommandLine(pid); return c }
+func (s *server) InjectedCode(pid uint32) (string, bool)   { return procinfo.InjectedCode(pid) }
 func (s *server) BlockProgram(path string) error           { return netguard.BlockProgram(path) }
 func (s *server) Isolate() error                           { return netguard.Isolate(s.selfExe) }
 func (s *server) DisableAdapters() ([]string, error)       { return netguard.DisableAdapters() }
@@ -483,6 +485,14 @@ func (s *server) IsSelf(image string) bool {
 	if selfHash == "" || image == "" {
 		return false
 	}
+	return s.Hash(image) == selfHash
+}
+
+// Hash returns a file's SHA-256, cached by path, size and modification time.
+func (s *server) Hash(image string) string {
+	if image == "" {
+		return ""
+	}
 	key := strings.ToLower(image)
 	if fi, err := os.Stat(image); err == nil {
 		key += fmt.Sprintf("|%d|%d", fi.Size(), fi.ModTime().UnixNano())
@@ -496,7 +506,7 @@ func (s *server) IsSelf(image string) bool {
 		hashCache[key] = h
 		hashCacheMu.Unlock()
 	}
-	return h == selfHash
+	return h
 }
 
 // Elevated reports whether pid runs at high (admin) or system integrity, the

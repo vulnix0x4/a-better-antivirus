@@ -28,10 +28,15 @@ type fakeOps struct {
 	state     *config.State
 	test      *TestRequest
 	images    map[uint32]string
+	hashes    map[string]string
+	cmdlines  map[uint32]string
+	injected  map[uint32]string
+	elevated  map[uint32]bool
 }
 
 func newFake() *fakeOps {
-	return &fakeOps{images: map[uint32]string{}, sigs: map[string]authenticode.Result{}, saved: map[string]*alerts.Alert{}, state: config.NewState()}
+	return &fakeOps{images: map[uint32]string{}, sigs: map[string]authenticode.Result{}, saved: map[string]*alerts.Alert{}, state: config.NewState(),
+		hashes: map[string]string{}, cmdlines: map[uint32]string{}, injected: map[uint32]string{}, elevated: map[uint32]bool{}}
 }
 
 func (f *fakeOps) ImagePath(pid uint32) (string, error) {
@@ -59,12 +64,22 @@ func (f *fakeOps) RetireDecoy(id, why string)                     { f.retired = 
 func (f *fakeOps) PendingTest() *TestRequest                      { return f.test }
 func (f *fakeOps) ClearTest()                                     { f.test = nil }
 func (f *fakeOps) UserSession(uint32) bool                        { return true }
-func (f *fakeOps) Elevated(pid uint32) bool                       { return pid == 777 }
+func (f *fakeOps) Elevated(pid uint32) bool                       { return pid == 777 || f.elevated[pid] }
+func (f *fakeOps) Hash(img string) string                         { return f.hashes[img] }
+func (f *fakeOps) CommandLine(pid uint32) string                  { return f.cmdlines[pid] }
+func (f *fakeOps) InjectedCode(pid uint32) (string, bool)         { d, ok := f.injected[pid]; return d, ok }
 func (f *fakeOps) IsSelf(img string) bool                         { return strings.HasSuffix(strings.ToLower(img), `\aba.exe`) }
 func (f *fakeOps) Logf(string, ...any)                            {}
 func (f *fakeOps) UpdateState(fn func(*config.State) error) error { return fn(f.state) }
 
 const desktopBait = `C:\Users\bob\Desktop\passwords.txt`
+
+const (
+	discordBait  = `C:\Users\bob\AppData\Roaming\discord\Local Storage\leveldb\000005.ldb`
+	awsBait      = `C:\Users\bob\.aws\credentials`
+	chromeBait   = `C:\Users\bob\AppData\Local\Google\Chrome\User Data\Default\Login Data`
+	metamaskBait = `C:\Users\bob\AppData\Local\Google\Chrome\User Data\Default\Local Extension Settings\nkbihfbeogaeaoehlefnkodbefgpgknn\000003.log`
+)
 
 func setup(preset string) (*Engine, *fakeOps) {
 	f := newFake()
@@ -76,6 +91,9 @@ func setup(preset string) (*Engine, *fakeOps) {
 		Files: []config.BaitFile{{Path: desktopBait, Audit: true}}}
 	st.Baits["discord"] = &config.BaitState{ID: "discord", Name: "Discord token store",
 		Files: []config.BaitFile{{Path: `C:\Users\bob\AppData\Roaming\discord\Local Storage\leveldb\000005.ldb`, Audit: true}}}
+	for id, path := range map[string]string{"aws": awsBait, "chrome": chromeBait, "metamask": metamaskBait} {
+		st.Baits[id] = &config.BaitState{ID: id, Name: id + " data", Files: []config.BaitFile{{Path: path, Audit: true}}}
+	}
 	e.Configure(cfg, st)
 	return e, f
 }
@@ -360,5 +378,169 @@ func TestInstantRefreezeIsTracked(t *testing.T) {
 	e.HandleOpen(100, `C:\Users\bob\AppData\Roaming\discord\Local Storage\leveldb\000005.ldb`, time.Now(), []uint32{100})
 	if len(f.saved) != 2 || len(f.state.Frozen) != 1 {
 		t.Fatalf("second freeze untracked: alerts=%d frozen=%+v", len(f.saved), f.state.Frozen)
+	}
+}
+
+// lastAlert returns the most severe alert (the latest, in these tests).
+func lastAlert(f *fakeOps) *alerts.Alert {
+	var last *alerts.Alert
+	for _, a := range f.saved {
+		if last == nil || a.Tier.Rank() > last.Tier.Rank() {
+			last = a
+		}
+	}
+	return last
+}
+
+func TestSweepCatchesInjectedTrustedApp(t *testing.T) {
+	e, f := setup("balanced")
+	// You trusted OpenCode for ~/.aws. Code injected into it then goes after
+	// Discord and Chrome: the trust doesn't cover those, and reading three
+	// apps' data is a sweep, so it's stopped whatever it is.
+	oc := `C:\Users\bob\AppData\Roaming\npm\node_modules\opencode-ai\bin\opencode.exe`
+	f.sigs[oc] = authenticode.Result{Signed: true, Valid: true, Signer: "Anomaly Innovations, Inc."}
+	e.cfg.Ignore = []config.IgnoreRule{{Path: `C:\Users\*\AppData\Roaming\npm\**\opencode.exe`, Signer: "Anomaly", Baits: []string{"aws"}}}
+	e.Configure(e.cfg, stateWithAll())
+	e.HandleAccess(ev(800, oc, awsBait, 1))
+	if len(f.saved) != 0 {
+		t.Fatal("trusted read of ~/.aws should be silent")
+	}
+	e.HandleAccess(ev(800, oc, discordBait, 1))
+	if a := only(f); a == nil || a.Tier != config.TierWarn {
+		t.Fatalf("second bait: %+v", a)
+	}
+	e.HandleAccess(ev(800, oc, chromeBait, 1))
+	a := lastAlert(f)
+	if a.Tier != config.TierCritical || len(a.Verdict.Swept) != 3 || !a.Did(config.ActionFreeze) || !a.Did(config.ActionBlockProgram) {
+		t.Fatalf("sweep must be critical and stopped: %+v", a)
+	}
+	if !strings.Contains(a.Summary, "3 different apps") {
+		t.Fatalf("summary: %s", a.Summary)
+	}
+}
+
+func stateWithAll() *config.State {
+	st := config.NewState()
+	for id, path := range map[string]string{"desktop-passwords": desktopBait, "discord": discordBait, "aws": awsBait, "chrome": chromeBait, "metamask": metamaskBait} {
+		st.Baits[id] = &config.BaitState{ID: id, Name: id + " data", Files: []config.BaitFile{{Path: path, Audit: true}}}
+	}
+	return st
+}
+
+func TestSweepByWindowsProgram(t *testing.T) {
+	e, f := setup("balanced")
+	exp := `C:\Windows\explorer.exe`
+	f.sigs[exp] = authenticode.Result{Signed: true, Valid: true, Signer: "Microsoft Windows"}
+	for _, b := range []string{discordBait, chromeBait, metamaskBait} {
+		e.HandleAccess(ev(900, exp, b, 1))
+	}
+	a := lastAlert(f)
+	if a.Tier != config.TierCritical || len(a.Verdict.Swept) != 3 {
+		t.Fatalf("explorer sweeping baits: %+v", a)
+	}
+	if len(f.suspended) != 0 || len(f.blocked) != 1 {
+		t.Fatalf("explorer is never frozen, but its network is cut: suspended=%v blocked=%v", f.suspended, f.blocked)
+	}
+}
+
+func TestSweepNotForAdminToolsOrExemptPrograms(t *testing.T) {
+	e, f := setup("balanced")
+	bb := `C:\Program Files\Backblaze\bztransmit64.exe`
+	f.sigs[bb] = authenticode.Result{Signed: true, Valid: true, Signer: "Backblaze, Inc."}
+	e.cfg.Ignore = []config.IgnoreRule{{Path: bb, Signer: "Backblaze"}} // all baits
+	e.Configure(e.cfg, stateWithAll())
+	adm := `C:\Program Files\Tool\tool.exe`
+	f.sigs[adm] = authenticode.Result{Signed: true, Valid: true, Signer: "Tool Inc"}
+	f.elevated[1001] = true
+	for _, b := range []string{discordBait, chromeBait, metamaskBait, awsBait} {
+		e.HandleAccess(ev(1000, bb, b, 1))
+		e.HandleAccess(ev(1001, adm, b, 1))
+	}
+	for _, a := range f.saved {
+		if a.Tier == config.TierCritical {
+			t.Fatalf("not a sweep: %+v", a)
+		}
+	}
+	// (The backup tool may be paused for the moment its signature is checked.)
+	if len(f.state.Frozen) != 0 || len(f.blocked) != 0 {
+		t.Fatalf("left frozen/blocked: %v %v", f.state.Frozen, f.blocked)
+	}
+}
+
+func TestInstantSweep(t *testing.T) {
+	e, f := setup("balanced")
+	e.cfg.InstantFreeze = true
+	code := `C:\Users\bob\AppData\Local\Programs\Microsoft VS Code\Code.exe`
+	f.images[200] = code
+	f.sigs[code] = authenticode.Result{Signed: true, Valid: true, Signer: "Microsoft Corporation"}
+	if e.DecideInstant(200, discordBait) || e.DecideInstant(200, chromeBait) {
+		t.Fatal("a signed app opening one or two baits is only a warning in balanced")
+	}
+	if !e.DecideInstant(200, metamaskBait) {
+		t.Fatal("third app's bait in a row: freeze before it reads")
+	}
+}
+
+func TestInjectedWindowsProgramIsCritical(t *testing.T) {
+	e, f := setup("balanced")
+	np := `C:\Windows\System32\notepad.exe`
+	f.sigs[np] = authenticode.Result{Signed: true, Valid: true, Signer: "Microsoft Windows"}
+	e.HandleAccess(ev(1100, np, desktopBait, 1))
+	if a := only(f); a.Tier != config.TierWarn {
+		t.Fatalf("clean notepad opening a bait: %+v", a)
+	}
+	f.injected[1200] = "it's running a whole program from memory that isn't backed by any file on disk (412 KB): code was injected into it"
+	e.HandleAccess(ev(1200, np, discordBait, 1))
+	a := lastAlert(f)
+	if a.Tier != config.TierCritical || !a.Did(config.ActionFreeze) || !strings.Contains(a.Summary, "injected") {
+		t.Fatalf("injected notepad: %+v", a)
+	}
+	// A trust rule doesn't skip the check.
+	e2, f2 := setup("balanced")
+	f2.sigs[np] = f.sigs[np]
+	e2.cfg.Ignore = []config.IgnoreRule{{Path: np, Signer: "Microsoft"}}
+	e2.Configure(e2.cfg, stateWithAll())
+	f2.injected[1300] = "injected"
+	e2.HandleAccess(ev(1300, np, discordBait, 1))
+	if a := only(f2); a == nil || a.Tier != config.TierCritical {
+		t.Fatalf("trusted but injected: %+v", a)
+	}
+}
+
+func TestScriptHostRepeatsStillNotify(t *testing.T) {
+	e, f := setup("balanced")
+	py := `C:\Python312\python.exe`
+	f.sigs[py] = authenticode.Result{Signed: true, Valid: true, Signer: "Python Software Foundation"}
+	e.HandleAccess(ev(1400, py, desktopBait, 1))
+	e.HandleAccess(ev(1401, py, desktopBait, 1))
+	if len(f.desktop) != 2 {
+		t.Fatalf("each script run through python.exe must notify: %d", len(f.desktop))
+	}
+}
+
+func TestYourFilesCountAsOneInASweep(t *testing.T) {
+	e, f := setup("balanced")
+	st := stateWithAll()
+	docs := `C:\Users\bob\Documents\passwords.txt`
+	seed := `C:\Users\bob\Documents\recovery phrase.txt`
+	st.Baits["documents-passwords"] = &config.BaitState{ID: "documents-passwords", Name: "passwords.txt in Documents", Files: []config.BaitFile{{Path: docs, Audit: true}}}
+	st.Baits["seed-phrase"] = &config.BaitState{ID: "seed-phrase", Name: "recovery phrase", Files: []config.BaitFile{{Path: seed, Audit: true}}}
+	e.Configure(e.cfg, st)
+	// OneDrive syncing Desktop and Documents reads all of those: not a sweep.
+	od := `C:\Users\bob\AppData\Local\Microsoft\OneDrive\OneDrive.exe`
+	f.sigs[od] = authenticode.Result{Signed: true, Valid: true, Signer: "Microsoft Corporation"}
+	for _, b := range []string{desktopBait, docs, seed} {
+		e.HandleAccess(ev(1500, od, b, 1))
+	}
+	for _, a := range f.saved {
+		if a.Tier == config.TierCritical {
+			t.Fatalf("syncing your documents is not a sweep: %+v", a)
+		}
+	}
+	// Your files plus two apps' data is.
+	e.HandleAccess(ev(1500, od, discordBait, 1))
+	e.HandleAccess(ev(1500, od, chromeBait, 1))
+	if a := lastAlert(f); a.Tier != config.TierCritical || len(a.Verdict.Swept) != 3 {
+		t.Fatalf("files + 2 apps: %+v", a)
 	}
 }

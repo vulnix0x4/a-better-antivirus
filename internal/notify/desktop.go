@@ -12,6 +12,7 @@ import (
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/alerts"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
+	"github.com/vulnix0x4/a-better-antivirus/internal/trust"
 )
 
 // Toast shows a Windows notification (best effort, non-blocking).
@@ -128,7 +129,19 @@ func ShowPopup(a *alerts.Alert, cli string) {
 	case a.Test:
 		messageBox(title, body+"\nThis was a test. Everything worked.", mbOK|mbIconInfo)
 	case frozen:
-		text := body + "\nWhat should happen to it?\n\nYes = Kill it (recommended if you didn't do this)\nNo = It's mine: unfreeze it and trust it from now on\nCancel = Decide later (it stays frozen)"
+		// "Is it yours?" is the wrong question here: people who ran a cracked
+		// game or a "free Nitro" tool did start it themselves. Ask whether it
+		// should be reading this, and only trust signed programs in one click.
+		oneClick := trust.OneClick(a)
+		text := body + "\nDid you expect " + a.ExeName() + " to read " + baitWhat(a) + "?\n" +
+			"Games, mods, cheats, cracks and \"free\" tools never need to, even ones you started yourself.\n\n" +
+			"Yes = Kill it (recommended)\n"
+		if oneClick {
+			text += "No = It's mine: unfreeze it and trust it for this from now on\n"
+		} else {
+			text += "No = It's mine: unfreeze it (this time only)\n"
+		}
+		text += "Cancel = Decide later (it stays frozen)" + warnings(a)
 		if isolated {
 			text += "\n\nYour PC is isolated from the network. When it's safe, run `aba release` as admin."
 		}
@@ -138,8 +151,10 @@ func ShowPopup(a *alerts.Alert, cli string) {
 				RunElevated(cli, "kill", a.ID)
 			}
 		case idNo:
-			if cli != "" {
+			if cli != "" && oneClick {
 				RunElevated(cli, "trust", a.ID)
+			} else if cli != "" {
+				RunElevated(cli, "resume", a.ID)
 			}
 		}
 	case isolated:
@@ -154,15 +169,43 @@ func ShowPopup(a *alerts.Alert, cli string) {
 	default:
 		// Nothing was done to it: one click to say it's yours.
 		icon := uint32(mbIconWarning)
-		ask := "\nIs this program yours?\n\nYes = It's mine: trust it, no more alerts about it\nNo = Not sure: keep alerting (review later with `aba alerts`)"
-		if !a.Process.Signature.Valid {
+		ask := "\nShould " + a.ExeName() + " be reading " + baitWhat(a) + "?\n\n"
+		if _, why := trust.Rule(a); why == "" {
+			ask += "Yes = It's mine: trust it for this, no more alerts about it\n"
+		} else {
+			ask += "Yes = It's mine (just this once: " + why + ")\n"
+		}
+		ask += "No = Not sure: keep alerting (review later with `aba alerts`)" + warnings(a)
+		if !a.Process.Signature.Valid || a.Tier == config.TierCritical {
 			icon = mbIconError
-			ask += "\n\nIt isn't signed by any publisher. Only say Yes if you built or installed it yourself."
 		}
 		if messageBox(title, body+ask, mbYesNo|icon) == idYes && cli != "" {
 			RunElevated(cli, "trust", a.ID)
 		}
 	}
+}
+
+// baitWhat names what the program read, for the popup question.
+func baitWhat(a *alerts.Alert) string {
+	if len(a.Verdict.Swept) > 1 {
+		return fmt.Sprintf("the data of %d different apps", len(a.Verdict.Swept))
+	}
+	if len(a.Baits) > 0 && a.Baits[0].Name != "" {
+		return a.Baits[0].Name
+	}
+	return "this file"
+}
+
+// warnings are the red flags worth repeating next to the question.
+func warnings(a *alerts.Alert) string {
+	var w string
+	if a.Process != nil && !a.Process.Signature.Valid {
+		w += "\n\nIt isn't signed by any publisher, which is how most stealers look. Only say it's yours if you built or installed it yourself."
+	}
+	if len(a.Verdict.Swept) > 1 {
+		w += "\n\nIt went through several apps' data one after another. That's what stealers do; real apps only touch their own."
+	}
+	return w
 }
 
 func accessVerb(access string) string {

@@ -19,6 +19,16 @@ import (
 )
 
 func main() {
+	// medium -raw <program> <command line>: the command line is passed as is,
+	// with single quotes turned into double quotes (for programs like find.exe
+	// that insist on quotes, which PowerShell 5 mangles).
+	if len(os.Args) == 4 && os.Args[1] == "-raw" {
+		if err := run(os.Args[2], strings.ReplaceAll(os.Args[3], "'", "\"")); err != nil {
+			fmt.Fprintln(os.Stderr, "medium:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) < 2 {
 		fmt.Fprintln(os.Stderr, "usage: medium <program> [args...]")
 		os.Exit(2)

@@ -132,7 +132,37 @@ type BaitConfig struct {
 type IgnoreRule struct {
 	Path   string `json:"path,omitempty"`   // glob on full image path, case-insensitive ('*' matches within a segment, '**' across)
 	Signer string `json:"signer,omitempty"` // substring of the Authenticode signer, case-insensitive
-	Note   string `json:"note,omitempty"`
+	// SHA256 pins the exact file (used for unsigned programs, whose path alone
+	// could be reused by anything dropped there later).
+	SHA256 string `json:"sha256,omitempty"`
+	// CommandLine pins a script host / runtime to one exact command line, so
+	// trusting `python.exe my_tool.py` doesn't trust every Python script.
+	CommandLine string `json:"commandLine,omitempty"`
+	// Baits limits the rule to these bait IDs (empty: all baits). Trusting an
+	// app from an alert covers only what it was seen reading, so code injected
+	// into it that goes after other baits still gets caught.
+	Baits []string `json:"baits,omitempty"`
+	Note  string   `json:"note,omitempty"`
+}
+
+// CoversBait reports whether the rule applies to bait id.
+func (r IgnoreRule) CoversBait(id string) bool {
+	if len(r.Baits) == 0 {
+		return true
+	}
+	for _, b := range r.Baits {
+		if strings.EqualFold(b, id) {
+			return true
+		}
+	}
+	return false
+}
+
+// SameProgram reports whether two rules describe the same program (they may
+// cover different baits).
+func (r IgnoreRule) SameProgram(o IgnoreRule) bool {
+	return strings.EqualFold(r.Path, o.Path) && strings.EqualFold(r.Signer, o.Signer) &&
+		strings.EqualFold(r.SHA256, o.SHA256) && strings.EqualFold(r.CommandLine, o.CommandLine)
 }
 
 type Config struct {

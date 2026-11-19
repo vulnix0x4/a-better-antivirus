@@ -17,7 +17,6 @@ import (
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/alerts"
 	"github.com/vulnix0x4/a-better-antivirus/internal/baits"
-	"github.com/vulnix0x4/a-better-antivirus/internal/classify"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/doctor"
 	"github.com/vulnix0x4/a-better-antivirus/internal/engine"
@@ -27,6 +26,7 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/respond"
 	"github.com/vulnix0x4/a-better-antivirus/internal/service"
 	"github.com/vulnix0x4/a-better-antivirus/internal/svcctl"
+	"github.com/vulnix0x4/a-better-antivirus/internal/trust"
 	"github.com/vulnix0x4/a-better-antivirus/internal/ui"
 )
 
@@ -164,12 +164,20 @@ func resumeCmd() *cobra.Command {
 			if a.Process == nil || a.Process.Image == "" {
 				return nil
 			}
+			rule, why := trust.Rule(a)
+			if why != "" {
+				if ignore {
+					fmt.Println(ui.Dim.Render("Not adding a rule: " + why + "."))
+				}
+				return nil
+			}
 			if !ignore && ui.IsTTY() {
-				huh.NewConfirm().Title("Ignore " + a.ExeName() + " from now on?").
-					Description(ruleFor(a).Path).Affirmative("Yes").Negative("No").Value(&ignore).WithTheme(theme()).Run()
+				huh.NewConfirm().Title("Trust " + a.ExeName() + " from now on?").
+					Description(rule.Path + "\n" + trust.Describe(rule, baitNames())).
+					Affirmative("Yes").Negative("No").Value(&ignore).WithTheme(theme()).Run()
 			}
 			if ignore {
-				return addIgnore(ruleFor(a))
+				return addIgnore(rule)
 			}
 			return nil
 		},
@@ -179,11 +187,13 @@ func resumeCmd() *cobra.Command {
 }
 
 // trustCmd is the one-click "it's mine" from an alert: undo anything done to
-// the program and stop alerting on it (rule pinned to its path + signer).
+// the program and stop alerting on it. The rule is as narrow as possible (see
+// package trust): only the baits it read, pinned to its publisher, its exact
+// file if unsigned, or its exact command line if it's a script host.
 func trustCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "trust <alert-id>",
-		Short: "It's yours: undo any response and never alert on that program again",
+		Short: "It's yours: undo any response and stop alerting on that program reading that bait",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireAdmin(); err != nil {
@@ -201,46 +211,69 @@ func trustCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			rule, why := trust.Rule(a)
+			if why != "" {
+				alerts.Update(a.ID, func(x *alerts.Alert) {
+					x.Status, x.Note = "resolved", "you said it was yours (not trusted permanently)"
+				})
+				fmt.Println(ui.Warn.Render("Unfrozen this once, not trusted permanently: " + why + "."))
+				return nil
+			}
 			alerts.Update(a.ID, func(x *alerts.Alert) { x.Status, x.Note = "resolved", "you trusted this program" })
-			return addIgnore(ruleFor(a))
+			return addIgnore(rule)
 		},
 	}
 }
 
-func ruleFor(a *alerts.Alert) config.IgnoreRule {
-	r := config.IgnoreRule{Path: classify.GeneralizePath(a.Process.Image), Note: "added " + time.Now().Format("2006-01-02")}
-	if a.Process.Signature.Valid {
-		r.Signer = a.Process.Signature.Signer
+// baitNames maps bait IDs to their display names (best effort).
+func baitNames() map[string]string {
+	names := map[string]string{}
+	if st, err := config.LoadState(); err == nil {
+		for id, b := range st.Baits {
+			names[id] = b.Name
+		}
 	}
-	return r
+	return names
 }
 
+// addIgnore saves rules. A rule for a program that already has one widens the
+// existing rule's baits instead of adding a duplicate.
 func addIgnore(rules ...config.IgnoreRule) error {
 	cfg, err := mustConfig()
 	if err != nil {
 		return err
 	}
+	names := baitNames()
 	for _, r := range rules {
-		dup := false
-		for _, x := range cfg.Ignore {
-			dup = dup || (strings.EqualFold(x.Path, r.Path) && strings.EqualFold(x.Signer, r.Signer))
+		merged := false
+		for i, x := range cfg.Ignore {
+			if !x.SameProgram(r) {
+				continue
+			}
+			merged = true
+			switch {
+			case len(x.Baits) == 0:
+			case len(r.Baits) == 0:
+				cfg.Ignore[i].Baits = nil
+			default:
+				for _, b := range r.Baits {
+					if !x.CoversBait(b) {
+						cfg.Ignore[i].Baits = append(cfg.Ignore[i].Baits, b)
+					}
+				}
+			}
+			fmt.Println(ui.Good.Render(ui.IconOK) + " trusting " + r.Path + ui.Dim.Render(" ("+trust.Describe(cfg.Ignore[i], names)+")"))
+			break
 		}
-		if !dup {
+		if !merged {
 			cfg.Ignore = append(cfg.Ignore, r)
-			fmt.Println(ui.Good.Render(ui.IconOK) + " ignoring " + r.Path + signerNote(r))
+			fmt.Println(ui.Good.Render(ui.IconOK) + " trusting " + r.Path + ui.Dim.Render(" ("+trust.Describe(r, names)+")"))
 		}
 	}
 	if err := config.SaveConfig(cfg); err != nil {
 		return err
 	}
 	return install.Reload()
-}
-
-func signerNote(r config.IgnoreRule) string {
-	if r.Signer == "" {
-		return ""
-	}
-	return ui.Dim.Render(" (signed by " + r.Signer + ")")
 }
 
 // ---- test ----
@@ -475,12 +508,24 @@ func learnCmd() *cobra.Command {
 				if a.Test || a.Process == nil || a.Process.Image == "" || a.Kind != alerts.KindRead {
 					continue
 				}
-				r := ruleFor(a)
-				key := strings.ToLower(r.Path + "|" + r.Signer)
+				r, why := trust.Rule(a)
+				if why != "" {
+					continue // can't be trusted permanently (script host without a command line, a sweep…)
+				}
+				key := strings.ToLower(r.Path + "|" + r.Signer + "|" + r.SHA256 + "|" + r.CommandLine)
 				s := byPath[key]
 				if s == nil {
 					s = &suggestion{rule: r, tier: a.Tier}
 					byPath[key] = s
+				} else {
+					for _, b := range r.Baits {
+						if !s.rule.CoversBait(b) {
+							s.rule.Baits = append(s.rule.Baits, b)
+						}
+					}
+				}
+				if a.Tier.Rank() > s.tier.Rank() {
+					s.tier = a.Tier
 				}
 				s.count++
 				if a.Time.After(s.last) {
@@ -491,7 +536,16 @@ func learnCmd() *cobra.Command {
 			for _, s := range byPath {
 				ignored := false
 				for _, x := range cfg.Ignore {
-					ignored = ignored || (strings.EqualFold(x.Path, s.rule.Path) && strings.EqualFold(x.Signer, s.rule.Signer))
+					if x.SameProgram(s.rule) {
+						covered := len(x.Baits) == 0
+						if !covered {
+							covered = len(s.rule.Baits) > 0
+							for _, b := range s.rule.Baits {
+								covered = covered && x.CoversBait(b)
+							}
+						}
+						ignored = ignored || covered
+					}
 				}
 				if !ignored {
 					sugg = append(sugg, s)
@@ -511,6 +565,7 @@ func learnCmd() *cobra.Command {
 				fmt.Println(ui.Dim.Render("No programs to review: nothing new has touched your baits."))
 				return nil
 			}
+			names := baitNames()
 			var opts []huh.Option[int]
 			for i, s := range sugg {
 				label := fmt.Sprintf("%-9s %3d× %s", s.tier, s.count, ui.TruncateMiddle(s.rule.Path, 70))
@@ -519,6 +574,7 @@ func learnCmd() *cobra.Command {
 				} else {
 					label += ui.Bad.Render("  UNSIGNED")
 				}
+				label += ui.Fainter.Render("  (" + trust.Describe(s.rule, names) + ")")
 				opts = append(opts, huh.NewOption(label, i).Selected(s.tier == config.TierInfo && s.rule.Signer != ""))
 			}
 			if !ui.IsTTY() {
@@ -564,8 +620,9 @@ func ignoreCmd() *cobra.Command {
 				fmt.Println(ui.Dim.Render("No ignore rules (Defender and Windows Search are always ignored)."))
 				return nil
 			}
+			names := baitNames()
 			for i, r := range cfg.Ignore {
-				fmt.Printf(" %2d  %s%s %s\n", i+1, r.Path, signerNote(r), ui.Fainter.Render(r.Note))
+				fmt.Printf(" %2d  %s %s %s\n", i+1, r.Path, ui.Dim.Render("("+trust.Describe(r, names)+")"), ui.Fainter.Render(r.Note))
 			}
 			return nil
 		},

@@ -118,10 +118,12 @@ function Did($alert, $action) { [bool]($alert.actions | Where-Object { $_.action
 # Like real stealers it runs as the normal user at medium integrity (not admin;
 # scripts/medium does that from the elevated runner), and a few random bytes
 # make its hash differ from ABA's, so it isn't recognised as ABA itself.
-function Stealer([string]$name, [string]$bait) {
+function Stealer([string]$name, [string]$bait, [switch]$Again) {
     $exe = Join-Path $env:TEMP "$name.exe"
-    Copy-Item $Aba $exe -Force
-    [IO.File]::AppendAllText($exe, [guid]::NewGuid().ToString())
+    if (-not $Again) {   # -Again: run the same file again (same fingerprint)
+        Copy-Item $Aba $exe -Force
+        [IO.File]::AppendAllText($exe, [guid]::NewGuid().ToString())
+    }
     $procId = & $Medium $exe test-reader $bait
     if ($LASTEXITCODE -or -not $procId) { Fail "fake stealer $name didn't start" }
     $p = Get-Process -Id ([int]$procId) -ErrorAction SilentlyContinue
@@ -230,11 +232,17 @@ Check (WaitFor { -not (IsSuspended $s2.Id) } 5) 'resumed'
 Check ((& $Aba ignore list | Out-String) -match 'mytool') 'ignore rule added'
 Stop-Process -Id $s2.Id -Force -ErrorAction SilentlyContinue
 $before = @(Alerts).Count
-$s2b = Stealer 'mytool' $desktopBait
+$s2b = Stealer 'mytool' $desktopBait -Again
 Start-Sleep -Seconds 6
 Check (@(Alerts).Count -eq $before) 'ignored program no longer alerts'
 Check (-not (IsSuspended $s2b.Id)) 'ignored program not frozen'
 Stop-Process -Id $s2b.Id -Force -ErrorAction SilentlyContinue
+# It's unsigned, so the rule is pinned to that exact file: anything else
+# dropped at the same path later is still caught.
+$s2c = Stealer 'mytool' $desktopBait
+$a2c = AlertFor $s2c.Id
+Check ($a2c -and $a2c.tier -eq 'critical' -and (Did $a2c 'freeze')) 'a different file at the trusted path is still caught'
+Aba kill $a2c.id
 Aba ignore remove 1
 
 Step 'Learning mode still stops critical; one-click trust (the popup''s "It''s mine")'
@@ -247,12 +255,34 @@ Check (WaitFor { -not (IsSuspended $s5.Id) } 5) 'trust unfroze it'
 Check ((& $Aba ignore list | Out-String) -match 'devtool') 'trust added an ignore rule'
 Stop-Process -Id $s5.Id -Force -ErrorAction SilentlyContinue
 $before = @(Alerts).Count
-$s5b = Stealer 'devtool' $desktopBait
+$s5b = Stealer 'devtool' $desktopBait -Again
 Start-Sleep -Seconds 6
 Check (@(Alerts).Count -eq $before) 'trusted program no longer alerts'
 Stop-Process -Id $s5b.Id -Force -ErrorAction SilentlyContinue
+# Trust covers only the bait it was seen reading.
+$discordBait = ($st.baits.discord.files | Where-Object audit | Select-Object -First 1).path
+$s5c = Stealer 'devtool' $discordBait -Again
+$a5c = AlertFor $s5c.Id
+Check ($a5c -and (Did $a5c 'freeze')) 'the trusted program going after a different bait is still frozen'
+Aba kill $a5c.id
 Aba ignore remove 1
 Aba install --yes --preset balanced --learning 0 --ntfy-topic $topic
+
+Step 'A Windows program going through several apps'' data is stopped (how an injected stealer looks)'
+# find.exe is part of Windows and signed by Microsoft: one bait read by it is
+# only "suspicious". Reading your files, Discord and a browser in a row is a sweep.
+$sweepBaits = @($desktopBait, $discordBait, ($st.baits.brave.files | Where-Object audit | Select-Object -First 1).path)
+$findExe = "$env:SystemRoot\System32\find.exe"
+$fp = & $Medium -raw $findExe ("'$findExe' 'zz-not-there' " + (($sweepBaits | ForEach-Object { "'$_'" }) -join ' '))
+if ($LASTEXITCODE -or -not $fp) { Fail "find.exe didn't start" }
+$a6 = WaitFor { Alerts | Where-Object { $_.process.pid -eq [int]$fp -and $_.tier -eq 'critical' } | Select-Object -Last 1 } 20
+Check ($a6) "find.exe sweeping 3 apps' baits is critical: $($a6.summary)"
+Check (@($a6.verdict.swept).Count -ge 3) "swept: $($a6.verdict.swept -join ', ')"
+if ((Get-Process -Id ([int]$fp) -ErrorAction SilentlyContinue).SessionId -gt 0) {
+    Check ((Did $a6 'freeze') -and (WaitFor { IsSuspended ([int]$fp) } 5)) 'frozen before it could read the third'
+    Aba kill $a6.id
+}
+Check (Did $a6 'block-program') 'its internet is cut'
 
 Step 'Release everything'
 Aba release

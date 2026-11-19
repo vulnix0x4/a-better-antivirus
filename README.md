@@ -96,11 +96,15 @@ It catches stealers by **what they do**, not by recognising the file, so it work
 
   | Reader | Severity |
   |---|---|
+  | Anything that goes through **several apps' data** within 2 minutes (a sweep) | **critical** |
+  | A Windows program running **injected code** (code that isn't from any file on disk) | **critical** |
   | Unsigned program in Temp, AppData, Downloads, Desktop… | **critical** |
-  | PowerShell, cmd, mshta, rundll32, wscript and similar | **critical** |
-  | Signed app in a user folder, scripting runtimes (Python, Node, Java), network share reads | **warn** |
-  | Signed, installed software (Program Files, Windows) | **info** |
-  | Defender, Windows Search, your ignore rules | ignored |
+  | PowerShell, cmd, mshta, rundll32, wscript, and .NET tools stealers hide in (RegAsm, AppLaunch, vbc, MSBuild…) | **critical** |
+  | Signed app in a user folder, scripting runtimes (Python, Node, Java), other Windows programs in your session, network share reads | **warn** |
+  | Signed, installed software (Program Files), Windows services, the preview pane | **info** |
+  | Defender, Windows Search, your trust rules | ignored |
+
+- **Behaviour beats identity.** Stealers often hide inside a legitimate program (process injection / hollowing), so *who* opened a bait can lie. *What* it opened can't: a real app only ever touches its own data, a stealer grabs everything it knows in seconds. So a process that reads several different apps' baits (your password files count as one, browsers, Discord, wallets… each count on their own) is stopped as a stealer whatever it claims to be: signed, trusted by you, or part of Windows. Only Defender, Windows Search and programs you explicitly allow to read everything (a backup tool) are exempt. And when a Windows program reads a bait, ABA looks inside it for a whole program running from memory that isn't backed by any file, the footprint of injected code.
 
 - **Responses** per severity. Presets:
 
@@ -126,7 +130,7 @@ When something trips:
 
 ```
 aba kill <id>    it's malware: kill what's frozen (it stays blocked)
-aba trust <id>   it's yours: undo everything and never alert on it again
+aba trust <id>   it's yours: undo everything and stop alerting on it reading that
 aba resume <id>  unfreeze it and restore its internet, without trusting it
 aba release      undo all responses: network back, everything unfrozen/unblocked
 ```
@@ -147,7 +151,15 @@ aba uninstall [--purge]
 
 ## When it's one of your apps
 
-Every alert asks **"Is this program yours?"** One click on *It's mine* undoes anything ABA did (unfreezes it, restores its internet) and stops alerting on that program, with a rule pinned to its path *and* its code-signing publisher so malware can't impersonate it. The same thing from a terminal: `aba trust <alert-id>`. A program that keeps touching a bait without you answering only pops up once every 12 hours; the rest goes to `aba alerts`.
+Every alert asks whether that program should be reading that bait. One click on *It's mine* undoes anything ABA did (unfreezes it, restores its internet) and stops alerting on it. Trust is kept as narrow as possible, so malware can't reuse it:
+
+- it covers **only the bait(s) the program was seen reading**: code injected into a trusted app that goes after anything else is still caught;
+- a signed program is pinned to its folder **and** its code-signing publisher;
+- an unsigned program is pinned to **that exact file** (its SHA-256), not its path, since anything can be dropped at the same path later;
+- a script host or runtime (`python.exe`, `powershell.exe`, `java.exe`…) is pinned to **the exact command line**: trusting your script never trusts every script;
+- a Windows program that went through several apps' data is never trusted permanently, only unfrozen that once.
+
+When something is **frozen**, the popup asks "Did you expect it to read this?" rather than "is it yours?" (you *did* start that cracked game yourself), and only signed programs can be trusted in one click; anything else is unfrozen that once (`aba trust <id>` in a terminal still trusts it, pinned to the file). A program that keeps touching a bait without you answering only pops up once every 12 hours, except script hosts and anything critical; the rest goes to `aba alerts`.
 
 **Learning mode** (Strict and custom setups, 3 days by default): critical threats are stopped from minute one, but merely suspicious programs only alert, so you can mark your own apps before Strict starts freezing them. You get a notification when it ends. `aba learn` lists everything that tripped, to trust several at once.
 
@@ -172,8 +184,9 @@ So a swapped release file, a compromised mirror or a proxy can't get code onto y
 - **Speed.** With instant freeze a stealer is frozen about 0.1 s after it opens a bait (it gets the fake bait contents, not your real data). Without it, ABA waits for the event log: a few ms to about 1 s. A stealer that uploads each item the moment it reads it may get something out first; freezing stops whatever it hasn't sent yet.
 - **Instant freeze is deliberately cautious.** It skips programs running as administrator and anything it can't pinpoint with certainty; those are still caught by the event-log path, just a little later.
 - **Admin malware.** Malware running as administrator can stop the service, clear the audit policy or remove filters. ABA alerts if auditing is switched off, but it can't defend against an attacker who already owns the machine.
+- **Injection is judged by its results, not watched as it happens.** Seeing one process write code into another needs a kernel driver or Microsoft's protected-antivirus signing, which ABA doesn't have. It catches injected stealers by what they read (sweeps) and, inside Windows programs, by the injected code they leave in memory. A stealer injected into an app you trusted that reads *only* the one bait you trusted that app with would get through; nothing real works that way, but it's possible. The memory check skips programs that legitimately generate code (.NET, Java, browsers), and newer tricks that disguise injected code as a file on disk (module stomping, process ghosting) aren't detected by it; the sweep rule still applies to them.
 - **Desktop popups need you to be signed in.** Detections are always logged and phone alerts always go out, and responses happen either way.
-- **Some legit software reads files** (backup, sync, search tools). One click on *It's mine* handles that.
+- **Some legit software reads files** (backup, sync, search tools). One click on *It's mine* handles that. A backup tool that copies your whole AppData looks like a sweep; allow it to read everything with `aba ignore add "<path>" --signer <publisher>` (or *It's mine* on the sweep alert, for signed programs).
 - **`~/.aws/credentials` is read by every AWS SDK** (OpenCode, Claude Code, VS Code, Terraform…), so a *signed* program reading it is only logged. Unsigned programs, script hosts and runtimes still trip it, and the other baits are unaffected.
 - **Low profile, not hidden.** The service is called "File Access Monitor" so it doesn't advertise itself to malware that checks for honeypots, but it's fully visible to you.
 

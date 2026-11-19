@@ -31,6 +31,9 @@ type Verdict struct {
 	Ignored    bool        `json:"ignored,omitempty"`
 	Reasons    []string    `json:"reasons"`
 	DecoyOwner bool        `json:"decoyOwner,omitempty"` // the real app this decoy imitates is now installed
+	Builtin    bool        `json:"builtin,omitempty"`    // Defender / Windows Search: never escalated
+	ByRule     bool        `json:"byRule,omitempty"`     // ignored because of one of your rules
+	Swept      []string    `json:"swept,omitempty"`      // bait IDs it went through (a sweep: several apps' data)
 }
 
 var lolbins = set(
@@ -39,7 +42,23 @@ var lolbins = set(
 	"regsvcs.exe", "certutil.exe", "bitsadmin.exe", "curl.exe", "tar.exe", "forfiles.exe",
 	"cmstp.exe", "wmic.exe", "xcopy.exe", "robocopy.exe", "findstr.exe", "msxsl.exe", "hh.exe",
 	"pcalua.exe", "scriptrunner.exe", "msdt.exe", "esentutl.exe", "expand.exe", "makecab.exe",
+	// .NET Framework tools that stealers (RedLine, AgentTesla, Lumma…) hollow
+	// out and run inside, so their reads look like a Microsoft-signed program.
+	"applaunch.exe", "vbc.exe", "csc.exe", "jsc.exe", "aspnet_compiler.exe", "addinprocess.exe",
+	"addinprocess32.exe", "addinutil.exe", "cvtres.exe", "caspol.exe", "ilasm.exe", "ieexec.exe",
 )
+
+// windowsReaders are the Windows programs with a real reason to open a file
+// in your profile in the background (preview pane). Any other Windows program
+// reading a bait is suspicious: malware hides inside them (injection).
+var windowsReaders = set("prevhost.exe")
+
+// ScriptHost reports whether name (an executable's file name) runs code it's
+// given: what it does depends on the script, not on the program.
+func ScriptHost(name string) bool {
+	n := strings.ToLower(filepath.Base(name))
+	return lolbins[n] || runtimes[n]
+}
 
 var runtimes = set(
 	"python.exe", "pythonw.exe", "py.exe", "pyw.exe", "node.exe", "java.exe", "javaw.exe",
@@ -124,6 +143,40 @@ func (e Env) locate(image string, pid uint32) location {
 type Classifier struct {
 	Env    Env
 	Ignore []config.IgnoreRule
+	// Optional probes (nil: unknown). Hash returns a file's SHA-256 (for rules
+	// pinned to one file), CommandLine a process's command line (for rules
+	// pinned to one script), UserSession whether it runs in a user's session.
+	Hash        func(image string) string
+	CommandLine func(pid uint32) string
+	UserSession func(pid uint32) bool
+}
+
+// SweepExempt reports whether a reader may go through many apps' baits:
+// Defender and Windows Search, or a program you trusted for all baits (e.g. a
+// backup tool, with `aba ignore add` or by trusting it from a sweep alert).
+// Rules from trusting an app's single alert cover only that bait, so they
+// don't exempt it. sig may be nil (not checked yet).
+func (c *Classifier) SweepExempt(image string, pid uint32, sig *authenticode.Result) bool {
+	signer := ""
+	if sig != nil {
+		signer = sig.Signer
+	}
+	for _, p := range builtinIgnore {
+		if Glob(c.Env.expand(p), image) && (sig == nil || (sig.Valid && strings.Contains(signer, "Microsoft"))) {
+			return true
+		}
+	}
+	for _, r := range c.Ignore {
+		if len(r.Baits) == 0 && c.ruleMatches(r, image, pid, "", signer, sig != nil) {
+			return true
+		}
+	}
+	return false
+}
+
+// WindowsBinary reports whether image lives in the Windows folder.
+func (c *Classifier) WindowsBinary(image string) bool {
+	return c.Env.locate(image, 1) == locSystem
 }
 
 // Prelim is the instant verdict before the (slower) signature check, assuming
@@ -146,17 +199,17 @@ func (c *Classifier) decide(image string, pid uint32, bait Bait, sig *authentico
 	}
 
 	for _, r := range c.Ignore {
-		if ruleMatches(r, image, signer, sig != nil) {
+		if c.ruleMatches(r, image, pid, bait.ID, signer, sig != nil) {
 			why := "matches your ignore rule"
 			if r.Note != "" {
 				why += " (" + r.Note + ")"
 			}
-			return Verdict{Tier: config.TierInfo, Ignored: true, Reasons: []string{why}}
+			return Verdict{Tier: config.TierInfo, Ignored: true, ByRule: true, Reasons: []string{why}}
 		}
 	}
 	for _, p := range builtinIgnore {
 		if Glob(c.Env.expand(p), image) && (sig == nil || (valid && strings.Contains(signer, "Microsoft"))) {
-			return Verdict{Tier: config.TierInfo, Ignored: true, Reasons: []string{"built-in: antivirus / search indexer"}}
+			return Verdict{Tier: config.TierInfo, Ignored: true, Builtin: true, Reasons: []string{"built-in: antivirus / search indexer"}}
 		}
 	}
 
@@ -196,8 +249,11 @@ func (c *Classifier) decide(image string, pid uint32, bait Bait, sig *authentico
 
 	switch loc {
 	case locSystem:
-		if valid {
+		if valid && (windowsReaders[name] || (c.UserSession != nil && !c.UserSession(pid))) {
 			return Verdict{Tier: config.TierInfo, Reasons: []string{"Windows component", sigNote}}
+		}
+		if valid {
+			return Verdict{Tier: config.TierWarn, Reasons: []string{name + " (part of Windows) has no reason to read app data: fine if you were copying or opening these files yourself, but malware also hides inside Windows programs", sigNote}}
 		}
 		return Verdict{Tier: config.TierWarn, Reasons: []string{"unsigned program inside the Windows folder", sigNote}}
 	case locProgramFiles:
@@ -213,8 +269,11 @@ func (c *Classifier) decide(image string, pid uint32, bait Bait, sig *authentico
 	}
 }
 
-func ruleMatches(r config.IgnoreRule, image, signer string, sigKnown bool) bool {
-	if r.Path == "" && r.Signer == "" {
+func (c *Classifier) ruleMatches(r config.IgnoreRule, image string, pid uint32, baitID, signer string, sigKnown bool) bool {
+	if r.Path == "" && r.Signer == "" && r.SHA256 == "" {
+		return false
+	}
+	if !r.CoversBait(baitID) {
 		return false
 	}
 	if r.Path != "" && !Glob(r.Path, image) {
@@ -225,7 +284,22 @@ func ruleMatches(r config.IgnoreRule, image, signer string, sigKnown bool) bool 
 			return false
 		}
 	}
+	if r.SHA256 != "" {
+		if c.Hash == nil || !strings.EqualFold(c.Hash(image), r.SHA256) {
+			return false
+		}
+	}
+	if r.CommandLine != "" {
+		if c.CommandLine == nil || !SameCommandLine(c.CommandLine(pid), r.CommandLine) {
+			return false
+		}
+	}
 	return true
+}
+
+// SameCommandLine compares command lines, ignoring case and outer spaces.
+func SameCommandLine(a, b string) bool {
+	return a != "" && strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b))
 }
 
 func contains(xs []string, x string) bool {

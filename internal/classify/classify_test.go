@@ -20,7 +20,7 @@ var (
 )
 
 func TestTiers(t *testing.T) {
-	c := &Classifier{Env: env}
+	c := &Classifier{Env: env, UserSession: func(pid uint32) bool { return pid != 200 }}
 	cases := []struct {
 		name  string
 		image string
@@ -37,7 +37,12 @@ func TestTiers(t *testing.T) {
 		{"copilot", `C:\Program Files (x86)\Microsoft\Copilot\Application\copilotapp.exe`, 100, ms, Bait{}, config.TierInfo, false, false},
 		{"unsigned in program files", `C:\Program Files\Foo\foo.exe`, 100, unsigned, Bait{}, config.TierWarn, false, false},
 		{"powershell", `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`, 100, ms, Bait{}, config.TierCritical, false, false},
-		{"notepad", `C:\Windows\System32\notepad.exe`, 100, ms, Bait{}, config.TierInfo, false, false},
+		{"notepad (Windows program in your session)", `C:\Windows\System32\notepad.exe`, 100, ms, Bait{}, config.TierWarn, false, false},
+		{"explorer", `C:\Windows\explorer.exe`, 100, ms, Bait{}, config.TierWarn, false, false},
+		{"preview pane", `C:\Windows\System32\prevhost.exe`, 100, ms, Bait{}, config.TierInfo, false, false},
+		{"Windows service (session 0)", `C:\Windows\System32\svchost.exe`, 200, ms, Bait{}, config.TierInfo, false, false},
+		{"hollowing target AppLaunch", `C:\Windows\Microsoft.NET\Framework\v4.0.30319\AppLaunch.exe`, 100, ms, Bait{}, config.TierCritical, false, false},
+		{"hollowing target vbc", `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\vbc.exe`, 100, ms, Bait{}, config.TierCritical, false, false},
 		{"signed node in appdata", `C:\Users\bob\AppData\Roaming\nvm\v22\node.exe`, 100, authenticode.Result{Signed: true, Valid: true, Signer: "OpenJS Foundation"}, Bait{}, config.TierWarn, false, false},
 		{"unsigned python", `C:\Users\bob\AppData\Local\Temp\_MEI1\python.exe`, 100, unsigned, Bait{}, config.TierCritical, false, false},
 		{"signed app in user folder", `C:\Users\bob\AppData\Local\Programs\Microsoft VS Code\Code.exe`, 100, ms, Bait{}, config.TierWarn, false, false},
@@ -100,5 +105,64 @@ func TestGlobAndGeneralize(t *testing.T) {
 	got = GeneralizePath(`C:\ProgramData\Microsoft\Windows Defender\Platform\4.18.24090.11-0\MsMpEng.exe`)
 	if got != `C:\ProgramData\Microsoft\Windows Defender\Platform\*\MsMpEng.exe` {
 		t.Fatalf("generalize: %s", got)
+	}
+}
+
+func TestTrustRulesArePinned(t *testing.T) {
+	hashes := map[string]string{`C:\Users\bob\Downloads\mytool.exe`: "aaaa"}
+	cmd := map[uint32]string{1: `"C:\Python312\python.exe" C:\me\sync.py`, 2: `"C:\Python312\python.exe" C:\Temp\grab.py`}
+	c := &Classifier{Env: env,
+		Hash:        func(img string) string { return hashes[img] },
+		CommandLine: func(pid uint32) string { return cmd[pid] },
+		Ignore: []config.IgnoreRule{
+			{Path: `C:\Users\*\AppData\Roaming\npm\**\opencode.exe`, Signer: "Anomaly", Baits: []string{"aws"}},
+			{Path: `C:\Users\bob\Downloads\mytool.exe`, SHA256: "aaaa", Baits: []string{"discord"}},
+			{Path: `C:\Python312\python.exe`, Signer: "Python Software Foundation", CommandLine: `"C:\Python312\python.exe" C:\me\sync.py`, Baits: []string{"aws"}},
+		}}
+	oc := `C:\Users\bob\AppData\Roaming\npm\node_modules\opencode-ai\bin\opencode.exe`
+	anomaly := authenticode.Result{Signed: true, Valid: true, Signer: "Anomaly Innovations, Inc."}
+	if v := c.Final(oc, 5, Bait{ID: "aws"}, anomaly); !v.Ignored || !v.ByRule {
+		t.Fatalf("trusted app on its bait: %+v", v)
+	}
+	// The same trusted app going after another bait (injected code?) is not covered.
+	if v := c.Final(oc, 5, Bait{ID: "discord"}, anomaly); v.Ignored {
+		t.Fatalf("trust leaked to another bait: %+v", v)
+	}
+	// Unsigned trust is pinned to the file's hash: a different file at the same path isn't trusted.
+	if v := c.Final(`C:\Users\bob\Downloads\mytool.exe`, 5, Bait{ID: "discord"}, unsigned); !v.Ignored {
+		t.Fatalf("pinned unsigned tool: %+v", v)
+	}
+	hashes[`C:\Users\bob\Downloads\mytool.exe`] = "bbbb"
+	if v := c.Final(`C:\Users\bob\Downloads\mytool.exe`, 5, Bait{ID: "discord"}, unsigned); v.Ignored {
+		t.Fatalf("replaced file still trusted: %+v", v)
+	}
+	// Runtimes are pinned to one command line.
+	psf := authenticode.Result{Signed: true, Valid: true, Signer: "Python Software Foundation"}
+	if v := c.Final(`C:\Python312\python.exe`, 1, Bait{ID: "aws"}, psf); !v.Ignored {
+		t.Fatalf("trusted script: %+v", v)
+	}
+	if v := c.Final(`C:\Python312\python.exe`, 2, Bait{ID: "aws"}, psf); v.Ignored {
+		t.Fatalf("another script trusted through python.exe: %+v", v)
+	}
+}
+
+func TestSweepExempt(t *testing.T) {
+	c := &Classifier{Env: env, Ignore: []config.IgnoreRule{
+		{Path: `C:\Program Files\Backblaze\bztransmit64.exe`, Signer: "Backblaze"},
+		{Path: `C:\Program Files\Foo\foo.exe`, Signer: "Foo", Baits: []string{"aws"}},
+	}}
+	bb := authenticode.Result{Signed: true, Valid: true, Signer: "Backblaze, Inc."}
+	if !c.SweepExempt(`C:\Program Files\Backblaze\bztransmit64.exe`, 1, &bb) {
+		t.Fatal("all-bait rule should allow sweeps")
+	}
+	foo := authenticode.Result{Signed: true, Valid: true, Signer: "Foo Ltd"}
+	if c.SweepExempt(`C:\Program Files\Foo\foo.exe`, 1, &foo) {
+		t.Fatal("single-bait trust must not allow sweeps")
+	}
+	if !c.SweepExempt(`C:\ProgramData\Microsoft\Windows Defender\Platform\4.18.1-0\MsMpEng.exe`, 1, &ms) {
+		t.Fatal("defender")
+	}
+	if c.SweepExempt(`C:\Windows\explorer.exe`, 1, &ms) {
+		t.Fatal("explorer must not be sweep-exempt")
 	}
 }
