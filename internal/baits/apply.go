@@ -215,6 +215,16 @@ func Remove(bs *config.BaitState) error {
 		if f.Created && unchanged(f) {
 			if err := os.Remove(f.Path); err != nil && !errors.Is(err, os.ErrNotExist) && firstErr == nil {
 				firstErr = err
+			} else if err == nil {
+				// The name stays visible until every handle closes (the service's
+				// instant-freeze guard lets go a moment after the delete), so wait
+				// for it: callers report "removed" right after this returns.
+				for try := 0; try < 20; try++ {
+					if _, err := os.Lstat(f.Path); errors.Is(err, os.ErrNotExist) {
+						break
+					}
+					time.Sleep(50 * time.Millisecond)
+				}
 			}
 		}
 	}

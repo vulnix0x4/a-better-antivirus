@@ -63,6 +63,7 @@ function Fail($m) {
     $r = Start-Process -FilePath $Aba -ArgumentList 'release' -NoNewWindow -PassThru
     if (-not $r.WaitForExit(60000)) { $r.Kill() }
     if (Test-Path "$data\service.log") { Write-Host '--- service.log (tail) ---'; Get-Content "$data\service.log" -Tail 120 }
+    if (Test-Path "$data\crash.log") { Write-Host '--- crash.log ---'; Get-Content "$data\crash.log" -Tail 200 }
     exit 1
 }
 

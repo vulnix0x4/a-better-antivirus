@@ -48,6 +48,13 @@ func Run(console bool) error {
 		s := newServer(true)
 		return s.run(ctx, nil)
 	}
+	// A service has no console: without this, a crash (an unrecovered panic in
+	// some goroutine, a fatal runtime error) leaves no trace at all.
+	os.MkdirAll(paths.DataDir(), 0o755)
+	if f, err := os.OpenFile(filepath.Join(paths.DataDir(), "crash.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
+		fmt.Fprintf(f, "--- service %s started %s (pid %d)\n", Version, time.Now().Format(time.RFC3339), os.Getpid())
+		debug.SetCrashOutput(f, debug.CrashOptions{})
+	}
 	return svc.Run(paths.ServiceName, &handler{})
 }
 
