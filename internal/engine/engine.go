@@ -72,16 +72,18 @@ type Engine struct {
 	Ops     Ops
 	SelfPID uint32
 
-	mu         sync.Mutex
-	cfg        *config.Config
-	classifier *classify.Classifier
-	index      map[string]string // lower path -> bait id
-	baitNames  map[string]string
-	incidents  map[uint32]*incident
-	claimed    map[uint32]time.Time // PIDs the instant path is handling
-	seen       map[string]time.Time // program|bait -> last notification, for alerts with no action
-	touched    map[uint32]*sweep    // baits each process opened recently
-	sids       map[uint32]string    // account (SID) a process read baits as, from the audit event
+	mu          sync.Mutex
+	cfg         *config.Config
+	classifier  *classify.Classifier
+	index       map[string]string // lower path -> bait id
+	baitNames   map[string]string
+	incidents   map[uint32]*incident
+	claimed     map[uint32]time.Time     // PIDs the instant path is handling
+	seen        map[string]time.Time     // program|bait -> last notification, for alerts with no action
+	touched     map[uint32]*sweep        // baits each process opened recently
+	sids        map[uint32]string        // account (SID) a process read baits as, from the audit event
+	pending     map[uint32]chan struct{} // instant decisions in progress
+	eventFrozen map[uint32]time.Time     // processes the event-log path froze
 }
 
 // sweep is what one process has opened lately. Stealers grab everything they
@@ -108,7 +110,8 @@ const window = 2 * time.Minute
 
 func New(ops Ops, selfPID uint32) *Engine {
 	return &Engine{Ops: ops, SelfPID: selfPID, incidents: map[uint32]*incident{}, claimed: map[uint32]time.Time{},
-		seen: map[string]time.Time{}, touched: map[uint32]*sweep{}, sids: map[uint32]string{}}
+		seen: map[string]time.Time{}, touched: map[uint32]*sweep{}, sids: map[uint32]string{},
+		pending: map[uint32]chan struct{}{}, eventFrozen: map[uint32]time.Time{}}
 }
 
 // Configure (re)loads config and the bait index.
@@ -179,20 +182,30 @@ func (e *Engine) DecideInstantWhy(pid uint32, path string) (bool, string) {
 		e.claim(pid)
 		return true, image + " is the `aba test` reader"
 	}
+	if !cfg.InstantFreeze {
+		return false, "instant freeze is off"
+	}
+	// From here on this pid is being decided: the event-log path waits for
+	// the decision instead of freezing it too (hashing and the signature check
+	// below can take longer than Windows takes to log the read).
+	done := e.beginDecision(pid)
+	if done == nil {
+		return false, image + " is already being handled (another bait or the event log got there first)"
+	}
 	// Instant freeze acts on a split-second inference, so it only touches
 	// ordinary, non-elevated programs in a user session. Admin tools that inspect
 	// baits (and elevated malware, out of scope) go through the event-log path.
 	if !e.Ops.UserSession(pid) {
+		done(false)
 		return false, image + " runs in session 0 (system/service)"
 	}
 	if e.Ops.Elevated(pid) {
+		done(false)
 		return false, image + " runs as administrator"
 	}
 	if e.Ops.IsSelf(image) {
+		done(false)
 		return false, image + " is ABA itself"
-	}
-	if !cfg.InstantFreeze {
-		return false, "instant freeze is off"
 	}
 	sig := e.Ops.Verify(image)
 	v := cls.Final(image, pid, baitRef(baitID), sig)
@@ -200,14 +213,14 @@ func (e *Engine) DecideInstantWhy(pid uint32, path string) (bool, string) {
 		v = e.sweepVerdict(v, swept)
 	}
 	if v.Ignored || v.DecoyOwner {
+		done(false)
 		return false, image + " is ignored or the real app"
 	}
 	if !config.Has(cfg.ActionsFor(v.Tier, time.Now()), config.ActionFreeze) {
+		done(false)
 		return false, fmt.Sprintf("%s is %s; that tier doesn't freeze right now", image, v.Tier)
 	}
-	if !e.tryClaim(pid) {
-		return false, image + " is already being frozen (another bait reported it at the same moment)"
-	}
+	done(true)
 	return true, fmt.Sprintf("%s is %s", image, v.Tier)
 }
 
@@ -217,14 +230,69 @@ func (e *Engine) DecideInstantWhy(pid uint32, path string) (bool, string) {
 // suspended after the user unfreezes it once.
 const claimDedupe = 2 * time.Second
 
-// tryClaim claims pid unless another instant decision claimed it moments ago.
-func (e *Engine) tryClaim(pid uint32) bool {
+// beginDecision starts an instant decision about pid, or returns nil if pid
+// is already being decided, was just claimed, or was frozen by the event-log
+// path. The returned func ends the decision; claimed=true claims pid.
+//
+// Exactly one of the two paths may freeze a process: Windows stacks
+// suspensions, so a double freeze leaves it suspended after one unfreeze.
+func (e *Engine) beginDecision(pid uint32) func(claimed bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if e.pending[pid] != nil {
+		return nil
+	}
 	if t, ok := e.claimed[pid]; ok && time.Since(t) < claimDedupe {
+		return nil
+	}
+	if t, ok := e.eventFrozen[pid]; ok && time.Since(t) < window {
+		return nil
+	}
+	ch := make(chan struct{})
+	e.pending[pid] = ch
+	return func(claimed bool) {
+		e.mu.Lock()
+		if claimed {
+			e.claimed[pid] = time.Now()
+		}
+		if e.pending[pid] == ch {
+			delete(e.pending, pid)
+		}
+		e.mu.Unlock()
+		close(ch)
+	}
+}
+
+// waitDecision waits (briefly) for an instant decision about pid in progress.
+func (e *Engine) waitDecision(pid uint32) {
+	e.mu.Lock()
+	ch := e.pending[pid]
+	e.mu.Unlock()
+	if ch != nil {
+		select {
+		case <-ch:
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
+// ownFreeze is the event-log path asking to freeze pid itself: false if the
+// instant path is deciding about it or has claimed it.
+func (e *Engine) ownFreeze(pid uint32) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.pending[pid] != nil {
 		return false
 	}
-	e.claimed[pid] = time.Now()
+	if t, ok := e.claimed[pid]; ok && time.Since(t) < window {
+		return false
+	}
+	for p, t := range e.eventFrozen {
+		if time.Since(t) > window {
+			delete(e.eventFrozen, p)
+		}
+	}
+	e.eventFrozen[pid] = time.Now()
 	return true
 }
 
@@ -271,11 +339,24 @@ func (e *Engine) HandleAccess(oa *evtlog.ObjectAccess) { e.handle(oa, nil) }
 // already frozen by the instant path, the moment it opened the bait.
 func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 	instant := preFrozen != nil
-	if !instant {
+	claimedNow := func() bool {
 		e.mu.Lock()
 		t, ok := e.claimed[oa.ProcessID]
 		e.mu.Unlock()
-		if ok && time.Since(t) < window {
+		return ok && time.Since(t) < window
+	}
+	// tryFreeze: the event-log path may freeze only what the instant path
+	// isn't freezing (a decision in progress is waited for).
+	tryFreeze := func() bool {
+		if e.ownFreeze(oa.ProcessID) {
+			return true
+		}
+		e.waitDecision(oa.ProcessID)
+		return e.ownFreeze(oa.ProcessID)
+	}
+	if !instant {
+		e.waitDecision(oa.ProcessID)
+		if claimedNow() {
 			return // the instant path already caught and is reporting this process
 		}
 	}
@@ -382,8 +463,14 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 	if instant {
 		latency = time.Since(oa.Time)
 	} else if canTouch && config.Has(actionsFor(pre.Tier), config.ActionFreeze) {
-		frozen, _ = e.Ops.SuspendTree(oa.ProcessID)
-		latency = time.Since(oa.Time)
+		if !tryFreeze() {
+			if claimedNow() {
+				return // the instant path froze it and reports it
+			}
+		} else {
+			frozen, _ = e.Ops.SuspendTree(oa.ProcessID)
+			latency = time.Since(oa.Time)
+		}
 	}
 
 	// 3-4. Signature and final verdict.
@@ -418,8 +505,12 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 		e.Ops.Resume(frozen)
 		frozen = nil
 	} else if len(frozen) == 0 && canTouch && config.Has(acts, config.ActionFreeze) {
-		frozen, _ = e.Ops.SuspendTree(oa.ProcessID)
-		latency = time.Since(oa.Time)
+		if instant || tryFreeze() {
+			frozen, _ = e.Ops.SuspendTree(oa.ProcessID)
+			latency = time.Since(oa.Time)
+		} else if claimedNow() {
+			return // the instant path froze it and reports it
+		}
 	}
 
 	a := &alerts.Alert{

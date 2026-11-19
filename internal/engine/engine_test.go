@@ -33,6 +33,7 @@ type fakeOps struct {
 	injected  map[uint32]string
 	elevated  map[uint32]bool
 	gone      map[uint32]bool // exited: no session, no create time
+	slowSig   time.Duration   // Verify takes this long (signature checks can be slow)
 }
 
 func newFake() *fakeOps {
@@ -52,7 +53,10 @@ func (f *fakeOps) CreateTime(pid uint32) int64 {
 	}
 	return 1
 }
-func (f *fakeOps) Verify(p string) authenticode.Result { return f.sigs[p] }
+func (f *fakeOps) Verify(p string) authenticode.Result {
+	time.Sleep(f.slowSig)
+	return f.sigs[p]
+}
 func (f *fakeOps) SuspendTree(pid uint32) ([]uint32, error) {
 	f.suspended = append(f.suspended, pid)
 	return []uint32{pid, pid + 1}, nil
@@ -608,5 +612,39 @@ func TestSweepByProcessThatAlreadyExited(t *testing.T) {
 		if a.Tier == config.TierCritical {
 			t.Fatalf("SYSTEM reader treated as a user sweep: %+v", a)
 		}
+	}
+}
+
+func TestInstantAndEventLogNeverBothFreeze(t *testing.T) {
+	// The instant path is still checking the signature (slow) when Windows
+	// has already logged the read: the event-log path must wait for that
+	// decision instead of freezing the process a second time.
+	e, f := setup("balanced")
+	e.cfg.InstantFreeze = true
+	img := `C:\Users\bob\AppData\Local\Temp\x\stealer.exe`
+	f.images[100] = img
+	f.slowSig = 150 * time.Millisecond
+	got := make(chan bool, 1)
+	go func() { got <- e.DecideInstant(100, desktopBait) }()
+	time.Sleep(30 * time.Millisecond)
+	e.HandleAccess(ev(100, img, desktopBait, 1))
+	if !<-got {
+		t.Fatal("instant path should freeze it")
+	}
+	if len(f.suspended) != 0 || len(f.saved) != 0 {
+		t.Fatalf("event-log path froze/alerted too: suspended=%v alerts=%d", f.suspended, len(f.saved))
+	}
+
+	// The other way round: the event-log path froze it first, so a late
+	// instant decision for the same process declines.
+	e2, f2 := setup("balanced")
+	e2.cfg.InstantFreeze = true
+	f2.images[200] = img
+	e2.HandleAccess(ev(200, img, desktopBait, 1))
+	if len(f2.suspended) != 1 {
+		t.Fatalf("event-log path should freeze: %v", f2.suspended)
+	}
+	if e2.DecideInstant(200, discordBait) {
+		t.Fatal("instant path froze a process the event-log path already froze")
 	}
 }

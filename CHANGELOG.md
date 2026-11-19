@@ -22,6 +22,10 @@ A new look, and a setup that takes a minute.
   and removes it afterwards, explains what went wrong instead of dumping a PowerShell error, and makes
   `aba` work in the same window right away.
 - Windows paths in setup no longer lose their backslashes.
+- **Fix: a stealer could be frozen twice.** When Windows logged the read faster than instant freeze finished
+  checking the program's signature, both detection paths froze it and raised an alert each; one "unfreeze"
+  then left it suspended. Now only one path ever freezes a process: the event log waits for an instant
+  decision in progress, and instant freeze stands down for a process the event log already froze.
 
 ## v0.4.0
 
