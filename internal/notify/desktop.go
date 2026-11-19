@@ -132,9 +132,12 @@ func ShowPopup(a *alerts.Alert, cli string) {
 		// "Is it yours?" is the wrong question here: people who ran a cracked
 		// game or a "free Nitro" tool did start it themselves. Ask whether it
 		// should be reading this, and only trust signed programs in one click.
+		// The question must be one where "Yes" means kill: an earlier "Did you
+		// expect it to read this?" made an honest "yes" kill the program.
 		oneClick := trust.OneClick(a)
-		text := body + "\nDid you expect " + a.ExeName() + " to read " + baitWhat(a) + "?\n" +
+		text := body + "\n" + a.ExeName() + " was frozen while reading " + baitWhat(a) + ".\n" +
 			"Games, mods, cheats, cracks and \"free\" tools never need to, even ones you started yourself.\n\n" +
+			"Kill it?\n" +
 			"Yes = Kill it (recommended)\n"
 		if oneClick {
 			text += "No = It's mine: unfreeze it and trust it for this from now on\n"

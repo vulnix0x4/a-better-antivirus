@@ -162,7 +162,7 @@ Every alert asks whether that program should be reading that bait. One click on 
 - a script host or runtime (`python.exe`, `powershell.exe`, `java.exe`…) is pinned to **the exact command line**: trusting your script never trusts every script;
 - a Windows program that went through several apps' data is never trusted permanently, only unfrozen that once.
 
-When something is **frozen**, the popup asks "Did you expect it to read this?" rather than "is it yours?" (you *did* start that cracked game yourself), and only signed programs can be trusted in one click; anything else is unfrozen that once (`aba trust <id>` in a terminal still trusts it, pinned to the file). A program that keeps touching a bait without you answering only pops up once every 12 hours, except script hosts and anything critical; the rest goes to `aba alerts`.
+When something is **frozen**, the popup asks "Kill it?" and reminds you that games, mods, cheats and cracks never need to read this, rather than asking "is it yours?" (you *did* start that cracked game yourself), and only signed programs can be trusted in one click; anything else is unfrozen that once (`aba trust <id>` in a terminal still trusts it, pinned to the file). A program that keeps touching a bait without you answering only pops up once every 12 hours, except script hosts and anything critical; the rest goes to `aba alerts`.
 
 **Learning mode** (Strict and custom setups, 3 days by default): critical threats are stopped from minute one, but merely suspicious programs only alert, so you can mark your own apps before Strict starts freezing them. You get a notification when it ends. `aba learn` lists everything that tripped, to trust several at once.
 

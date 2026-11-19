@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.5.1
+
+- **Fix: the frozen popup's question was back to front.** It asked "Did you expect it to read this?" with
+  *Yes = Kill it*, so answering honestly that you expected it killed the program. It now asks "Kill it?"
+  (*Yes* kills it, *No* means it's yours), with the same reminder that games, mods, cheats and cracks never
+  need to read your data.
+
 ## v0.5.0
 
 A new look, and a setup that takes a minute.
