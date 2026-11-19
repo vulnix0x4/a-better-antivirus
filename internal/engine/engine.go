@@ -81,6 +81,7 @@ type Engine struct {
 	claimed    map[uint32]time.Time // PIDs the instant path is handling
 	seen       map[string]time.Time // program|bait -> last notification, for alerts with no action
 	touched    map[uint32]*sweep    // baits each process opened recently
+	sids       map[uint32]string    // account (SID) a process read baits as, from the audit event
 }
 
 // sweep is what one process has opened lately. Stealers grab everything they
@@ -107,7 +108,7 @@ const window = 2 * time.Minute
 
 func New(ops Ops, selfPID uint32) *Engine {
 	return &Engine{Ops: ops, SelfPID: selfPID, incidents: map[uint32]*incident{}, claimed: map[uint32]time.Time{},
-		seen: map[string]time.Time{}, touched: map[uint32]*sweep{}}
+		seen: map[string]time.Time{}, touched: map[uint32]*sweep{}, sids: map[uint32]string{}}
 }
 
 // Configure (re)loads config and the bait index.
@@ -116,7 +117,7 @@ func (e *Engine) Configure(cfg *config.Config, st *config.State) {
 	defer e.mu.Unlock()
 	e.cfg = cfg
 	e.classifier = &classify.Classifier{Env: classify.DefaultEnv(), Ignore: cfg.Ignore,
-		Hash: e.Ops.Hash, CommandLine: e.Ops.CommandLine, UserSession: e.Ops.UserSession}
+		Hash: e.Ops.Hash, CommandLine: e.Ops.CommandLine, UserSession: e.userSession}
 	e.index = baits.Index(st)
 	e.baitNames = map[string]string{}
 	for id, b := range st.Baits {
@@ -291,6 +292,14 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 		return
 	}
 
+	if oa.UserSID != "" {
+		e.mu.Lock()
+		if len(e.sids) > 4096 {
+			e.sids = map[uint32]string{}
+		}
+		e.sids[oa.ProcessID] = oa.UserSID
+		e.mu.Unlock()
+	}
 	var swept []string
 	if access == "read" {
 		swept = e.touch(oa.ProcessID, baitID, time.Now())
@@ -584,9 +593,14 @@ func (e *Engine) touch(pid uint32, baitID string, now time.Time) []string {
 		}
 	}
 	sw := e.touched[pid]
-	if sw == nil || sw.createTime != ct {
+	// A different process that reuses the PID starts afresh. (ct is 0 once the
+	// process has exited: its late audit events still count.)
+	if sw == nil || (ct != 0 && sw.createTime != 0 && sw.createTime != ct) {
 		sw = &sweep{createTime: ct, baits: map[string]time.Time{}}
 		e.touched[pid] = sw
+	}
+	if sw.createTime == 0 {
+		sw.createTime = ct
 	}
 	sw.baits[sweepUnit(baitID)] = now
 	var ids []string
@@ -606,7 +620,42 @@ func (e *Engine) sweepable(pid uint32) bool {
 	if tr := e.Ops.PendingTest(); tr != nil && tr.PID == pid {
 		return false
 	}
-	return e.Ops.UserSession(pid) && !e.Ops.Elevated(pid)
+	if !e.userSession(pid) {
+		return false
+	}
+	// Once it has exited its elevation can't be checked; it's judged by what it read.
+	return e.Ops.CreateTime(pid) == 0 || !e.Ops.Elevated(pid)
+}
+
+// userSession reports whether pid is an ordinary user's program rather than
+// a Windows service. While it runs, its session says so. A fast reader (or a
+// stealer that grabs everything and quits) may be gone by the time the audit
+// event arrives; then the account it read as, from that event, says so.
+func (e *Engine) userSession(pid uint32) bool {
+	if e.Ops.UserSession(pid) {
+		return true
+	}
+	if e.Ops.CreateTime(pid) != 0 {
+		return false // running, in session 0
+	}
+	e.mu.Lock()
+	sid := e.sids[pid]
+	e.mu.Unlock()
+	return sid != "" && !serviceAccount(sid)
+}
+
+// serviceAccount: SYSTEM, LOCAL/NETWORK SERVICE and per-service accounts.
+func serviceAccount(sid string) bool {
+	switch sid {
+	case "S-1-5-18", "S-1-5-19", "S-1-5-20":
+		return true
+	}
+	for _, p := range []string{"S-1-5-80-", "S-1-5-82-", "S-1-5-90-", "S-1-5-96-"} {
+		if strings.HasPrefix(sid, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // sweepVerdict turns a verdict into a critical one: the reader went through

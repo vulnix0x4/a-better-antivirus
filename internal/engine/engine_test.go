@@ -32,11 +32,12 @@ type fakeOps struct {
 	cmdlines  map[uint32]string
 	injected  map[uint32]string
 	elevated  map[uint32]bool
+	gone      map[uint32]bool // exited: no session, no create time
 }
 
 func newFake() *fakeOps {
 	return &fakeOps{images: map[uint32]string{}, sigs: map[string]authenticode.Result{}, saved: map[string]*alerts.Alert{}, state: config.NewState(),
-		hashes: map[string]string{}, cmdlines: map[uint32]string{}, injected: map[uint32]string{}, elevated: map[uint32]bool{}}
+		hashes: map[string]string{}, cmdlines: map[uint32]string{}, injected: map[uint32]string{}, elevated: map[uint32]bool{}, gone: map[uint32]bool{}}
 }
 
 func (f *fakeOps) ImagePath(pid uint32) (string, error) {
@@ -45,7 +46,12 @@ func (f *fakeOps) ImagePath(pid uint32) (string, error) {
 	}
 	return "", fmt.Errorf("n/a")
 }
-func (f *fakeOps) CreateTime(pid uint32) int64         { return 1 }
+func (f *fakeOps) CreateTime(pid uint32) int64 {
+	if f.gone[pid] {
+		return 0
+	}
+	return 1
+}
 func (f *fakeOps) Verify(p string) authenticode.Result { return f.sigs[p] }
 func (f *fakeOps) SuspendTree(pid uint32) ([]uint32, error) {
 	f.suspended = append(f.suspended, pid)
@@ -63,7 +69,7 @@ func (f *fakeOps) NotifyPhone(a *alerts.Alert)                    { f.phone = ap
 func (f *fakeOps) RetireDecoy(id, why string)                     { f.retired = append(f.retired, id) }
 func (f *fakeOps) PendingTest() *TestRequest                      { return f.test }
 func (f *fakeOps) ClearTest()                                     { f.test = nil }
-func (f *fakeOps) UserSession(uint32) bool                        { return true }
+func (f *fakeOps) UserSession(pid uint32) bool                    { return !f.gone[pid] }
 func (f *fakeOps) Elevated(pid uint32) bool                       { return pid == 777 || f.elevated[pid] }
 func (f *fakeOps) Hash(img string) string                         { return f.hashes[img] }
 func (f *fakeOps) CommandLine(pid uint32) string                  { return f.cmdlines[pid] }
@@ -570,5 +576,37 @@ func TestConcurrentGuardsFreezeOnce(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatalf("frozen %d times; must be exactly once (suspensions stack)", n)
+	}
+}
+
+func TestSweepByProcessThatAlreadyExited(t *testing.T) {
+	// A fast Windows program (or a stealer that grabs everything and quits)
+	// is gone by the time the audit events arrive: no session to look up.
+	// The account it read as decides: a user, not a service.
+	e, f := setup("balanced")
+	find := `C:\Windows\System32\find.exe`
+	f.sigs[find] = authenticode.Result{Signed: true, Valid: true, Signer: "Microsoft Windows"}
+	f.gone[1600] = true
+	for _, b := range []string{desktopBait, discordBait, chromeBait} {
+		x := ev(1600, find, b, 1)
+		x.UserSID = "S-1-5-21-1111-2222-3333-1001"
+		e.HandleAccess(x)
+	}
+	if a := lastAlert(f); a == nil || a.Tier != config.TierCritical || len(a.Verdict.Swept) != 3 || !a.Did(config.ActionBlockProgram) {
+		t.Fatalf("exited sweeper: %+v", a)
+	}
+	// The same from a service account is not a sweep.
+	e2, f2 := setup("balanced")
+	f2.sigs[find] = f.sigs[find]
+	f2.gone[1700] = true
+	for _, b := range []string{desktopBait, discordBait, chromeBait} {
+		x := ev(1700, find, b, 1)
+		x.UserSID = "S-1-5-18"
+		e2.HandleAccess(x)
+	}
+	for _, a := range f2.saved {
+		if a.Tier == config.TierCritical {
+			t.Fatalf("SYSTEM reader treated as a user sweep: %+v", a)
+		}
 	}
 }
