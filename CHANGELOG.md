@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.5.4
+
+- **A sweeping program is frozen before it gets the third app's data.** Instant freeze identifies who opened a
+  bait by letting the open finish and seeing who wakes, so a program going through several apps' data was
+  frozen just *after* opening the third, and a quick one (`find.exe` in a test) could read it and exit first.
+  Now, when a program that already read two other apps' data is among those paused inside the open, it's
+  frozen while still paused: it never gets the file.
+
 ## v0.5.3
 
 - **Fix: instant freeze could blame the wrong program.** When ABA itself read one of its baits (its health

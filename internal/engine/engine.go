@@ -704,6 +704,51 @@ func (e *Engine) touch(pid uint32, baitID string, now time.Time) []string {
 	return ids
 }
 
+// SweepSuspect returns which of pids (programs paused inside an open of path)
+// would complete a sweep by opening it: the one that already read two other
+// apps' data within the window. Instant freeze normally identifies the opener
+// by letting the open go through and seeing who wakes, so a quick sweeper got
+// the third app's data (and could even exit) before it was frozen. With a
+// suspect known, it's decided while the open is still paused. 0 if none, or
+// more than one.
+func (e *Engine) SweepSuspect(path string, pids []uint32) uint32 {
+	now := time.Now()
+	e.mu.Lock()
+	baitID, ok := e.index[paths.Key(path)]
+	if !ok {
+		e.mu.Unlock()
+		return 0
+	}
+	unit := sweepUnit(baitID)
+	var hit uint32
+	var hitCT int64
+	n := 0
+	for _, pid := range pids {
+		sw := e.touched[pid]
+		if pid == e.SelfPID || sw == nil {
+			continue
+		}
+		others := 0
+		for u, t := range sw.baits {
+			if u != unit && now.Sub(t) < window {
+				others++
+			}
+		}
+		if others+1 >= sweepApps {
+			hit, hitCT = pid, sw.createTime
+			n++
+		}
+	}
+	e.mu.Unlock()
+	if n != 1 {
+		return 0
+	}
+	if ct := e.Ops.CreateTime(hit); ct != 0 && hitCT != 0 && ct != hitCT {
+		return 0 // the PID was reused by another process
+	}
+	return hit
+}
+
 // sweepable: a sweep only counts for ordinary programs in a user session.
 // Services and admin tools (backup, antivirus) are out of reach of a
 // user-level stealer, and `aba test` is a test.

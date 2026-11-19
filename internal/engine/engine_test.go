@@ -495,6 +495,35 @@ func TestInstantSweep(t *testing.T) {
 	}
 }
 
+func TestSweepSuspect(t *testing.T) {
+	e, f := setup("balanced")
+	e.cfg.InstantFreeze = true
+	find := `C:\Windows\System32\find.exe`
+	f.images[300], f.images[301] = find, find
+	f.sigs[find] = authenticode.Result{Signed: true, Valid: true, Signer: "Microsoft Windows"}
+	if e.SweepSuspect(metamaskBait, []uint32{300}) != 0 {
+		t.Fatal("nothing read yet: no suspect")
+	}
+	e.DecideInstant(300, discordBait)
+	if e.SweepSuspect(metamaskBait, []uint32{300, 301}) != 0 {
+		t.Fatal("one app's data so far: no suspect")
+	}
+	e.DecideInstant(300, chromeBait)
+	e.DecideInstant(301, chromeBait)
+	if e.SweepSuspect(discordBait, []uint32{300}) != 0 {
+		t.Fatal("opening an app it already read isn't a third app")
+	}
+	if got := e.SweepSuspect(metamaskBait, []uint32{301, 300, 999}); got != 300 {
+		t.Fatalf("the program that read two other apps is the suspect, got %d", got)
+	}
+	if !e.DecideInstant(300, metamaskBait) {
+		t.Fatal("deciding on the suspect: freeze before it reads the third app's data")
+	}
+	if e.SweepSuspect(`C:\not\a\bait.txt`, []uint32{300}) != 0 {
+		t.Fatal("not a bait")
+	}
+}
+
 func TestInjectedWindowsProgramIsCritical(t *testing.T) {
 	e, f := setup("balanced")
 	np := `C:\Windows\System32\notepad.exe`

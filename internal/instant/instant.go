@@ -274,6 +274,9 @@ type Watcher struct {
 	OnOpen func(path string, at time.Time, pids []uint32)
 	// OnOther runs for opens that don't read contents (delete, security checks).
 	OnOther func(path string, access uint32)
+	// Suspect (optional) picks, among programs paused inside an open, one
+	// already known to be sweeping: it's reported before the open is let go.
+	Suspect func(path string, pids []uint32) uint32
 	Logf    func(format string, args ...any)
 	Self    uint32
 	Settle  time.Duration
@@ -387,6 +390,19 @@ func (w *Watcher) guard(path string, stop windows.Handle) {
 		// out made any program that happened to wake at that instant look like
 		// the opener, and get frozen for a read it never made.
 		stuck := FindStuck(tick0, 0, settle)
+		// A program already known to be sweeping (it read other apps' data) is
+		// decided while the open is still paused, so it never gets this file.
+		if w.Suspect != nil && !selfIn(stuck, w.Self) {
+			if p := w.Suspect(path, stuckPIDs(stuck)); p != 0 {
+				w.logf("instant: %s opened while pid %d (already sweeping) was paused in it", path, p)
+				w.report(path, at, []uint32{p})
+				g.Release()
+				if stopped(150 * time.Millisecond) {
+					return
+				}
+				continue
+			}
+		}
 		g.Release()
 		pids := Woke(stuck, 0, 3*time.Millisecond)
 		if selfIn(stuck, w.Self) {
@@ -399,22 +415,37 @@ func (w *Watcher) guard(path string, stop windows.Handle) {
 		} else if len(pids) == 1 {
 			w.logf("instant: %s opened by pid %d", path, pids[0])
 		}
-		if w.OnOpen != nil {
-			func() {
-				defer func() {
-					if p := recover(); p != nil {
-						w.logf("instant freeze handler panicked: %v", p)
-					}
-				}()
-				w.OnOpen(path, at, pids)
-			}()
-		}
+		w.report(path, at, pids)
 		// Give the opener time to finish before re-arming (a trusted reader may
 		// still hold the file; Arm just retries until it's free).
 		if stopped(150 * time.Millisecond) {
 			return
 		}
 	}
+}
+
+func (w *Watcher) report(path string, at time.Time, pids []uint32) {
+	if w.OnOpen == nil {
+		return
+	}
+	defer func() {
+		if p := recover(); p != nil {
+			w.logf("instant freeze handler panicked: %v", p)
+		}
+	}()
+	w.OnOpen(path, at, pids)
+}
+
+func stuckPIDs(stuck []Thread) []uint32 {
+	seen := map[uint32]bool{}
+	var out []uint32
+	for _, t := range stuck {
+		if !seen[t.PID] {
+			seen[t.PID] = true
+			out = append(out, t.PID)
+		}
+	}
+	return out
 }
 
 const outFlagModesProvided = 0x2

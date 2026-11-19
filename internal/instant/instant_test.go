@@ -94,6 +94,51 @@ func TestOwnReadIsNotBlamedOnOthers(t *testing.T) {
 	}
 }
 
+// A program already known to be sweeping is reported while it's still paused
+// inside the open, before it can read anything.
+func TestSuspectDecidedBeforeTheRead(t *testing.T) {
+	dir := t.TempDir()
+	bait := filepath.Join(dir, "passwords.txt")
+	os.WriteFile(bait, []byte("email / hunter2\r\n"), 0o644)
+	out := filepath.Join(dir, "out.txt")
+	var reader *exec.Cmd
+	type seen struct {
+		pids    []uint32
+		readYet bool
+	}
+	got := make(chan seen, 4)
+	w := &Watcher{Self: uint32(os.Getpid()),
+		Suspect: func(_ string, pids []uint32) uint32 {
+			for _, p := range pids {
+				if reader != nil && reader.Process != nil && p == uint32(reader.Process.Pid) {
+					return p
+				}
+			}
+			return 0
+		},
+		OnOpen: func(_ string, _ time.Time, pids []uint32) {
+			b, _ := os.ReadFile(out)
+			got <- seen{pids, len(b) > 0}
+		}}
+	w.Sync([]string{bait})
+	defer w.Stop()
+	time.Sleep(100 * time.Millisecond)
+	reader = exec.Command("cmd.exe", "/c", "type", bait, ">", out)
+	reader.Start()
+	defer reader.Wait()
+	select {
+	case s := <-got:
+		if len(s.pids) != 1 || s.pids[0] != uint32(reader.Process.Pid) {
+			t.Fatalf("reported %v, want the reader %d", s.pids, reader.Process.Pid)
+		}
+		if s.readYet {
+			t.Fatal("the reader had already read the bait when it was reported")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("watcher never saw the open")
+	}
+}
+
 // The CI hang taught us an innocent thread can start a long wait at the same
 // moment as the opener (e.g. a runner reading a pipe). Only the opener wakes
 // when ABA lets go, so only it may be reported.
