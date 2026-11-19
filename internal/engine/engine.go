@@ -204,8 +204,27 @@ func (e *Engine) DecideInstantWhy(pid uint32, path string) (bool, string) {
 	if !config.Has(cfg.ActionsFor(v.Tier, time.Now()), config.ActionFreeze) {
 		return false, fmt.Sprintf("%s is %s; that tier doesn't freeze right now", image, v.Tier)
 	}
-	e.claim(pid)
+	if !e.tryClaim(pid) {
+		return false, image + " is already being frozen (another bait reported it at the same moment)"
+	}
 	return true, fmt.Sprintf("%s is %s", image, v.Tier)
+}
+
+// claimDedupe: several bait guards can fire in the same instant (e.g. while
+// the service re-arms them) and all point at the same opener. Only the first
+// may freeze it: Windows stacks suspensions, so a second freeze would leave it
+// suspended after the user unfreezes it once.
+const claimDedupe = 2 * time.Second
+
+// tryClaim claims pid unless another instant decision claimed it moments ago.
+func (e *Engine) tryClaim(pid uint32) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if t, ok := e.claimed[pid]; ok && time.Since(t) < claimDedupe {
+		return false
+	}
+	e.claimed[pid] = time.Now()
+	return true
 }
 
 // claim marks pid as handled by the instant path, so the event-log path (which

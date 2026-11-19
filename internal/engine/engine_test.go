@@ -284,7 +284,8 @@ func TestInstantFreezeDecisions(t *testing.T) {
 		t.Error("never ourselves")
 	}
 	e.cfg.LearningUntil = time.Now().Add(time.Hour)
-	if !e.DecideInstant(100, desktopBait) {
+	f.images[101] = stealer
+	if !e.DecideInstant(101, desktopBait) {
 		t.Error("learning mode must still freeze critical readers")
 	}
 	e.cfg.LearningUntil = time.Time{}
@@ -373,7 +374,10 @@ func TestInstantRefreezeIsTracked(t *testing.T) {
 	f.images[100] = `C:\Users\bob\AppData\Local\Temp\x\stealer.exe`
 	e.DecideInstant(100, desktopBait)
 	e.HandleOpen(100, desktopBait, time.Now(), []uint32{100})
-	f.state.Frozen = nil // user resumed it (`aba resume`)
+	f.state.Frozen = nil // user resumed it (`aba resume`), a while later
+	e.mu.Lock()
+	e.claimed[100] = time.Now().Add(-claimDedupe)
+	e.mu.Unlock()
 	e.DecideInstant(100, desktopBait)
 	e.HandleOpen(100, `C:\Users\bob\AppData\Roaming\discord\Local Storage\leveldb\000005.ldb`, time.Now(), []uint32{100})
 	if len(f.saved) != 2 || len(f.state.Frozen) != 1 {
@@ -542,5 +546,29 @@ func TestYourFilesCountAsOneInASweep(t *testing.T) {
 	e.HandleAccess(ev(1500, od, chromeBait, 1))
 	if a := lastAlert(f); a.Tier != config.TierCritical || len(a.Verdict.Swept) != 3 {
 		t.Fatalf("files + 2 apps: %+v", a)
+	}
+}
+
+func TestConcurrentGuardsFreezeOnce(t *testing.T) {
+	e, f := setup("balanced")
+	e.cfg.InstantFreeze = true
+	f.images[100] = `C:\Users\bob\AppData\Local\Temp\x\stealer.exe`
+	// Two baits' guards fire at the same instant and both point at pid 100.
+	var wg sync.WaitGroup
+	results := make(chan bool, 2)
+	for _, b := range []string{desktopBait, discordBait} {
+		wg.Add(1)
+		go func(b string) { defer wg.Done(); results <- e.DecideInstant(100, b) }(b)
+	}
+	wg.Wait()
+	close(results)
+	n := 0
+	for ok := range results {
+		if ok {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("frozen %d times; must be exactly once (suspensions stack)", n)
 	}
 }
