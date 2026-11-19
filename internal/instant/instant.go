@@ -256,6 +256,15 @@ func Woke(stuck []Thread, skip uint32, after time.Duration) []uint32 {
 	return out
 }
 
+func selfIn(stuck []Thread, self uint32) bool {
+	for _, t := range stuck {
+		if self != 0 && t.PID == self {
+			return true
+		}
+	}
+	return false
+}
+
 // ---- watcher over all baits ----
 
 // Watcher keeps a guard on every bait and reports openers while they're paused.
@@ -373,10 +382,16 @@ func (w *Watcher) guard(path string, stop windows.Handle) {
 			}
 			continue
 		}
-		stuck := FindStuck(tick0, w.Self, settle)
+		// ABA's own threads are included on purpose: when ABA itself reads a
+		// bait (health check, repair), its stuck thread is the opener. Leaving it
+		// out made any program that happened to wake at that instant look like
+		// the opener, and get frozen for a read it never made.
+		stuck := FindStuck(tick0, 0, settle)
 		g.Release()
-		pids := Woke(stuck, w.Self, 3*time.Millisecond)
-		if len(pids) > 1 {
+		pids := Woke(stuck, 0, 3*time.Millisecond)
+		if selfIn(stuck, w.Self) {
+			pids = nil // our own read
+		} else if len(pids) > 1 {
 			// More than one program woke at that instant: don't guess. The
 			// event-log path still catches whichever one actually reads.
 			w.logf("instant: %s opened, but %v all woke at once; leaving it to the event log", path, pids)

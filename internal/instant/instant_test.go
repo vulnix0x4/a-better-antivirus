@@ -54,6 +54,46 @@ func TestNonReadOpensAreLetThrough(t *testing.T) {
 	}
 }
 
+// ABA reading its own bait (the health check does) must not be blamed on
+// whatever other program happens to wake at that moment.
+func TestOwnReadIsNotBlamedOnOthers(t *testing.T) {
+	for i := 0; i < 5; i++ {
+		dir := t.TempDir()
+		bait := filepath.Join(dir, "passwords.txt")
+		os.WriteFile(bait, []byte("email / hunter2\r\n"), 0o644)
+		got := make(chan []uint32, 4)
+		w := &Watcher{Self: uint32(os.Getpid()), OnOpen: func(_ string, _ time.Time, pids []uint32) { got <- pids }}
+		w.Sync([]string{bait})
+		time.Sleep(100 * time.Millisecond)
+
+		// Bystanders that keep starting short waits, like a busy program would.
+		stop := make(chan struct{})
+		var bys []*exec.Cmd
+		for j := 0; j < 3; j++ {
+			c := exec.Command("ping.exe", "-n", "4", "127.0.0.1")
+			c.Start()
+			bys = append(bys, c)
+		}
+		if _, err := os.ReadFile(bait); err != nil { // our own read
+			t.Fatal(err)
+		}
+		select {
+		case pids := <-got:
+			if len(pids) != 0 {
+				t.Fatalf("run %d: our own read was blamed on %v", i, pids)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("watcher never saw the open")
+		}
+		close(stop)
+		for _, c := range bys {
+			c.Process.Kill()
+			c.Wait()
+		}
+		w.Stop()
+	}
+}
+
 // The CI hang taught us an innocent thread can start a long wait at the same
 // moment as the opener (e.g. a runner reading a pipe). Only the opener wakes
 // when ABA lets go, so only it may be reported.

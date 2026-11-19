@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.5.3
+
+- **Fix: instant freeze could blame the wrong program.** When ABA itself read one of its baits (its health
+  check does, a second after the service starts), instant freeze looked for whichever program woke at that
+  moment but left ABA's own threads out, so a program that happened to wake then could be reported as the
+  opener and frozen for a read it never made. ABA's own reads are now recognised and blamed on no one.
+  Found through an intermittent end-to-end test failure.
+
 ## v0.5.2
 
 - **Stealers that run on Java, Python or Node are stopped at the first bait.** A `.jar` "game" double-clicked
