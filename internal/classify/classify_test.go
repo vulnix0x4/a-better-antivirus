@@ -146,6 +146,54 @@ func TestTrustRulesArePinned(t *testing.T) {
 	}
 }
 
+func TestRuntimeRunningADroppedScript(t *testing.T) {
+	java := `C:\Program Files\Eclipse Adoptium\jre-21.0.13.9-hotspot\bin\javaw.exe`
+	cmd := map[uint32]string{
+		1:  `"` + java + `" -jar "C:\Users\bob\Desktop\zombiesurvival.jar"`,
+		2:  `"C:\Python312\pythonw.exe" C:\Users\bob\Downloads\free_nitro.pyw`,
+		3:  `node "C:\Users\bob\AppData\Local\Temp\x1\run.js" --silent`,
+		5:  `"` + java + `" -jar C:\Users\bob\OneDrive\Desktop\mod.jar`, // pid 4 is the kernel
+		10: `"C:\Python312\python.exe" C:\Users\bob\code\sync.py`,
+		11: `node C:\Users\bob\AppData\Roaming\npm\node_modules\@anthropic-ai\claude-code\cli.js`,
+		12: `"C:\Python312\python.exe" -c "print(1)"`,
+		13: `"C:\Python312\python.exe" sync.py --out C:\Users\bob\Downloads`,
+	}
+	c := &Classifier{Env: env, CommandLine: func(pid uint32) string { return cmd[pid] }}
+	signed := authenticode.Result{Signed: true, Valid: true, Signer: "Eclipse.org Foundation, Inc."}
+	for pid, img := range map[uint32]string{1: java, 2: `C:\Python312\pythonw.exe`, 3: `C:\Program Files\nodejs\node.exe`, 5: java} {
+		if v := c.Final(img, pid, Bait{ID: "discord"}, signed); v.Tier != config.TierCritical {
+			t.Errorf("pid %d (%s): a script from a drop zone must be critical, got %+v", pid, cmd[pid], v)
+		}
+	}
+	// Scripts kept elsewhere (your projects, npm/pip tools in AppData) stay a warning.
+	for pid, img := range map[uint32]string{10: `C:\Python312\python.exe`, 11: `C:\Program Files\nodejs\node.exe`, 12: `C:\Python312\python.exe`} {
+		if v := c.Final(img, pid, Bait{ID: "discord"}, signed); v.Tier != config.TierWarn {
+			t.Errorf("pid %d (%s): want warn, got %+v", pid, cmd[pid], v)
+		}
+	}
+	if v := c.Final(`C:\Python312\python.exe`, 13, Bait{ID: "discord"}, signed); v.Tier != config.TierCritical {
+		// A drop-zone path anywhere on the command line counts: we can't tell a
+		// script from an argument, and reading a bait is enough to be wrong here.
+		t.Errorf("drop-zone argument: %+v", v)
+	}
+	if got, where := DroppedScript(cmd[1]); got != `C:\Users\bob\Desktop\zombiesurvival.jar` || where != "Desktop" {
+		t.Fatalf("DroppedScript: %q %q", got, where)
+	}
+}
+
+func TestSplitCommandLine(t *testing.T) {
+	got := SplitCommandLine(`"C:\Program Files\x\a.exe" -jar "C:\a b\c.jar"  plain "q\"uote"`)
+	want := []string{`C:\Program Files\x\a.exe`, "-jar", `C:\a b\c.jar`, "plain", `q"uote`}
+	if len(got) != len(want) {
+		t.Fatalf("got %q", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("arg %d: got %q want %q", i, got[i], want[i])
+		}
+	}
+}
+
 func TestSweepExempt(t *testing.T) {
 	c := &Classifier{Env: env, Ignore: []config.IgnoreRule{
 		{Path: `C:\Program Files\Backblaze\bztransmit64.exe`, Signer: "Backblaze"},

@@ -66,6 +66,66 @@ var runtimes = set(
 	"autohotkey.exe", "autohotkey64.exe", "autohotkeyu64.exe", "dotnet.exe", "lua.exe", "tclsh.exe", "wish.exe",
 )
 
+// dropZones are where downloaded and double-clicked files land. AppData is left
+// out on purpose: tools installed with npm or pip run their scripts from there.
+var dropZones = []struct{ seg, name string }{
+	{`\desktop\`, "Desktop"},
+	{`\downloads\`, "Downloads folder"},
+	{`\appdata\local\temp\`, "Temp folder"},
+	{`\windows\temp\`, "Temp folder"},
+}
+
+// DroppedScript returns the first argument of a runtime's command line that is
+// an absolute path in a drop zone (Desktop, Downloads, Temp), and which zone.
+func DroppedScript(cmdline string) (path, where string) {
+	args := SplitCommandLine(cmdline)
+	for _, a := range args[min(1, len(args)):] {
+		if len(a) < 3 || !(a[1] == ':' && (a[2] == '\\' || a[2] == '/') || strings.HasPrefix(a, `\\`)) {
+			continue
+		}
+		p := strings.ToLower(strings.ReplaceAll(a, "/", `\`)) + `\`
+		for _, z := range dropZones {
+			if strings.Contains(p, z.seg) {
+				return a, z.name
+			}
+		}
+	}
+	return "", ""
+}
+
+// SplitCommandLine splits a Windows command line into arguments (double quotes
+// group, a backslash before a quote escapes it).
+func SplitCommandLine(s string) []string {
+	var args []string
+	var cur strings.Builder
+	inQuote, have := false, false
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		switch {
+		case ch == '\\' && i+1 < len(s) && s[i+1] == '"':
+			cur.WriteByte('"')
+			i++
+			have = true
+		case ch == '"':
+			inQuote = !inQuote
+			have = true
+		case (ch == ' ' || ch == '\t') && !inQuote:
+			if have {
+				args = append(args, cur.String())
+				cur.Reset()
+				have = false
+			}
+		default:
+			cur.WriteByte(ch)
+			have = true
+		}
+	}
+	if have {
+		args = append(args, cur.String())
+	}
+	return args
+}
+
 func set(xs ...string) map[string]bool {
 	m := map[string]bool{}
 	for _, x := range xs {
@@ -242,6 +302,15 @@ func (c *Classifier) decide(image string, pid uint32, bait Bait, sig *authentico
 	}
 	if runtimes[name] {
 		if valid {
+			// The runtime is signed, but the program is the script it runs. One
+			// sitting where downloads and double-clicked "games" land (a .jar on
+			// the Desktop, a .py in Downloads) is what a stealer looks like.
+			if c.CommandLine != nil {
+				if script, where := DroppedScript(c.CommandLine(pid)); script != "" {
+					return Verdict{Tier: config.TierCritical, Reasons: []string{
+						name + " is running " + filepath.Base(script) + " from your " + where + ": typical of stealers disguised as games, cheats and tools", sigNote}}
+				}
+			}
 			return Verdict{Tier: config.TierWarn, Reasons: []string{name + " is a scripting runtime: some script read the bait", sigNote}}
 		}
 		return Verdict{Tier: config.TierCritical, Reasons: []string{"unsigned scripting runtime " + name, sigNote}}

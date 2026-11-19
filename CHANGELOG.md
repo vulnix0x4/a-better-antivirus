@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.5.2
+
+- **Stealers that run on Java, Python or Node are stopped at the first bait.** A `.jar` "game" double-clicked
+  on the Desktop runs as `javaw.exe`, which is signed, so its first reads only counted as suspicious and it was
+  stopped by sweep detection at the third app's data. Now a signed runtime running a script or `.jar` from your
+  Desktop, Downloads or Temp folder is critical, like an unsigned program there: frozen the moment it opens
+  the first bait. Scripts elsewhere (your projects, tools installed with npm or pip) are unchanged. Found by
+  running a real Java stealer against v0.5.1.
+
 ## v0.5.1
 
 - **Fix: the frozen popup's question was back to front.** It asked "Did you expect it to read this?" with

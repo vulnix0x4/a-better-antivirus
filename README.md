@@ -103,6 +103,7 @@ It catches stealers by **what they do**, not by recognising the file, so it work
   | A Windows program running **injected code** (code that isn't from any file on disk) | **critical** |
   | Unsigned program in Temp, AppData, Downloads, Desktop… | **critical** |
   | PowerShell, cmd, mshta, rundll32, wscript, and .NET tools stealers hide in (RegAsm, AppLaunch, vbc, MSBuild…) | **critical** |
+  | Java, Python, Node… running a script or `.jar` from your Desktop, Downloads or Temp (a "game" you double-clicked) | **critical** |
   | Signed app in a user folder, scripting runtimes (Python, Node, Java), other Windows programs in your session, network share reads | **warn** |
   | Signed, installed software (Program Files), Windows services, the preview pane | **info** |
   | Defender, Windows Search, your trust rules | ignored |
