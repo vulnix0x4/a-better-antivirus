@@ -32,15 +32,28 @@ func LoadStatus() StatusData {
 	return d
 }
 
+// actionList says in plain words what happens to a reader of some tier.
 func actionList(acts []config.Action) string {
 	if len(acts) == 0 {
-		return Dim.Render("notify only")
+		return Dim.Render("alert only")
+	}
+	words := map[config.Action]string{
+		config.ActionFreeze: "frozen", config.ActionBlockProgram: "internet cut", config.ActionKill: "killed",
+		config.ActionIsolate: "PC isolated", config.ActionDisableAdapters: "adapters off",
 	}
 	var s []string
 	for _, a := range acts {
-		s = append(s, string(a))
+		s = append(s, words[a])
 	}
-	return strings.Join(s, ", ")
+	return strings.Join(s, " + ")
+}
+
+// plural: "1 program", "3 programs".
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return "1 " + one
+	}
+	return fmt.Sprintf("%d %s", n, many)
 }
 
 // RenderStatus draws the dashboard.
@@ -55,20 +68,21 @@ func RenderStatus(d StatusData) string {
 	w := Width()
 
 	// Emergency banner.
-	if st != nil && (st.Isolation != nil || len(st.Frozen) > 0 || len(st.Blocked) > 0) {
+	incident := st != nil && (st.Isolation != nil || len(st.Frozen) > 0 || len(st.Blocked) > 0)
+	if incident {
 		var lines []string
 		if st.Isolation != nil {
-			lines = append(lines, fmt.Sprintf("This PC is ISOLATED from the network since %s (alert %s).", st.Isolation.Since.Format("Jan 2 15:04"), st.Isolation.AlertID))
+			lines = append(lines, fmt.Sprintf("This PC is cut off from the network since %s (alert %s).", st.Isolation.Since.Format("Jan 2 15:04"), shortID(st.Isolation.AlertID)))
 		}
 		if len(st.Frozen) > 0 {
-			lines = append(lines, fmt.Sprintf("%d process(es) frozen.", len(st.Frozen)))
+			lines = append(lines, plural(len(st.Frozen), "process", "processes")+" frozen.")
 		}
 		if len(st.Blocked) > 0 {
-			lines = append(lines, fmt.Sprintf("%d program(s) blocked from the internet.", len(st.Blocked)))
+			lines = append(lines, plural(len(st.Blocked), "program", "programs")+" cut off from the internet.")
 		}
-		lines = append(lines, "", "Review: "+Code.Render("aba alerts show <id>")+"   Undo when safe: "+Code.Render("aba release"))
-		box := lipgloss.NewStyle().Border(lipgloss.ThickBorder()).BorderForeground(Jaw).Padding(0, 2).Width(w - 4).
-			Render(Bad.Bold(true).Render("RESPONSE ACTIVE") + "\n" + strings.Join(lines, "\n"))
+		lines = append(lines, "", Hint("Look at it:", "aba alerts show <id>")+"     "+Hint("Undo everything when safe:", "aba release"))
+		box := lipgloss.NewStyle().Border(lipgloss.ThickBorder()).BorderForeground(Jaw).Padding(0, 2).Width(w - 2).
+			Render(Bad.Bold(true).Render("● RESPONSE ACTIVE") + "\n" + strings.Join(lines, "\n"))
 		b.WriteString(box + "\n\n")
 	}
 
@@ -97,40 +111,65 @@ func RenderStatus(d StatusData) string {
 			}
 		}
 	}
-	prot = append(prot, Check(total > 0 && healthy == total, fmt.Sprintf("%d of %d baits healthy", healthy, total)))
+	baitsOK := total > 0 && healthy == total
+	prot = append(prot, Check(baitsOK, fmt.Sprintf("%d of %d baits healthy", healthy, total)))
 	if st != nil && !st.Heartbeat.IsZero() {
-		prot = append(prot, Dim.Render("last check "+Ago(st.Heartbeat)))
+		prot = append(prot, Fainter.Render("last check "+Ago(st.Heartbeat)))
 	}
-	ver := "version unknown"
-	if st != nil && st.ServiceVersion != "" {
-		ver = "version " + st.ServiceVersion
-	}
-	if cfg.AutoUpdate {
-		ver += " · auto-update on"
-		if st != nil && st.Update != nil && !st.Update.UpdatedAt.IsZero() && time.Since(st.Update.UpdatedAt) < 7*24*time.Hour {
-			ver += " (updated " + Ago(st.Update.UpdatedAt) + ")"
-		}
-	} else {
-		ver += " · auto-update off"
-	}
-	prot = append(prot, Dim.Render(ver))
 
 	// Response card.
 	resp := []string{Bold.Render(cfg.PresetName())}
-	resp = append(resp, Dim.Render("critical ")+actionList(cfg.Responses[config.TierCritical]))
-	resp = append(resp, Dim.Render("warn     ")+actionList(cfg.Responses[config.TierWarn]))
+	resp = append(resp, Dim.Render("critical    ")+actionList(cfg.Responses[config.TierCritical]))
+	resp = append(resp, Dim.Render("suspicious  ")+actionList(cfg.Responses[config.TierWarn]))
 	if cfg.Learning(time.Now()) && cfg.LearningMatters() {
-		resp = append(resp, Warn.Render("learning mode, "+Until(cfg.LearningUntil))+Dim.Render(": only critical is stopped"))
+		resp = append(resp, Warn.Render("learning, "+Until(cfg.LearningUntil))+Dim.Render(": only critical is stopped"))
 	}
 	if st != nil && st.Isolation != nil {
-		resp = append(resp, Bad.Render("network: ISOLATED"))
+		resp = append(resp, Dim.Render("network     ")+Bad.Bold(true).Render("isolated"))
 	} else {
-		resp = append(resp, Good.Render("network: online"))
+		resp = append(resp, Dim.Render("network     ")+Good.Render("online"))
+	}
+	ver := "version ?"
+	if st != nil && st.ServiceVersion != "" {
+		ver = st.ServiceVersion
+	}
+	switch {
+	case cfg.AutoUpdate && st != nil && st.Update != nil && !st.Update.UpdatedAt.IsZero() && time.Since(st.Update.UpdatedAt) < 7*24*time.Hour:
+		ver += " · updated " + Ago(st.Update.UpdatedAt)
+	case cfg.AutoUpdate:
+		ver += " · auto-update on"
+	default:
+		ver += " · auto-update off"
+	}
+	resp = append(resp, Fainter.Render(ver))
+
+	// The one line that matters: is this PC protected right now?
+	status := Good.Bold(true).Render("● Protected") + Dim.Render(fmt.Sprintf("  ·  %d baits armed", healthy))
+	switch {
+	case incident:
+		status = Bad.Bold(true).Render("● Responding to a threat") + Dim.Render("  ·  see below")
+	case !svcOK:
+		status = Bad.Bold(true).Render("● Not protected") + Dim.Render("  ·  the service isn't running: ") + Code.Render("aba doctor --fix")
+	case !baitsOK:
+		status = Warn.Bold(true).Render("● Needs attention") + Dim.Render("  ·  some baits are missing or changed: ") + Code.Render("aba doctor --fix")
+	}
+	if !incident {
+		b.WriteString(" " + status + "\n\n")
 	}
 
-	half := (w - 4) / 2
-	left := Card.Width(half).Render(Section.Render("Protection") + "\n" + strings.Join(prot, "\n"))
-	right := Card.Width(w - 4 - half).Render(Section.Render("Response") + "\n" + strings.Join(resp, "\n"))
+	half := (w - 3) / 2
+	// One row per line in the cards: cut what doesn't fit (card border and
+	// padding take 6 columns).
+	fit := func(lines []string, width int) string {
+		for i, l := range lines {
+			if lipgloss.Width(l) > width-6 {
+				lines[i] = Truncate(l, width-6)
+			}
+		}
+		return strings.Join(lines, "\n")
+	}
+	left := Card.Width(half).Render(Section.Render("Protection") + "\n" + fit(prot, half))
+	right := Card.Width(w - 3 - half).Render(Section.Render("Response") + "\n" + fit(resp, w-3-half))
 	if w < 70 {
 		b.WriteString(left + "\n" + right + "\n")
 	} else {
@@ -138,9 +177,9 @@ func RenderStatus(d StatusData) string {
 	}
 
 	// Alerts.
-	b.WriteString(Heading("Recent alerts") + "\n")
+	b.WriteString(Heading(" Recent alerts") + "\n")
 	if len(d.Alerts) == 0 {
-		b.WriteString(Dim.Render("  Nothing has touched your baits. ") + Hint("Try", "aba test") + "\n")
+		b.WriteString(Dim.Render("  Nothing has touched your baits yet. ") + Hint("See what a catch looks like:", "aba test") + "\n")
 	} else {
 		b.WriteString(AlertTable(d.Alerts, w) + "\n")
 	}
@@ -150,11 +189,15 @@ func RenderStatus(d StatusData) string {
 // AlertTable renders a compact list of alerts.
 func AlertTable(list []*alerts.Alert, w int) string {
 	var b strings.Builder
-	head := fmt.Sprintf("  %-12s %-9s %-24s %s", "WHEN", "TIER", "WHO", "WHAT")
+	whoW := 8 // "PROGRAM", or the longest name up to 22
+	for _, a := range list {
+		whoW = max(whoW, min(lipgloss.Width(a.ExeName()), 22))
+	}
+	whatW := w - 2 - 12 - 2 - 12 - 2 - whoW - 2 - 6
+	head := fmt.Sprintf("  %-12s  %-12s  %-*s  %-*s  %s", "WHEN", "SEVERITY", whoW, "PROGRAM", whatW, "WHAT IT READ", "ID")
 	b.WriteString(Fainter.Render(head) + "\n")
 	for _, a := range list {
 		when := a.Time.Format("Jan 02 15:04")
-		who := Truncate(a.ExeName(), 24)
 		what := ""
 		if len(a.Baits) > 0 {
 			what = a.Baits[0].Name
@@ -168,25 +211,40 @@ func AlertTable(list []*alerts.Alert, w int) string {
 		if a.Test {
 			tags = append(tags, "test")
 		}
+		if len(a.Verdict.Swept) > 1 {
+			tags = append(tags, "sweep")
+		}
 		if a.Learning {
 			tags = append(tags, "learning")
 		}
 		for _, r := range a.Actions {
 			if r.OK {
-				tags = append(tags, string(r.Action))
+				tags = append(tags, map[config.Action]string{config.ActionFreeze: "frozen", config.ActionBlockProgram: "internet cut",
+					config.ActionKill: "killed", config.ActionIsolate: "PC isolated", config.ActionDisableAdapters: "adapters off"}[r.Action])
 			}
 		}
+		status := ""
 		if a.Status == "resolved" {
-			tags = append(tags, "resolved")
+			status = Good.Render("✓ " + a.Note)
+			if a.Note == "" {
+				status = Good.Render("✓ resolved")
+			}
 		}
-		tier := lipgloss.NewStyle().Width(9).Render(TierWord(a.Tier))
-		line := fmt.Sprintf("  %-12s %s %-24s %s", when, tier, who, Truncate(what, w-52))
-		b.WriteString(line + "\n")
-		sub := Fainter.Render("    " + a.ID)
-		if len(tags) > 0 {
-			sub += "  " + Dim.Render(strings.Join(tags, " · "))
+		tier := lipgloss.NewStyle().Width(12).Render(TierDot(a.Tier) + " " + TierWord(a.Tier))
+		who := lipgloss.NewStyle().Width(whoW).Render(Plain.Render(Truncate(a.ExeName(), whoW)))
+		whatCol := lipgloss.NewStyle().Width(whatW).Render(Truncate(what, whatW))
+		b.WriteString(fmt.Sprintf("  %s  %s  %s  %s  %s\n", Dim.Render(when), tier, who, whatCol, Fainter.Render(shortID(a.ID))))
+		// A second line only when there's something to say about it.
+		if len(tags) > 0 || status != "" {
+			sub := strings.Repeat(" ", 2+12+2+12+2)
+			if len(tags) > 0 {
+				sub += Dim.Render(strings.Join(tags, " · "))
+				if status != "" {
+					sub += Dim.Render("  ·  ")
+				}
+			}
+			b.WriteString(sub + status + "\n")
 		}
-		b.WriteString(sub + "\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
@@ -194,10 +252,14 @@ func AlertTable(list []*alerts.Alert, w int) string {
 // AlertDetail renders one alert fully.
 func AlertDetail(a *alerts.Alert) string {
 	var b strings.Builder
-	b.WriteString(TierBadge(a.Tier) + " " + Bold.Render(a.Title) + "\n")
-	b.WriteString(Dim.Render(a.Time.Format("Mon Jan 2 2006, 15:04:05")+"  ·  "+a.ID) + "\n")
+	w := Width() - 2
+	wrap := func(s string, indent int) string {
+		return lipgloss.NewStyle().PaddingLeft(indent).Width(w).Render(s)
+	}
+	b.WriteString("\n" + TierBadge(a.Tier) + " " + Bold.Render(a.Title) + "\n")
+	b.WriteString(Dim.Render(a.Time.Format("Mon Jan 2 2006, 15:04:05")+"  ·  alert "+shortID(a.ID)) + "\n")
 	if a.Summary != "" {
-		b.WriteString("\n" + a.Summary + "\n")
+		b.WriteString("\n" + wrap(Plain.Render(a.Summary), 0) + "\n")
 	}
 	if a.Test {
 		b.WriteString(Info.Render("This was a test run by `aba test`.") + "\n")
@@ -246,41 +308,94 @@ func AlertDetail(a *alerts.Alert) string {
 		}
 		b.WriteString(indent(KV(rows), 2) + "\n")
 		if len(p.Connections) > 0 {
-			b.WriteString(Heading("Network connections at detection") + "\n")
+			// What matters is anything talking to another machine; listening
+			// sockets and connections to this PC itself are summarised.
+			local := 0
+			var order []string
+			count := map[string]int{}
 			for _, c := range p.Connections {
-				line := fmt.Sprintf("  %-5s %-22s", c.Proto, c.Local)
-				if c.Remote != "" && !strings.HasPrefix(c.Remote, "0.0.0.0") && !strings.HasPrefix(c.Remote, "[::]") {
-					line += " → " + Bold.Render(c.Remote)
+				r := c.Remote
+				if r == "" || c.State == "LISTEN" || strings.HasPrefix(r, "0.0.0.0") || strings.HasPrefix(r, "[::]") ||
+					strings.HasPrefix(r, "127.") || strings.HasPrefix(r, "[::1]") {
+					local++
+					continue
 				}
-				if c.State != "" {
-					line += " " + Dim.Render(c.State)
+				key := c.Proto + " " + r
+				if count[key] == 0 {
+					order = append(order, key)
 				}
-				b.WriteString(line + "\n")
+				count[key]++
+			}
+			var remote []string
+			for i, k := range order {
+				if i == 8 {
+					remote = append(remote, Fainter.Render(fmt.Sprintf("  + %d more destinations", len(order)-8)))
+					break
+				}
+				proto, addr, _ := strings.Cut(k, " ")
+				line := "  " + Dim.Render(fmt.Sprintf("%-4s", proto)) + " → " + Bold.Render(addr)
+				if n := count[k]; n > 1 {
+					line += Fainter.Render(fmt.Sprintf("  ×%d", n))
+				}
+				remote = append(remote, line)
+			}
+			b.WriteString(Heading("Network at detection") + "\n")
+			for _, l := range remote {
+				b.WriteString(l + "\n")
+			}
+			switch {
+			case len(remote) == 0:
+				b.WriteString("  " + Good.Render("no connections to other machines") + Fainter.Render(fmt.Sprintf("  (%d local)", local)) + "\n")
+			case local > 0:
+				b.WriteString(Fainter.Render(fmt.Sprintf("  + %d local or listening", local)) + "\n")
 			}
 		}
 	}
 	if len(a.Verdict.Reasons) > 0 {
 		b.WriteString(Heading("Why this severity") + "\n")
 		for _, r := range a.Verdict.Reasons {
-			b.WriteString("  " + IconDot + " " + r + "\n")
+			lines := strings.Split(lipgloss.NewStyle().Width(w-4).Render(r), "\n")
+			for i, l := range lines {
+				mark := "  "
+				if i == 0 {
+					mark = Dim.Render(IconDot) + " "
+				}
+				b.WriteString("  " + mark + l + "\n")
+			}
 		}
 	}
 	if len(a.Actions) > 0 {
 		b.WriteString(Heading("Response") + "\n")
 		for _, r := range a.Actions {
-			b.WriteString("  " + Check(r.OK, r.Action.Describe()) + " " + Dim.Render(r.Detail) + "\n")
+			b.WriteString("  " + Check(r.OK, r.Action.Describe()) + "\n")
+			if r.Detail != "" {
+				b.WriteString(wrap(Fainter.Render(r.Detail), 4) + "\n")
+			}
 		}
 		if a.LatencyMS > 0 {
-			b.WriteString(Dim.Render(fmt.Sprintf("  frozen %d ms after the read was logged", a.LatencyMS)) + "\n")
+			when := "after the read was logged"
+			if a.Instant {
+				when = "after it opened the bait, before it could read it"
+			}
+			b.WriteString("  " + Good.Render(fmt.Sprintf("%d ms", a.LatencyMS)) + Dim.Render(" "+when) + "\n")
 		}
 	}
 	if a.Status == "resolved" {
-		b.WriteString("\n" + Good.Render("Resolved: "+a.Note) + "\n")
-	} else if a.Did(config.ActionFreeze) || a.Did(config.ActionIsolate) || a.Did(config.ActionBlockProgram) {
-		b.WriteString(Heading("Next") + "\n")
-		b.WriteString("  " + Hint("It's malware:", "aba kill "+shortID(a.ID)) + "\n")
-		b.WriteString("  " + Hint("It's yours:  ", "aba resume "+shortID(a.ID)) + "\n")
-		b.WriteString("  " + Hint("Undo all:    ", "aba release") + "\n")
+		b.WriteString("\n" + Good.Render(IconOK+" Resolved: "+a.Note) + "\n")
+	} else if a.Process != nil && !a.Test && a.Kind == alerts.KindRead {
+		id := shortID(a.ID)
+		var rows [][2]string
+		if a.Did(config.ActionFreeze) || a.Did(config.ActionBlockProgram) {
+			rows = append(rows, [2]string{"aba kill " + id, "it's malware: end it (it stays cut off)"})
+		}
+		rows = append(rows, [2]string{"aba trust " + id, "it's yours: undo everything and stop alerting about it"})
+		if a.Did(config.ActionFreeze) || a.Did(config.ActionBlockProgram) {
+			rows = append(rows, [2]string{"aba resume " + id, "not sure: let it run again, without trusting it"})
+		}
+		if a.Did(config.ActionIsolate) {
+			rows = append(rows, [2]string{"aba release", "reconnect the PC when it's safe"})
+		}
+		b.WriteString(Heading("What now") + "\n" + indent(Cmd(rows), 2) + "\n")
 	}
 	if a.Tier == config.TierCritical && !a.Test && a.Status != "resolved" {
 		b.WriteString(Heading("If you didn't cause this") + "\n")

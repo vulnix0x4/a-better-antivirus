@@ -9,11 +9,11 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/huh"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/baits"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/install"
+	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
 )
 
 // WizardInput is what the wizard knows before asking.
@@ -22,78 +22,117 @@ type WizardInput struct {
 	Plan     []baits.Availability
 	Existing *config.Config  // nil on first install
 	Secrets  *config.Secrets // may be empty
+	Change   bool            // `aba configure`: start on "Change settings"
 }
 
-func Theme() *huh.Theme {
-	t := huh.ThemeCharm()
-	t.Focused.Title = t.Focused.Title.Foreground(Leaf)
-	t.Focused.SelectSelector = t.Focused.SelectSelector.Foreground(Leaf)
-	t.Focused.MultiSelectSelector = t.Focused.MultiSelectSelector.Foreground(Leaf)
-	t.Focused.SelectedOption = t.Focused.SelectedOption.Foreground(Leaf)
-	t.Focused.SelectedPrefix = lipgloss.NewStyle().Foreground(Leaf).SetString("[✓] ")
-	t.Focused.FocusedButton = t.Focused.FocusedButton.Background(lipgloss.Color("#1E8A4C"))
-	return t
+// Setup modes. A first install offers Recommended (three questions) or
+// Customize (everything); a re-run offers Keep (repair/upgrade with the
+// current settings) or Customize.
+const (
+	modeRecommended = "recommended"
+	modeCustom      = "custom"
+	modeKeep        = "keep"
+)
+
+// wizard is the setup form plus what turns its answers into install options.
+type wizard struct {
+	form    *huh.Form
+	finish  func() (install.Options, bool)
+	setMode func(mode, phone string) // previews: walk a given path
 }
 
 // RunWizard asks everything and returns install options. ok=false if cancelled.
 func RunWizard(in WizardInput) (install.Options, bool, error) {
+	w := newWizard(in)
+	if err := w.form.Run(); err != nil {
+		if errors.Is(err, huh.ErrUserAborted) {
+			return install.Options{}, false, nil
+		}
+		return install.Options{}, false, err
+	}
+	o, ok := w.finish()
+	return o, ok, nil
+}
+
+func newWizard(in WizardInput) *wizard {
+	ex := in.Existing
+	sec := in.Secrets
+	if sec == nil {
+		sec = &config.Secrets{}
+	}
 	o := install.Options{CleanRecent: true, Preset: "balanced", LearningDays: 3, PhoneMinTier: config.TierWarn}
-	existing := map[string]bool{}
-	if in.Existing != nil {
-		o.Preset = in.Existing.Preset
-		o.CleanRecent = in.Existing.CleanRecent
-		o.PhoneMinTier = in.Existing.PhoneMinTier
-		o.KeepLearning = true
-		o.LearningDays = 0
-		for _, b := range in.Existing.Baits {
-			existing[b.ID] = true
+	mode := modeRecommended
+	if ex != nil {
+		mode = modeKeep
+		if in.Change {
+			mode = modeCustom
+		}
+		o.Preset, o.CleanRecent, o.PhoneMinTier, o.KeepLearning, o.LearningDays = ex.Preset, ex.CleanRecent, ex.PhoneMinTier, true, 0
+		for _, b := range ex.Baits {
 			if b.Path != "" {
 				o.CustomBaits = append(o.CustomBaits, b.Path)
 			}
 		}
 	}
-	sec := in.Secrets
-	if sec == nil {
-		sec = &config.Secrets{}
-	}
 
-	// ---- Baits ----
+	// ---- baits ----
+	existing := map[string]bool{}
+	if ex != nil {
+		for _, b := range ex.Baits {
+			existing[b.ID] = true
+		}
+	}
+	formW := min(Width()-2, 96)
 	var opts []huh.Option[string]
 	var skipped []string
+	nameW := 0
+	for _, a := range in.Plan {
+		if a.Available && len(a.Spec.Name) > nameW {
+			nameW = len(a.Spec.Name)
+		}
+	}
+	// One line per bait: name, then its note cut to what fits (border,
+	// cursor and tick take 7 columns).
+	noteW := formW - 7 - nameW - 2
 	for _, a := range in.Plan {
 		if !a.Available {
-			skipped = append(skipped, fmt.Sprintf("%s %s: %s", IconDot, a.Spec.Name, a.Reason))
+			skipped = append(skipped, a.Spec.Name+" ("+a.Reason+")")
 			continue
 		}
-		label := a.Spec.Name
-		if a.Spec.Caveat != "" {
-			label += Warn.Render("  (opt-in: " + a.Spec.Caveat + ")")
-		} else {
-			label += Fainter.Render("  " + a.Spec.Description)
-		}
 		pre := a.Spec.Default
-		if in.Existing != nil {
+		if ex != nil {
 			pre = existing[a.Spec.ID]
 		}
-		opts = append(opts, huh.NewOption(fmt.Sprintf("%-9s %s", a.Spec.Category, label), a.Spec.ID).Selected(pre))
+		if pre {
+			o.Baits = append(o.Baits, a.Spec.ID)
+		}
+		note := Fainter.Render(Truncate(a.Spec.Description, noteW))
+		if a.Spec.Caveat != "" {
+			note = Warn.Render("opt-in") + Fainter.Render(" · "+Truncate(a.Spec.Caveat, noteW-9))
+		}
+		opts = append(opts, huh.NewOption(fmt.Sprintf("%-*s  %s", nameW, a.Spec.Name, note), a.Spec.ID).Selected(pre))
 	}
-	skippedNote := "Nothing skipped."
+	baitsDesc := "Every one is fake and harmless. The recommended ones are already ticked."
 	if len(skipped) > 0 {
-		skippedNote = "Skipped because you use these apps (fake data would get in their way):\n" + strings.Join(skipped, "\n")
+		baitsDesc += "\n" + Fainter.Render("Left out so fake data never gets in the way of your real apps: "+strings.Join(skipped, ", ")+".")
 	}
 
-	// ---- Response ----
+	// ---- response ----
 	var presetOpts []huh.Option[string]
+	optW := 0
 	for _, p := range config.Presets {
-		presetOpts = append(presetOpts, huh.NewOption(p.Name+Fainter.Render("  "+p.Description), p.ID))
+		optW = max(optW, len(p.Name))
 	}
-	presetOpts = append(presetOpts, huh.NewOption("Custom"+Fainter.Render("  Choose actions per severity yourself"), "custom"))
+	for _, p := range config.Presets {
+		presetOpts = append(presetOpts, huh.NewOption(fmt.Sprintf("%-*s  ", optW, p.Name)+Fainter.Render(presetShort(p.ID)), p.ID))
+	}
+	presetOpts = append(presetOpts, huh.NewOption(fmt.Sprintf("%-*s  ", optW, "Custom")+Fainter.Render(presetShort("custom")), "custom"))
 	var warnActs, critActs []string
-	if in.Existing != nil && in.Existing.Preset == "custom" {
-		for _, a := range in.Existing.Responses[config.TierWarn] {
+	if ex != nil && ex.Preset == "custom" {
+		for _, a := range ex.Responses[config.TierWarn] {
 			warnActs = append(warnActs, string(a))
 		}
-		for _, a := range in.Existing.Responses[config.TierCritical] {
+		for _, a := range ex.Responses[config.TierCritical] {
 			critActs = append(critActs, string(a))
 		}
 	} else {
@@ -109,16 +148,16 @@ func RunWizard(in WizardInput) (install.Options, bool, error) {
 
 	learning := strconv.Itoa(o.LearningDays)
 	learnOpts := []huh.Option[string]{
-		huh.NewOption("3 days (recommended)"+Fainter.Render("  watch and learn what's normal on this PC first"), "3"),
+		huh.NewOption("3 days "+Fainter.Render("recommended"), "3"),
 		huh.NewOption("7 days", "7"),
-		huh.NewOption("No: protect right away", "0"),
+		huh.NewOption("No, respond fully right away", "0"),
 	}
-	if in.Existing != nil {
-		learnOpts = append([]huh.Option[string]{huh.NewOption("Keep current setting", "keep")}, learnOpts...)
+	if ex != nil {
+		learnOpts = append([]huh.Option[string]{huh.NewOption("Keep the current setting", "keep")}, learnOpts...)
 		learning = "keep"
 	}
 
-	// ---- Phone ----
+	// ---- phone ----
 	p := sec.Phone
 	phoneKind := p.Kind
 	ntfyServer, ntfyTopic, ntfyToken := p.Ntfy.Server, p.Ntfy.Topic, p.Ntfy.Token
@@ -137,15 +176,16 @@ func RunWizard(in WizardInput) (install.Options, bool, error) {
 	}
 	minTier := string(o.PhoneMinTier)
 
-	// ---- Canary ----
+	// ---- extras ----
 	canaryOn := sec.Canary.Email != ""
 	canaryEmail := sec.Canary.Email
-
 	cleanRecent := o.CleanRecent
 	// Configs from before auto-update existed haven't chosen yet: suggest on.
-	autoUpdate := in.Existing == nil || in.Existing.Version < config.CurrentConfigVersion || in.Existing.AutoUpdate
+	updateUnasked := ex != nil && ex.Version < config.CurrentConfigVersion
+	autoUpdate := ex == nil || updateUnasked || ex.AutoUpdate
 	confirm := true
 
+	custom := func() bool { return mode == modeCustom }
 	notEmpty := func(s string) error {
 		if strings.TrimSpace(s) == "" {
 			return errors.New("required")
@@ -153,158 +193,279 @@ func RunWizard(in WizardInput) (install.Options, bool, error) {
 		return nil
 	}
 
+	// ---- the intro ----
+	var intro *huh.Note
+	var modeSel *huh.Select[string]
+	if ex == nil {
+		intro = huh.NewNote().Title("Let's set up your tripwires").Description(noteText(
+			"ABA plants fake passwords, wallets and app data around your PC. Nothing legitimate ever reads them, so when something does, ABA freezes it, cuts its internet and tells you, before your real data leaves.\n\n" +
+				Dim.Render("Protecting ") + Plain.Render(in.User.Name) + Dim.Render("  ·  "+in.User.Profile)))
+		modeSel = huh.NewSelect[string]().Title("How would you like to set it up?").Options(
+			huh.NewOption("Recommended  "+Fainter.Render(fmt.Sprintf("%d baits · Balanced response · a few quick questions", len(o.Baits))), modeRecommended),
+			huh.NewOption("Customize    "+Fainter.Render("pick baits, response, phone alerts and extras"), modeCustom),
+		).Value(&mode)
+	} else {
+		intro = huh.NewNote().Title("Change your setup").Description(noteText(
+			"A Better Antivirus is already installed for " + Plain.Render(in.User.Name) + ".\n" +
+				Dim.Render("Your alerts, trusted programs and planted baits are kept either way.")))
+		modeSel = huh.NewSelect[string]().Title("What would you like to do?").Options(
+			huh.NewOption("Keep my settings  "+Fainter.Render("repair or upgrade the install, change nothing"), modeKeep),
+			huh.NewOption("Change settings   "+Fainter.Render("baits, response, phone alerts, extras"), modeCustom),
+		).Value(&mode)
+	}
+
 	form := huh.NewForm(
+		huh.NewGroup(intro, modeSel),
+
 		huh.NewGroup(
-			huh.NewNote().Title("Set up A Better Antivirus").Description(
-				"ABA plants convincing fake files and fake app data that only malware would ever read.\n"+
-					"When something touches them you're alerted instantly, and it can freeze the reader\n"+
-					"and cut its internet before your real data leaves.\n\n"+
-					"Protecting: "+in.User.Name+"\n\n"+
-					Fainter.Render("Use ↑/↓, space to toggle, enter to continue. Esc goes back.")),
-		),
-		huh.NewGroup(
-			huh.NewMultiSelect[string]().Title("Which baits should ABA plant?").
-				Description("Recommended ones are preselected. Every one is fake and harmless.").
-				Options(opts...).Height(16).Value(&o.Baits).
+			huh.NewMultiSelect[string]().Title("Which baits should ABA plant?").Description(baitsDesc).
+				Options(opts...).Height(min(len(opts)+2, 14)).Value(&o.Baits).
 				Validate(func(v []string) error {
 					if len(v) == 0 {
 						return errors.New("pick at least one bait")
 					}
 					return nil
 				}),
-			huh.NewNote().Title("Skipped").Description(skippedNote),
-		),
+		).WithHideFunc(func() bool { return !custom() }),
+
 		huh.NewGroup(
-			huh.NewSelect[string]().Title("What should happen when a bait is read?").
-				Description("Severity is automatic: unsigned programs from Temp/AppData/Downloads and script hosts are critical;\nsigned installed apps are just noted.").
+			huh.NewSelect[string]().Title("What should happen when something takes the bait?").
+				DescriptionFunc(func() string { return presetDetail(o.Preset) }, &o.Preset).
 				Options(presetOpts...).Value(&o.Preset),
-		),
+		).WithHideFunc(func() bool { return !custom() }),
+
 		huh.NewGroup(
-			huh.NewMultiSelect[string]().Title("Custom: for SUSPICIOUS readers (warn)").Options(actionOpts()...).Value(&warnActs),
-			huh.NewMultiSelect[string]().Title("Custom: for CRITICAL readers").Options(actionOpts()...).Value(&critActs),
-		).WithHideFunc(func() bool { return o.Preset != "custom" }),
+			huh.NewMultiSelect[string]().Title("For SUSPICIOUS readers").Description("Signed apps in user folders, scripting runtimes, Windows programs.").Options(actionOpts()...).Value(&warnActs),
+			huh.NewMultiSelect[string]().Title("For CRITICAL readers").Description("Unsigned programs in Temp/AppData/Downloads, script hosts, anything that sweeps several apps' data.").Options(actionOpts()...).Value(&critActs),
+		).WithHideFunc(func() bool { return !custom() || o.Preset != "custom" }),
+
 		huh.NewGroup(
 			huh.NewSelect[string]().Title("Start in learning mode?").
-				Description("Critical threats (unsigned programs from Temp/Downloads, script hosts) are stopped either way.\n"+
-					"Learning mode only holds back the response to merely suspicious programs, so a legit app\n"+
-					"(backup tool, sync client) just triggers an alert you can answer with one click: \"It's mine\".").
+				Description("Critical threats are stopped either way. Learning mode only holds back the response to merely suspicious programs for a few days, so your own apps just raise an alert you can answer with one click: \"It's mine\".").
 				Options(learnOpts...).Value(&learning),
-		).WithHideFunc(func() bool { return !warnResponds(o.Preset, warnActs) }),
+		).WithHideFunc(func() bool { return !custom() || !warnResponds(o.Preset, warnActs) }),
+
 		huh.NewGroup(
-			huh.NewSelect[string]().Title("Phone alerts").
-				Description("Get alerts even when you're away. They're sent before isolation kicks in, and still\nget out while the PC is isolated.").
+			huh.NewSelect[string]().Title("Get alerts on your phone too?").
+				Description("They reach you when you're away, and still get out while the PC is isolated.").
 				Options(
-					huh.NewOption("None", ""),
-					huh.NewOption("ntfy"+Fainter.Render("  free app, no account: install ntfy on your phone and subscribe to a topic"), "ntfy"),
-					huh.NewOption("Discord webhook", "discord"),
-					huh.NewOption("Pushover", "pushover"),
-					huh.NewOption("Email (SMTP)", "email"),
+					huh.NewOption("Not now", ""),
+					huh.NewOption("ntfy      "+Fainter.Render("free app, no account: the easiest"), "ntfy"),
+					huh.NewOption("Discord   "+Fainter.Render("a webhook into your server"), "discord"),
+					huh.NewOption("Pushover  "+Fainter.Render("if you already use it"), "pushover"),
+					huh.NewOption("Email     "+Fainter.Render("through your mail provider's SMTP"), "email"),
 				).Value(&phoneKind),
-		),
+		).WithHideFunc(func() bool { return mode == modeKeep }),
+
 		huh.NewGroup(
-			huh.NewInput().Title("ntfy topic").Description("Pick something hard to guess: anyone who knows it can read your alerts.").Value(&ntfyTopic).Validate(notEmpty),
-			huh.NewInput().Title("ntfy server").Value(&ntfyServer).Validate(validURL),
-			huh.NewInput().Title("Access token (optional, for protected topics)").EchoMode(huh.EchoModePassword).Value(&ntfyToken),
-		).WithHideFunc(func() bool { return phoneKind != "ntfy" }),
+			huh.NewNote().Title("Phone alerts with ntfy").Description(noteText(
+				Good.Render("1")+"  Install the free "+Plain.Render("ntfy")+" app from the App Store or Google Play.\n"+
+					Good.Render("2")+"  Tap "+Plain.Render("+")+" and subscribe to the topic below.\n"+
+					Good.Render("3")+"  That's it. Setup ends by sending a test, so you'll know it works.")),
+			huh.NewInput().Title("Topic").Description("Anyone who knows it can read your alerts, so keep it hard to guess.").Value(&ntfyTopic).Validate(notEmpty),
+			huh.NewInput().Title("Server").Value(&ntfyServer).Validate(validURL),
+			huh.NewInput().Title("Access token").Description("Only for protected topics on your own server.").EchoMode(huh.EchoModePassword).Value(&ntfyToken),
+		).WithHideFunc(func() bool { return mode == modeKeep || phoneKind != "ntfy" }),
 		huh.NewGroup(
-			huh.NewInput().Title("Discord webhook URL").Description("Server Settings > Integrations > Webhooks > New Webhook > Copy URL").EchoMode(huh.EchoModePassword).Value(&webhook).Validate(validURL),
-		).WithHideFunc(func() bool { return phoneKind != "discord" }),
+			huh.NewInput().Title("Discord webhook URL").Description("Server Settings › Integrations › Webhooks › New Webhook › Copy Webhook URL").EchoMode(huh.EchoModePassword).Value(&webhook).Validate(validURL),
+		).WithHideFunc(func() bool { return mode == modeKeep || phoneKind != "discord" }),
 		huh.NewGroup(
 			huh.NewInput().Title("Pushover application token").EchoMode(huh.EchoModePassword).Value(&poApp).Validate(notEmpty),
 			huh.NewInput().Title("Pushover user key").EchoMode(huh.EchoModePassword).Value(&poUser).Validate(notEmpty),
-		).WithHideFunc(func() bool { return phoneKind != "pushover" }),
+		).WithHideFunc(func() bool { return mode == modeKeep || phoneKind != "pushover" }),
 		huh.NewGroup(
 			huh.NewInput().Title("SMTP server").Placeholder("smtp.gmail.com").Value(&em.Host).Validate(notEmpty),
 			huh.NewInput().Title("Port").Description("587 = STARTTLS, 465 = TLS").Value(&emPort).Validate(func(s string) error {
 				if _, err := strconv.Atoi(s); err != nil {
-					return errors.New("number")
+					return errors.New("a number")
 				}
 				return nil
 			}),
 			huh.NewInput().Title("Username").Value(&em.Username),
-			huh.NewInput().Title("Password / app password").EchoMode(huh.EchoModePassword).Value(&em.Password),
+			huh.NewInput().Title("Password").Description("For Gmail and Outlook, an app password.").EchoMode(huh.EchoModePassword).Value(&em.Password),
 			huh.NewInput().Title("Send alerts to").Value(&em.To).Validate(validEmail),
-		).WithHideFunc(func() bool { return phoneKind != "email" }),
+		).WithHideFunc(func() bool { return mode == modeKeep || phoneKind != "email" }),
 		huh.NewGroup(
-			huh.NewSelect[string]().Title("Which alerts go to your phone?").Options(
-				huh.NewOption("Suspicious and critical", string(config.TierWarn)),
+			huh.NewSelect[string]().Title("Which alerts should reach your phone?").Options(
+				huh.NewOption("Suspicious and critical "+Fainter.Render("recommended"), string(config.TierWarn)),
 				huh.NewOption("Critical only", string(config.TierCritical)),
 				huh.NewOption("Everything", string(config.TierInfo)),
 			).Value(&minTier),
-		).WithHideFunc(func() bool { return phoneKind == "" }),
+		).WithHideFunc(func() bool { return !custom() || phoneKind == "" }),
+
 		huh.NewGroup(
-			huh.NewConfirm().Title("Use canary tokens?").
-				Description("ABA puts fake AWS keys and a tracking link inside your baits, created with the free\n"+
-					"canarytokens.org service. If a stealer gets your files and USES them later, you get an email,\n"+
-					"even if this PC was never online to tell you. Your email is shared with canarytokens.org.").
+			huh.NewConfirm().Title("Add canary tokens?").
+				Description("ABA hides fake AWS keys and a tracking link inside your baits, made with the free canarytokens.org service. If a stealer gets away with your files and USES them later, you get an email, even if this PC never got the chance to warn you.\n"+
+					Fainter.Render("Your email address is shared with canarytokens.org.")).
 				Affirmative("Yes").Negative("No").Value(&canaryOn),
-		),
+		).WithHideFunc(func() bool { return !custom() }),
 		huh.NewGroup(
 			huh.NewInput().Title("Email for canary alerts").Value(&canaryEmail).Validate(validEmail),
-		).WithHideFunc(func() bool { return !canaryOn }),
+		).WithHideFunc(func() bool { return !custom() || !canaryOn }),
 		huh.NewGroup(
 			huh.NewConfirm().Title("Keep baits out of your Recent files?").
-				Description("If you open a bait, Windows lists it under Recent files and apps like Copilot then read it.\nABA removes those shortcuts automatically.").
+				Description("If you open a bait yourself, Windows lists it under Recent files, and apps like Copilot then read it. ABA removes those shortcuts automatically.").
 				Affirmative("Yes").Negative("No").Value(&cleanRecent),
-		),
+		).WithHideFunc(func() bool { return !custom() }),
+
 		huh.NewGroup(
 			huh.NewConfirm().Title("Keep A Better Antivirus up to date automatically?").
-				Description("Once a day it checks GitHub for a new version and installs it, but only if the release is\n"+
-					"signed with ABA's release key and the download matches its signed checksum.\n"+
-					"Change this any time with `aba configure`, or update by hand with `aba update`.").
-				Affirmative("Yes, keep it updated").Negative("No, I'll update myself").Value(&autoUpdate),
-			huh.NewConfirm().Title("Ready to install?").Affirmative("Install").Negative("Cancel").Value(&confirm),
+				Description("Once a day it checks GitHub and installs a new version, but only if the release is signed with ABA's release key and the download matches its signed checksum.").
+				Affirmative("Yes, automatically").Negative("No, I'll update myself").Value(&autoUpdate),
+		).WithHideFunc(func() bool { return mode == modeKeep && !updateUnasked }),
+
+		huh.NewGroup(
+			huh.NewNote().Title("Ready").DescriptionFunc(func() string {
+				return noteText(reviewSummary(mode, len(o.Baits)+len(o.CustomBaits), o.Preset, phoneKind, ntfyTopic, canaryOn && custom() || (mode == modeKeep && canaryEmail != ""), autoUpdate, learning, warnResponds(o.Preset, warnActs)))
+			}, []any{&mode, &o.Baits, &o.Preset, &phoneKind, &ntfyTopic, &canaryOn, &autoUpdate, &learning, &warnActs}),
+			huh.NewConfirm().Title(map[bool]string{true: "Go ahead?", false: "Install A Better Antivirus?"}[ex != nil]).
+				Affirmative(map[bool]string{true: "Apply", false: "Install"}[ex != nil]).Negative("Cancel").Value(&confirm),
 		),
-	).WithTheme(Theme()).WithShowHelp(true)
+	).WithTheme(Theme()).WithKeyMap(KeyMap()).WithShowHelp(true).WithWidth(formW)
 
-	if err := form.Run(); err != nil {
-		if errors.Is(err, huh.ErrUserAborted) {
-			return o, false, nil
+	finish := func() (install.Options, bool) {
+		if !confirm {
+			return o, false
 		}
-		return o, false, err
+		if mode == modeKeep && ex != nil {
+			// Same settings as now; only the install itself is redone.
+			if ex.Preset == "custom" {
+				o.Responses = ex.Responses
+			}
+			o.Phone = sec.Phone
+			o.CanaryEmail = sec.Canary.Email
+			o.AutoUpdate = autoUpdate
+			return o, true
+		}
+		if o.Preset == "custom" {
+			o.Responses = map[config.Tier][]config.Action{}
+			for _, a := range warnActs {
+				o.Responses[config.TierWarn] = append(o.Responses[config.TierWarn], config.Action(a))
+			}
+			for _, a := range critActs {
+				o.Responses[config.TierCritical] = append(o.Responses[config.TierCritical], config.Action(a))
+			}
+		}
+		if mode == modeRecommended || !warnResponds(o.Preset, warnActs) {
+			if learning != "keep" {
+				learning = "0" // nothing for learning mode to hold back with this response
+			}
+		}
+		if learning == "keep" {
+			o.KeepLearning = true
+		} else {
+			o.KeepLearning = false
+			o.LearningDays, _ = strconv.Atoi(learning)
+		}
+		o.PhoneMinTier = config.Tier(minTier)
+		o.CleanRecent = cleanRecent
+		o.AutoUpdate = autoUpdate
+		o.Phone = config.PhoneConfig{Kind: phoneKind}
+		switch phoneKind {
+		case "ntfy":
+			o.Phone.Ntfy = config.NtfyConfig{Server: strings.TrimSpace(ntfyServer), Topic: strings.TrimSpace(ntfyTopic), Token: ntfyToken}
+		case "discord":
+			o.Phone.Discord = config.DiscordConfig{WebhookURL: strings.TrimSpace(webhook)}
+		case "pushover":
+			o.Phone.Pushover = config.PushoverConfig{AppToken: strings.TrimSpace(poApp), UserKey: strings.TrimSpace(poUser)}
+		case "email":
+			em.Port, _ = strconv.Atoi(emPort)
+			em.ImplicitTLS = em.Port == 465
+			em.Host, em.To = strings.TrimSpace(em.Host), strings.TrimSpace(em.To)
+			o.Phone.Email = em
+		}
+		if canaryOn && custom() {
+			o.CanaryEmail = strings.TrimSpace(canaryEmail)
+		} else if mode == modeRecommended {
+			o.CanaryEmail = ""
+		}
+		return o, true
 	}
-	if !confirm {
-		return o, false, nil
-	}
+	setMode := func(m, phone string) { mode, phoneKind = m, phone }
+	return &wizard{form: form, finish: finish, setMode: setMode}
+}
 
-	if o.Preset == "custom" {
-		o.Responses = map[config.Tier][]config.Action{}
-		for _, a := range warnActs {
-			o.Responses[config.TierWarn] = append(o.Responses[config.TierWarn], config.Action(a))
-		}
-		for _, a := range critActs {
-			o.Responses[config.TierCritical] = append(o.Responses[config.TierCritical], config.Action(a))
-		}
+// presetDetail explains a response preset in plain words.
+func presetDetail(id string) string {
+	switch id {
+	case "alert":
+		return "Tell you, and nothing else. ABA never touches a process or the network."
+	case "balanced":
+		return "A critical reader (an unsigned program from Temp or Downloads, a script host, anything going through several apps' data) is frozen and cut off from the internet; the rest of your PC stays online. Merely suspicious readers just alert you."
+	case "strict":
+		return "Critical readers are frozen and the whole PC is cut off from the network until you say so. Suspicious readers are frozen too: expect to confirm a few of your own apps at first."
+	case "custom":
+		return "Choose what happens for suspicious and for critical readers yourself."
 	}
-	if !warnResponds(o.Preset, warnActs) && learning != "keep" {
-		learning = "0" // nothing for learning mode to hold back with this response
+	return ""
+}
+
+// reviewSummary is the last screen before installing: what's about to happen.
+func reviewSummary(mode string, nBaits int, preset, phone, topic string, canary, autoUpdate bool, learning string, learningMatters bool) string {
+	if mode == modeKeep {
+		return "ABA will be reinstalled in place with your current settings:\n" +
+			Fainter.Render("program files, the background service, Windows auditing and your baits are checked and repaired.")
 	}
-	if learning == "keep" {
-		o.KeepLearning = true
-	} else {
-		o.KeepLearning = false
-		o.LearningDays, _ = strconv.Atoi(learning)
+	name := map[string]string{"alert": "Alert only", "balanced": "Balanced", "strict": "Strict", "custom": "Custom"}[preset]
+	rows := [][2]string{
+		{"Baits", fmt.Sprintf("%d fake files and app profiles", nBaits)},
+		{"Response", name + Fainter.Render("  ·  "+presetShort(preset))},
 	}
-	o.PhoneMinTier = config.Tier(minTier)
-	o.CleanRecent = cleanRecent
-	o.AutoUpdate = autoUpdate
-	o.Phone = config.PhoneConfig{Kind: phoneKind}
-	switch phoneKind {
+	if learningMatters && learning != "0" && learning != "keep" && mode == modeCustom {
+		rows = append(rows, [2]string{"Learning", learning + " days" + Fainter.Render("  ·  critical threats are stopped from the start")})
+	}
+	switch phone {
+	case "":
+		rows = append(rows, [2]string{"Phone", Fainter.Render("off  ·  turn on later with ") + Code.Render("aba configure")})
 	case "ntfy":
-		o.Phone.Ntfy = config.NtfyConfig{Server: ntfyServer, Topic: strings.TrimSpace(ntfyTopic), Token: ntfyToken}
-	case "discord":
-		o.Phone.Discord = config.DiscordConfig{WebhookURL: strings.TrimSpace(webhook)}
-	case "pushover":
-		o.Phone.Pushover = config.PushoverConfig{AppToken: poApp, UserKey: poUser}
-	case "email":
-		em.Port, _ = strconv.Atoi(emPort)
-		em.ImplicitTLS = em.Port == 465
-		o.Phone.Email = em
+		rows = append(rows, [2]string{"Phone", "ntfy, topic " + topic + Fainter.Render("  ·  a test is sent at the end")})
+	default:
+		rows = append(rows, [2]string{"Phone", strings.ToUpper(phone[:1]) + phone[1:] + Fainter.Render("  ·  a test is sent at the end")})
 	}
-	if canaryOn {
-		o.CanaryEmail = strings.TrimSpace(canaryEmail)
+	if canary {
+		rows = append(rows, [2]string{"Canary", "on"})
 	}
-	return o, true, nil
+	if autoUpdate {
+		rows = append(rows, [2]string{"Updates", "automatic" + Fainter.Render("  ·  signed releases only")})
+	} else {
+		rows = append(rows, [2]string{"Updates", "manual" + Fainter.Render("  ·  ") + Code.Render("aba update")})
+	}
+	rows = append(rows, [2]string{"Installs to", paths.InstallDir()})
+	return KV(rows)
+}
+
+func presetShort(id string) string {
+	switch id {
+	case "alert":
+		return "alerts only, never acts"
+	case "balanced":
+		return "critical readers frozen and cut off"
+	case "strict":
+		return "critical: PC isolated · suspicious: frozen"
+	}
+	return "your own choice of actions"
+}
+
+// noteText escapes text for a huh Note, which treats \ _ * and ` as markup
+// (Windows paths and user names are full of them).
+func noteText(s string) string {
+	return strings.NewReplacer(`\`, `\\`, "_", `\_`, "*", `\*`, "`", "\\`").Replace(s)
+}
+
+// KeyMap is huh's default without type-to-filter (the lists are short, and
+// the "/ filter" hint is just noise).
+func KeyMap() *huh.KeyMap {
+	k := huh.NewDefaultKeyMap()
+	k.Select.Filter.SetEnabled(false)
+	k.MultiSelect.Filter.SetEnabled(false)
+	return k
+}
+
+func lowerFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToLower(s[:1]) + s[1:]
 }
 
 // warnResponds reports whether suspicious (warn) readers get any response

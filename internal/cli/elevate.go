@@ -56,7 +56,9 @@ func requireAdmin() error {
 		}
 	}
 	args = append(args, pauseFlag)
-	fmt.Println(ui.Dim.Render("This needs administrator rights. Approve the Windows prompt; it continues in a new window…"))
+	fmt.Println()
+	fmt.Println(" " + ui.Warn.Bold(true).Render("!") + " " + ui.Plain.Render("This needs administrator rights.") +
+		ui.Dim.Render(" Approve the Windows prompt and it carries on in a new window."))
 
 	verb, _ := windows.UTF16PtrFromString("runas")
 	file, _ := windows.UTF16PtrFromString(exe)
@@ -80,7 +82,7 @@ func requireAdmin() error {
 			return fmt.Errorf("the administrator window reported an error (exit code %d)", code)
 		}
 	}
-	fmt.Println(ui.Good.Render(ui.IconOK) + " Done (in the administrator window).")
+	fmt.Println(" " + ui.Good.Render(ui.IconOK) + " " + ui.Plain.Render("Done") + ui.Dim.Render(" (in the administrator window)."))
 	return errRelaunched
 }
 
@@ -104,6 +106,6 @@ func shouldPause() bool {
 }
 
 func pause() {
-	fmt.Print("\n" + ui.Dim.Render("Press Enter to close…"))
+	fmt.Print("\n " + ui.Fainter.Render("Press Enter to close this window…"))
 	bufio.NewReader(os.Stdin).ReadString('\n')
 }

@@ -27,11 +27,14 @@ In PowerShell:
 irm https://raw.githubusercontent.com/vulnix0x4/a-better-antivirus/main/install.ps1 | iex
 ```
 
-It downloads the latest release for your PC, checks it against the release's `SHA256SUMS.txt`, and runs the guided setup (it asks for admin). [Read the script first](install.ps1) if you like; it's 40 lines. Then try it safely:
+It downloads the latest release for your PC, checks it against the release's `SHA256SUMS.txt`, and starts the setup ([read the script first](install.ps1) if you like). Setup takes about a minute:
 
-```powershell
-aba test
-```
+- **Recommended** asks just two things, phone alerts and automatic updates, and uses sensible defaults for the rest. **Customize** lets you pick every bait and response.
+- If you set up phone alerts, it sends a test notification so you know they work.
+- It ends by offering a **safe test**: a harmless fake stealer reads a bait and you watch ABA freeze it.
+- Afterwards `aba` works in the same PowerShell window.
+
+<p align="center"><img src="docs/setup.png" alt="The end of setup: every step ticked, then a summary card saying you're protected" width="720"></p>
 
 <details>
 <summary><b>Other ways to install</b></summary>
@@ -61,15 +64,15 @@ Infostealers (Lumma, RedLine, Vidar, StealC…) are the most common malware on p
 It catches stealers by **what they do**, not by recognising the file, so it works on brand-new ones no antivirus has a signature for yet.
 
 ```
-> aba test        (example output)
+> aba test
 
- Fake stealer  C:\Users\you\AppData\Local\Temp\aba-test-41822.exe
- Reads bait    C:\Users\you\Desktop\passwords.txt
+ A harmless copy of ABA in your Temp folder is about to read passwords.txt on the Desktop,
+ exactly the way a stealer would. Nothing leaves your PC and your network isn't touched.
 
- ✓ Detected: critical (unsigned program running from a user-writable folder)
- ✓ Frozen 72 ms after it opened the bait (instant freeze: no waiting for the event log)
- ✓ Desktop alert sent (shows if you're signed in)
- ✓ Phone alert sent via ntfy
+ ✓ Caught      critical: unsigned program running from a user-writable folder: typical of stealers
+ ✓ Frozen      72 ms after it opened the bait, before it could read a byte
+ ✓ Alerted     popup on your desktop, and your phone (ntfy)
+ ✓ Cleaned up  the fake stealer was killed and deleted
 ```
 
 ## How it works
@@ -123,15 +126,15 @@ aba              live dashboard
 aba test         simulate a stealer safely and watch it get caught
 aba alerts       what touched your baits (aba alerts show <id> for everything)
 aba doctor       check everything is armed (--fix to repair)
-aba learn        review what tripped during learning mode and ignore legit apps
+aba learn        trust several of your own apps at once
 ```
 
 When something trips:
 
 ```
-aba kill <id>    it's malware: kill what's frozen (it stays blocked)
-aba trust <id>   it's yours: undo everything and stop alerting on it reading that
-aba resume <id>  unfreeze it and restore its internet, without trusting it
+aba trust <id>   it's yours: undo everything and stop alerting about it
+aba kill <id>    it's malware: end what the alert froze (it stays cut off)
+aba resume <id>  not sure: let it run again, without trusting it
 aba release      undo all responses: network back, everything unfrozen/unblocked
 ```
 

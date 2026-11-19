@@ -50,13 +50,13 @@ func TestRenderDashboardAndAlert(t *testing.T) {
 		Baits: []alerts.BaitHit{{Name: "passwords.txt on the Desktop"}}, Process: &alerts.Process{Image: `C:\Program Files (x86)\Microsoft\Copilot\Application\copilotapp.exe`}}
 	d := StatusData{Cfg: cfg, State: st, Service: svcctl.Running, Alerts: []*alerts.Alert{sampleAlert(), info}}
 	out := RenderStatus(d)
-	for _, want := range []string{"RESPONSE ACTIVE", "1 process(es) frozen", "learning mode", "svch0st.exe", "copilotapp.exe", "2 of 2 baits healthy"} {
+	for _, want := range []string{"RESPONSE ACTIVE", "1 process frozen", "learning, ", "svch0st.exe", "copilotapp.exe", "2 of 2 baits healthy"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("dashboard missing %q", want)
 		}
 	}
 	det := AlertDetail(sampleAlert())
-	for _, want := range []string{"CRITICAL", "185.234.72.11:443", "aba kill 9f3a", "frozen 4 ms", "virustotal.com", "explorer.exe (pid 4410)"} {
+	for _, want := range []string{"CRITICAL", "185.234.72.11", "aba kill 9f3a", "aba trust 9f3a", "4 ms", "virustotal.com", "explorer.exe (pid 4410)"} {
 		if !strings.Contains(det, want) {
 			t.Errorf("alert detail missing %q", want)
 		}

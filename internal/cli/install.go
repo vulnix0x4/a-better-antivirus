@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/huh"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/baits"
@@ -29,17 +30,17 @@ func installCmd() *cobra.Command {
 	var f installFlags
 	c := &cobra.Command{
 		Use:   "install",
-		Short: "Install A Better Antivirus (interactive setup)",
-		Long:  "Installs A Better Antivirus with a guided setup. Run it again any time to change settings.",
+		Short: "Set it up, or repair it",
+		Long:  "Installs A Better Antivirus with a guided setup. Run it again any time to repair or change settings.",
 		Example: "  aba install\n" +
-			"  aba install --yes --preset balanced --learning 3\n" +
-			"  aba install --yes --preset strict --ntfy-topic my-secret-topic\n" +
+			"  aba install --yes --preset balanced\n" +
+			"  aba install --yes --preset strict --learning 3 --ntfy-topic my-secret-topic\n" +
 			"  aba install --yes --auto-update=false",
 		RunE: func(cmd *cobra.Command, args []string) error { return runInstall(false, f) },
 	}
 	c.Flags().BoolVarP(&f.yes, "yes", "y", false, "non-interactive: use defaults and flags")
 	c.Flags().StringVar(&f.preset, "preset", "balanced", "alert | balanced | strict")
-	c.Flags().IntVar(&f.learning, "learning", 3, "learning mode days (0 = protect right away)")
+	c.Flags().IntVar(&f.learning, "learning", 3, "learning mode days, 0 = respond fully right away (only changes something with strict)")
 	c.Flags().StringVar(&f.canaryEmail, "canary-email", "", "create canary tokens that email this address")
 	c.Flags().StringVar(&f.ntfyTopic, "ntfy-topic", "", "send phone alerts to this ntfy.sh topic")
 	c.Flags().StringSliceVar(&f.baits, "baits", nil, "bait IDs to plant (default: recommended); see `aba bait catalog`")
@@ -50,7 +51,7 @@ func installCmd() *cobra.Command {
 func configureCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "configure",
-		Short: "Change baits, response, learning, phone alerts or canary tokens",
+		Short: "Change baits, response, phone alerts, updates",
 		RunE:  func(cmd *cobra.Command, args []string) error { return runInstall(true, installFlags{}) },
 	}
 }
@@ -74,6 +75,7 @@ func runInstall(reconfigure bool, f installFlags) error {
 	}
 	plan := baits.Plan(u, ours)
 
+	fmt.Println()
 	fmt.Println(ui.Banner("setup"))
 	fmt.Println()
 
@@ -107,7 +109,7 @@ func runInstall(reconfigure bool, f installFlags) error {
 		}
 		sec, _ := config.LoadSecrets()
 		var ok bool
-		o, ok, err = ui.RunWizard(ui.WizardInput{User: u, Plan: plan, Existing: existing, Secrets: sec})
+		o, ok, err = ui.RunWizard(ui.WizardInput{User: u, Plan: plan, Existing: existing, Secrets: sec, Change: reconfigure})
 		if err != nil {
 			return err
 		}
@@ -118,56 +120,141 @@ func runInstall(reconfigure bool, f installFlags) error {
 	}
 
 	fmt.Println()
-	if err := ui.RunSteps(install.Steps(o)); err != nil {
+	title := "Setting up A Better Antivirus"
+	if existing != nil {
+		title = "Updating your setup"
+	}
+	if err := ui.RunSteps(title, install.Steps(o)); err != nil {
 		return err
 	}
 	fmt.Println()
-	cfg, _ := config.LoadConfig()
-	lines := []string{
-		ui.Good.Bold(true).Render("A Better Antivirus is armed."),
-		"",
+	fmt.Println(doneCard(existing == nil))
+	if f.yes || !ui.IsTTY() {
+		return nil
 	}
-	if cfg != nil && cfg.Learning(timeNow()) && cfg.LearningMatters() {
-		lines = append(lines, ui.Warn.Render("Learning mode is on ("+ui.Until(cfg.LearningUntil)+"): critical threats are stopped, suspicious programs only alert. Answer \"It's mine\" on an alert to trust an app."))
-		lines = append(lines, "")
+	fmt.Println()
+	run := true
+	if err := huh.NewConfirm().Title("Want to see it catch something?").
+		Description("A harmless copy of ABA in your Temp folder reads a bait, the way a stealer would.\n" +
+			"You'll watch it get frozen and see the alert popup. Nothing leaves your PC.").
+		Affirmative("Run the safe test").Negative("Not now").Value(&run).WithTheme(theme()).Run(); err != nil || !run {
+		fmt.Println(ui.Hint("Any time:", "aba test"))
+		return nil
 	}
-	lines = append(lines,
-		ui.Hint("See it work safely:  ", "aba test"),
-		ui.Hint("Dashboard:           ", "aba"),
-		ui.Hint("Health check:        ", "aba doctor"),
+	fmt.Println()
+	return runTest()
+}
+
+// doneCard is the "you're protected" summary at the end of setup, built from
+// what was actually saved.
+func doneCard(first bool) string {
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return ui.Good.Render(ui.IconOK) + " A Better Antivirus is installed."
+	}
+	st, _ := config.LoadState()
+	sec, _ := config.LoadSecrets()
+	return renderDoneCard(cfg, st, sec, first)
+}
+
+func renderDoneCard(cfg *config.Config, st *config.State, sec *config.Secrets, first bool) string {
+	w := min(ui.Width()-2, 84)
+	inner := w - 6
+
+	active := 0
+	if st != nil {
+		for _, b := range st.Baits {
+			if b.Status != "retired" {
+				active++
+			}
+		}
+	}
+	head := "You're protected."
+	if !first {
+		head = "All set. You're protected."
+	}
+	rows := [][2]string{
+		{"Baits", fmt.Sprintf("%d planted, watched by Windows' own file auditing", active)},
+		{"Response", cfg.PresetName() + ui.Fainter.Render("  ·  "+responseLine(cfg))},
+	}
+	if cfg.Learning(timeNow()) && cfg.LearningMatters() {
+		rows = append(rows, [2]string{"Learning", ui.Until(cfg.LearningUntil) + ui.Fainter.Render("  ·  critical threats are stopped meanwhile")})
+	}
+	if sec != nil && sec.Phone.Enabled() {
+		rows = append(rows, [2]string{"Phone", sec.Phone.Describe()})
+	} else {
+		rows = append(rows, [2]string{"Phone", ui.Fainter.Render("off  ·  ") + ui.Code.Render("aba configure")})
+	}
+	if cfg.AutoUpdate {
+		rows = append(rows, [2]string{"Updates", "automatic" + ui.Fainter.Render("  ·  signed releases only")})
+	} else {
+		rows = append(rows, [2]string{"Updates", "manual" + ui.Fainter.Render("  ·  ") + ui.Code.Render("aba update")})
+	}
+
+	body := []string{
+		ui.Good.Bold(true).Render(ui.IconOK+" ") + ui.Bold.Render(head),
 		"",
-		ui.Dim.Render("Don't open the bait files yourself: that counts as a read. To see one: ")+ui.Code.Render("aba bait show <id>"),
-		ui.Dim.Render("Open a new terminal for the `aba` command to be on your PATH."),
-	)
-	fmt.Println(ui.Card.Render(strings.Join(lines, "\n")))
-	return nil
+		ui.KV(rows),
+		"",
+		ui.Cmd([][2]string{
+			{"aba test", "watch it catch a harmless fake stealer"},
+			{"aba", "live dashboard: health and alerts"},
+			{"aba doctor", "check that everything is armed"},
+		}),
+		"",
+		ui.Callout("Don't open the bait files yourself: that counts as a read. To look at one safely: "+ui.Code.Render("aba bait show <id>"), inner),
+	}
+	card := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(ui.Leaf).Padding(1, 2).Width(w)
+	return card.Render(strings.Join(body, "\n")) + "\n" + ui.Fainter.Render("  New terminal windows have the aba command on their PATH.")
+}
+
+// responseLine says in a few words what happens to a critical reader.
+func responseLine(cfg *config.Config) string {
+	acts := cfg.Responses[config.TierCritical]
+	switch {
+	case len(acts) == 0:
+		return "alerts only, never acts"
+	case config.Has(acts, config.ActionIsolate):
+		return "critical: frozen, PC cut off the network"
+	case config.Has(acts, config.ActionKill):
+		return "critical: killed"
+	case config.Has(acts, config.ActionFreeze) && config.Has(acts, config.ActionBlockProgram):
+		return "critical: frozen and cut off the internet"
+	case config.Has(acts, config.ActionFreeze):
+		return "critical: frozen"
+	}
+	return "critical: blocked"
 }
 
 func uninstallCmd() *cobra.Command {
 	var purge, yes bool
 	c := &cobra.Command{
 		Use:   "uninstall",
-		Short: "Remove A Better Antivirus and every bait, restoring Windows settings",
+		Short: "Remove it and every bait, restoring Windows",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireAdmin(); err != nil {
 				return err
 			}
+			fmt.Println()
+			fmt.Println(ui.Banner("uninstall"))
+			fmt.Println()
 			if !yes && ui.IsTTY() {
 				ok := false
-				desc := "Removes the service, every bait, network blocks, and restores the Windows audit setting."
+				desc := "Removes the service, every bait and any network blocks, and puts Windows' audit setting\nback the way it was."
 				if !purge {
-					desc += "\nAlert history is kept (use --purge to delete it)."
+					desc += "\nYour alert history is kept (add --purge to delete it too)."
 				}
 				huh.NewConfirm().Title("Uninstall A Better Antivirus?").Description(desc).Affirmative("Uninstall").Negative("Cancel").Value(&ok).WithTheme(theme()).Run()
 				if !ok {
-					fmt.Println(ui.Dim.Render("Cancelled."))
+					fmt.Println(ui.Dim.Render("Cancelled. Nothing was changed."))
 					return nil
 				}
+				fmt.Println()
 			}
-			if err := ui.RunSteps(install.UninstallSteps(purge)); err != nil {
+			if err := ui.RunSteps("Removing A Better Antivirus", install.UninstallSteps(purge)); err != nil {
 				return err
 			}
-			fmt.Println("\n" + ui.Good.Render(ui.IconOK) + " A Better Antivirus is uninstalled.")
+			fmt.Println("\n" + ui.Good.Render(ui.IconOK) + " " + ui.Bold.Render("A Better Antivirus is uninstalled.") + ui.Dim.Render(" Windows' settings are back to how they were."))
 			return nil
 		},
 	}

@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.5.0
+
+A new look, and a setup that takes a minute.
+
+- **Setup, rethought.** *Recommended* asks two things (phone alerts, automatic updates) and uses the
+  recommended baits and response; *Customize* asks everything. A review screen shows what's about to
+  happen before anything is installed. Running setup again offers *Keep my settings* (repair/upgrade in
+  place) or *Change settings*; `aba configure` goes straight to changing them.
+- **It ends with proof.** Setup sends a test to your phone when you've just set phone alerts up, then
+  offers the safe test: a harmless fake stealer reads a bait and you watch ABA freeze it.
+- **Clearer progress and a summary.** Install steps show what each one did, and the summary card shows
+  what you're protected with and the three commands worth knowing.
+- **One design everywhere.** A new wordmark, one colour palette (adapts to light terminals), and a
+  status line at the top of the dashboard: *Protected*, *Needs attention*, *Not protected* or
+  *Responding to a threat*. Alert lists show plain words ("frozen · internet cut") and short IDs, alert
+  details wrap to the window, the network section groups connections by destination and hides local
+  ones, and "What now" lists `trust`, `kill` and `resume` for that alert.
+- **`aba --help`** groups commands by when you need them, most useful first.
+- **The one-line installer** downloads quickly (no PowerShell progress bar), uses a fresh folder each time
+  and removes it afterwards, explains what went wrong instead of dumping a PowerShell error, and makes
+  `aba` work in the same window right away.
+- Windows paths in setup no longer lose their backslashes.
+
 ## v0.4.0
 
 Catching stealers that hide inside other programs, and trust that malware can't reuse.

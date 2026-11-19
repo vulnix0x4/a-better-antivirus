@@ -25,6 +25,7 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/canary"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/netguard"
+	"github.com/vulnix0x4/a-better-antivirus/internal/notify"
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
 	"github.com/vulnix0x4/a-better-antivirus/internal/respond"
@@ -92,9 +93,14 @@ func Steps(o Options) []Step {
 	var sec *config.Secrets
 	self, _ := os.Executable()
 	warnings := []string{}
+	// What phone alerts were set to before, to only send a test when they change.
+	var prevPhone config.PhoneConfig
+	if old, err := config.LoadSecrets(); err == nil {
+		prevPhone = old.Phone
+	}
 
-	return []Step{
-		{Name: "Checking your account", Run: func() (string, error) {
+	steps := []Step{
+		{Name: "Checking this PC", Run: func() (string, error) {
 			if !winsec.IsElevated() {
 				return "", errors.New("installing needs administrator rights")
 			}
@@ -103,11 +109,16 @@ func Steps(o Options) []Step {
 			if err != nil {
 				return "", err
 			}
-			return "protecting " + u.Name + " (" + u.Profile + ")", nil
+			return "protecting " + u.Name + " · " + u.Profile, nil
 		}},
-		{Name: "Removing the old PowerShell honeypot (if present)", Soft: true, Run: migrateLegacy},
-		{Name: "Pausing the service", Run: func() (string, error) { return "", svcctl.Stop() }},
-		{Name: "Installing files to " + paths.InstallDir(), Run: func() (string, error) {
+		{Name: "Cleaning up older versions", Soft: true, Run: migrateLegacy},
+		{Name: "Stopping the running service", Run: func() (string, error) {
+			if st, _ := svcctl.Status(); st == svcctl.NotInstalled {
+				return "first install", nil
+			}
+			return "paused while files are replaced", svcctl.Stop()
+		}},
+		{Name: "Installing program files", Run: func() (string, error) {
 			if err := os.MkdirAll(paths.InstallDir(), 0o755); err != nil {
 				return "", err
 			}
@@ -119,14 +130,14 @@ func Steps(o Options) []Step {
 					return "", fmt.Errorf("%s: %w", dst, err)
 				}
 			}
-			return "", nil
+			return paths.InstallDir(), nil
 		}},
-		{Name: "Securing the data folder", Run: func() (string, error) {
+		{Name: "Locking down the data folder", Run: func() (string, error) {
 			if err := os.MkdirAll(paths.AlertsDir(), 0o755); err != nil {
 				return "", err
 			}
 			// SYSTEM + Administrators: full. Users: read (status, notifier). Nobody else.
-			return "", config.SetSDDL(paths.DataDir(), "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)")
+			return "only admins can change it", config.SetSDDL(paths.DataDir(), "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)")
 		}},
 		{Name: "Saving your settings", Run: func() (string, error) {
 			old, err := config.LoadConfig()
@@ -181,11 +192,11 @@ func Steps(o Options) []Step {
 			if err := config.SaveSecrets(sec); err != nil {
 				return "", err
 			}
-			upd := "auto-update off"
+			upd := "manual updates"
 			if cfg.AutoUpdate {
-				upd = "auto-update on"
+				upd = "automatic updates"
 			}
-			return fmt.Sprintf("%s, %d baits, %s", cfg.PresetName(), len(cfg.Baits), upd), config.SaveConfig(cfg)
+			return fmt.Sprintf("%s · %d baits · %s", cfg.PresetName(), len(cfg.Baits), upd), config.SaveConfig(cfg)
 		}},
 		{Name: "Turning on Windows file auditing", Run: func() (string, error) {
 			err := config.UpdateState(func(st *config.State) error {
@@ -202,12 +213,11 @@ func Steps(o Options) []Step {
 				return "", err
 			}
 			_, err = winsec.EnsureFileSystemAudit()
-			return "", err
+			return "how ABA sees who opens a bait", err
 		}},
-		{Name: "Creating canary tokens", Soft: true, Run: func() (string, error) {
-			if o.CanaryEmail == "" {
-				return "skipped", nil
-			}
+	}
+	if o.CanaryEmail != "" {
+		steps = append(steps, Step{Name: "Creating canary tokens", Soft: true, Run: func() (string, error) {
 			cfg.CanaryEnabled = true
 			sec.Canary.Email = o.CanaryEmail
 			have := map[string]bool{}
@@ -242,19 +252,42 @@ func Steps(o Options) []Step {
 			if len(warnings) > 0 {
 				return "", errors.New(strings.Join(warnings, "; "))
 			}
-			return fmt.Sprintf("%d token(s); alerts go to %s", made+len(have), o.CanaryEmail), nil
-		}},
-		{Name: "Planting baits", Run: func() (string, error) { return plantBaits(cfg, sec) }},
-		{Name: "Registering the background service", Run: func() (string, error) {
+			return fmt.Sprintf("%d token(s), alerts go to %s", made+len(have), o.CanaryEmail), nil
+		}})
+	}
+	steps = append(steps,
+		Step{Name: "Planting baits", Run: func() (string, error) { return plantBaits(cfg, sec) }},
+		Step{Name: "Starting the background service", Run: func() (string, error) {
 			// Start fresh in the event log: reads made by this installer must not be replayed as alerts.
 			config.UpdateState(func(st *config.State) error { st.Bookmark = ""; return nil })
 			if err := svcctl.InstallOrUpdate(paths.InstalledService()); err != nil {
 				return "", err
 			}
-			return paths.ServiceDisplayName, svcctl.Start()
+			return "\"" + paths.ServiceDisplayName + "\", starts with Windows", svcctl.Start()
 		}},
-		{Name: "Adding aba to PATH", Soft: true, Run: func() (string, error) { return "", AddToPath(paths.InstallDir()) }},
+		Step{Name: "Adding aba to your PATH", Soft: true, Run: func() (string, error) { return "", AddToPath(paths.InstallDir()) }},
+	)
+	if o.Phone.Enabled() && o.Phone != prevPhone {
+		steps = append(steps, Step{Name: "Sending a test to your phone", Soft: true, Run: func() (string, error) {
+			if err := SendTest(o.Phone); err != nil {
+				return "", fmt.Errorf("couldn't reach %s: %v (check the settings with `aba configure`, retry with `aba phone test`)", o.Phone.Describe(), err)
+			}
+			return "sent via " + o.Phone.Describe() + ": check your phone", nil
+		}})
 	}
+	return steps
+}
+
+// SendTest sends a test alert through the given phone settings.
+func SendTest(p config.PhoneConfig) error {
+	var cache map[string][]string
+	if st, err := config.LoadState(); err == nil {
+		cache = st.DialCache
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return notify.NewSender(p, notify.NewDialCache(cache)).Send(ctx, notify.Message{
+		Title: "A Better Antivirus is set up", Body: "Phone alerts work: if something takes the bait on your PC, you'll hear about it here.", Priority: 3})
 }
 
 // ourBaits returns IDs of baits currently in state (so our own decoy folders
@@ -281,7 +314,7 @@ func SyncBaits(cfg *config.Config) (string, error) {
 }
 
 func plantBaits(cfg *config.Config, sec *config.Secrets) (string, error) {
-	created, removed := 0, 0
+	created, removed, n := 0, 0, 0
 	var errs []string
 	err := config.UpdateState(func(st *config.State) error {
 		g := baits.GenFromPersona(st.Persona)
@@ -348,6 +381,11 @@ func plantBaits(cfg *config.Config, sec *config.Secrets) (string, error) {
 			st.Baits[b.ID] = bs
 			created++
 		}
+		for _, b := range cfg.Baits {
+			if bs := st.Baits[b.ID]; bs != nil && bs.Status != "retired" {
+				n++
+			}
+		}
 		return nil
 	})
 	if err != nil {
@@ -356,7 +394,14 @@ func plantBaits(cfg *config.Config, sec *config.Secrets) (string, error) {
 	if len(errs) > 0 {
 		return "", errors.New(strings.Join(errs, "; "))
 	}
-	return fmt.Sprintf("%d planted, %d removed", created, removed), nil
+	out := fmt.Sprintf("%d in place", n)
+	if created > 0 && created != n {
+		out += fmt.Sprintf(", %d new", created)
+	}
+	if removed > 0 {
+		out += fmt.Sprintf(", %d removed", removed)
+	}
+	return out, nil
 }
 
 // CopyFile installs src at dst, moving a running dst out of the way first.
@@ -422,7 +467,7 @@ func migrateLegacy() (string, error) {
 		}
 	}
 	if len(did) == 0 {
-		return "none found", nil
+		return "nothing to clean up", nil
 	}
 	return "removed " + strings.Join(did, ", ") + " (its baits are adopted)", nil
 }

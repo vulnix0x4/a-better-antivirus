@@ -20,7 +20,7 @@ func updateCmd() *cobra.Command {
 	var check, yes bool
 	c := &cobra.Command{
 		Use:   "update",
-		Short: "Check for a new version and install it",
+		Short: "Install the latest signed version",
 		Long: "Checks GitHub for a newer release. Updates are only installed if the release is signed\n" +
 			"with A Better Antivirus' release key and the download matches its signed checksum.\n" +
 			"Automatic updates can be turned on or off with `aba configure`.",
@@ -94,7 +94,7 @@ func updateCmd() *cobra.Command {
 				}},
 			}
 			fmt.Println()
-			if err := ui.RunSteps(steps); err != nil {
+			if err := ui.RunSteps("Updating A Better Antivirus", steps); err != nil {
 				return err
 			}
 			fmt.Println("\n" + ui.Good.Render(ui.IconOK) + " Updated to " + rel.Tag + ".")

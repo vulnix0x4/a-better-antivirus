@@ -38,7 +38,7 @@ func alertsCmd() *cobra.Command {
 	var all bool
 	c := &cobra.Command{
 		Use:   "alerts",
-		Short: "List what touched your baits",
+		Short: "What touched your baits",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			limit := 25
 			if all {
@@ -105,7 +105,7 @@ func printReport(rep *respond.Report) {
 func releaseCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "release [alert-id]",
-		Short: "Restore the network, unfreeze and unblock (all, or one alert's)",
+		Short: "Undo everything: reconnect, unfreeze, unblock",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireAdmin(); err != nil {
@@ -129,7 +129,7 @@ func releaseCmd() *cobra.Command {
 func killCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "kill <alert-id>",
-		Short: "Kill the processes frozen by an alert (they stay blocked)",
+		Short: "It's malware: end what an alert froze",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireAdmin(); err != nil {
@@ -146,7 +146,7 @@ func resumeCmd() *cobra.Command {
 	var ignore bool
 	c := &cobra.Command{
 		Use:   "resume <alert-id>",
-		Short: "It was yours: unfreeze it and restore its internet",
+		Short: "Let it run again, without trusting it",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireAdmin(); err != nil {
@@ -193,7 +193,7 @@ func resumeCmd() *cobra.Command {
 func trustCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "trust <alert-id>",
-		Short: "It's yours: undo any response and stop alerting on that program reading that bait",
+		Short: "It's yours: undo everything, stop alerting about it",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireAdmin(); err != nil {
@@ -281,7 +281,7 @@ func addIgnore(rules ...config.IgnoreRule) error {
 func testCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "test",
-		Short: "Safely simulate a stealer and watch ABA catch it",
+		Short: "Watch it catch a harmless fake stealer",
 		Long: "Copies ABA to your Temp folder (where stealers run from) and reads a bait with it.\n" +
 			"You'll see the detection, the freeze and the popup. The network is never touched during a test.",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -339,14 +339,21 @@ func runTest() error {
 		}
 	}()
 
-	fmt.Println(ui.Banner("test"))
+	baitName := filepath.Base(target)
+	for _, bs := range st.Baits {
+		for _, f := range bs.Files {
+			if strings.EqualFold(f.Path, target) {
+				baitName = bs.Name
+			}
+		}
+	}
 	fmt.Println()
-	fmt.Println(ui.KV([][2]string{
-		{"Fake stealer", reader},
-		{"Reads bait", target},
-		{"Expected", "critical (unsigned program in Temp) → frozen → popup → killed"},
-	}))
+	fmt.Println(ui.Banner("safe test"))
 	fmt.Println()
+	fmt.Println(" " + ui.Plain.Render("A harmless copy of ABA in your Temp folder is about to read ") + ui.Bold.Render(baitName) + ui.Plain.Render(","))
+	fmt.Println(" " + ui.Plain.Render("exactly the way a stealer would. Nothing leaves your PC and your network isn't touched."))
+	fmt.Println()
+	fmt.Println(" " + ui.Good.Render(ui.IconArr) + ui.Dim.Render(" Running the fake stealer…"))
 
 	cmd := exec.Command(reader, "test-reader", target)
 	if err := cmd.Start(); err != nil {
@@ -373,26 +380,17 @@ func runTest() error {
 	cmd.Wait()
 	if found == nil {
 		os.Remove(paths.TestFile())
-		fmt.Println(ui.Bad.Render(ui.IconBad) + " No detection within 20 seconds.")
-		fmt.Println(ui.Hint("Diagnose with", "aba doctor"), ui.Dim.Render("and check "+paths.LogFile()))
+		fmt.Println()
+		fmt.Println(" " + ui.Bad.Bold(true).Render(ui.IconBad) + " " + ui.Plain.Render("ABA didn't react within 20 seconds."))
+		fmt.Println("   " + ui.Hint("Find out why with", "aba doctor") + ui.Dim.Render(", and the log at "+paths.LogFile()))
 		return exitf("test failed")
 	}
-	fmt.Println(ui.Check(true, "Detected: ") + ui.TierWord(found.Tier) + ui.Dim.Render(" ("+found.Summary+")"))
-	if found.Did(config.ActionFreeze) {
-		if found.Instant {
-			fmt.Println(ui.Check(true, fmt.Sprintf("Frozen %d ms after it opened the bait", found.LatencyMS)) + ui.Dim.Render(" (instant freeze: no waiting for the event log)"))
-		} else {
-			fmt.Println(ui.Check(true, fmt.Sprintf("Frozen %d ms after the read", found.LatencyMS)) + ui.Dim.Render(fmt.Sprintf(" (Windows delivered the event after %d ms)", found.DeliveryMS)))
-		}
-	} else {
-		fmt.Println(ui.Check(false, "Not frozen") + ui.Dim.Render(" (check the alert for why)"))
-	}
-	fmt.Println(ui.Check(true, "Desktop alert sent (shows if you're signed in)"))
-	fmt.Println(ui.Check(true, "Test process killed and removed"))
+	fmt.Println()
+	phone := ""
 	if sec, err := config.LoadSecrets(); err == nil && sec.Phone.Enabled() {
-		fmt.Println(ui.Check(true, "Phone alert sent via "+sec.Phone.Describe()))
+		phone = sec.Phone.Kind
 	}
-	fmt.Println("\n" + ui.Hint("Full details:", "aba alerts show "+found.ID))
+	fmt.Print(renderTestResult(found, phone))
 	return nil
 }
 
@@ -421,7 +419,7 @@ func doctorCmd() *cobra.Command {
 	var fix bool
 	c := &cobra.Command{
 		Use:   "doctor",
-		Short: "Check that everything is armed, and fix what isn't",
+		Short: "Check that everything is armed (--fix repairs)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if fix {
 				if err := requireAdmin(); err != nil {
@@ -475,7 +473,7 @@ func learnCmd() *cobra.Command {
 	var extend int
 	c := &cobra.Command{
 		Use:   "learn",
-		Short: "Review what touched baits and ignore legit apps",
+		Short: "Trust several of your apps at once",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := mustConfig()
 			if err != nil {
@@ -608,7 +606,7 @@ func learnCmd() *cobra.Command {
 // ---- ignore ----
 
 func ignoreCmd() *cobra.Command {
-	c := &cobra.Command{Use: "ignore", Short: "Manage programs that may touch baits"}
+	c := &cobra.Command{Use: "ignore", Short: "Programs you trust to touch baits"}
 	c.AddCommand(&cobra.Command{
 		Use: "list", Short: "Show ignore rules",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -671,7 +669,7 @@ func ignoreCmd() *cobra.Command {
 // ---- bait ----
 
 func baitCmd() *cobra.Command {
-	c := &cobra.Command{Use: "bait", Short: "List, view, add or remove baits"}
+	c := &cobra.Command{Use: "bait", Short: "See, add or remove baits"}
 	c.AddCommand(&cobra.Command{
 		Use: "list", Short: "Planted baits and their health",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -828,7 +826,7 @@ func baitCmd() *cobra.Command {
 // ---- phone ----
 
 func phoneCmd() *cobra.Command {
-	c := &cobra.Command{Use: "phone", Short: "Phone alerts"}
+	c := &cobra.Command{Use: "phone", Short: "Test your phone alerts"}
 	c.AddCommand(&cobra.Command{
 		Use: "test", Short: "Send a test alert to your phone",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -936,7 +934,7 @@ func demoAlert() *alerts.Alert {
 func instantCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "instant [on|off]",
-		Short: "Instant freeze: catch readers the moment they open a bait",
+		Short: "Freeze readers the moment they open a bait",
 		Long: "Instant freeze holds every bait with a Windows oplock. When a program opens one, Windows\n" +
 			"pauses it inside the open; ABA works out who it is and, if it's suspicious, freezes it\n" +
 			"before it reads anything. The normal detection keeps running as a backup.",
@@ -973,4 +971,46 @@ func instantCmd() *cobra.Command {
 		},
 	}
 	return c
+}
+
+// testReason is the verdict of the test alert in a few words.
+func testReason(a *alerts.Alert) string {
+	r := a.Summary
+	if len(a.Verdict.Reasons) > 0 {
+		r = a.Verdict.Reasons[0]
+	}
+	if i := strings.Index(r, " ("); i > 0 {
+		if j := strings.Index(r[i:], ")"); j > 0 {
+			r = r[:i] + r[i+j+1:]
+		}
+	}
+	return r
+}
+
+// renderTestResult is what `aba test` prints once ABA has reacted.
+func renderTestResult(found *alerts.Alert, phoneKind string) string {
+	var b strings.Builder
+	rows := [][3]string{{"", "Caught", ui.TierWord(found.Tier) + ui.Dim.Render(": "+testReason(found))}}
+	switch {
+	case found.Did(config.ActionFreeze) && found.Instant:
+		rows = append(rows, [3]string{"", "Frozen", ui.Good.Bold(true).Render(fmt.Sprintf("%d ms", found.LatencyMS)) + ui.Dim.Render(" after it opened the bait, before it could read a byte")})
+	case found.Did(config.ActionFreeze):
+		rows = append(rows, [3]string{"", "Frozen", ui.Good.Bold(true).Render(fmt.Sprintf("%d ms", found.LatencyMS)) + ui.Dim.Render(" after the read")})
+	default:
+		rows = append(rows, [3]string{"x", "Not frozen", ui.Dim.Render("see the alert for why")})
+	}
+	alert := "popup on your desktop"
+	if phoneKind != "" {
+		alert += ", and your phone (" + phoneKind + ")"
+	}
+	rows = append(rows, [3]string{"", "Alerted", ui.Dim.Render(alert)}, [3]string{"", "Cleaned up", ui.Dim.Render("the fake stealer was killed and deleted")})
+	for _, r := range rows {
+		mark := ui.Good.Bold(true).Render(ui.IconOK)
+		if r[0] == "x" {
+			mark = ui.Bad.Bold(true).Render(ui.IconBad)
+		}
+		fmt.Fprintf(&b, " %s %s %s\n", mark, ui.Plain.Render(fmt.Sprintf("%-11s", r[1])), r[2])
+	}
+	b.WriteString("\n " + ui.Plain.Render("That's what happens to a real one.") + ui.Dim.Render(" Everything ABA saw: ") + ui.Code.Render("aba alerts show "+found.ID[strings.LastIndex(found.ID, "-")+1:]) + "\n")
+	return b.String()
 }
