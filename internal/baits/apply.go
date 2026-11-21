@@ -7,13 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-	"unsafe"
-
-	"golang.org/x/sys/windows"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
-	"github.com/vulnix0x4/a-better-antivirus/internal/winsec"
 )
 
 // legacyMarkers identify baits planted by the original PowerShell honeypot
@@ -58,7 +54,7 @@ func Create(s Spec, u config.UserInfo, g *Gen) (*config.BaitState, error) {
 			ownedBy(f.Path, u.SID)
 		}
 		if f.Audit {
-			if err := winsec.SetBaitAudit(f.Path); err != nil {
+			if err := SetTripwire(f.Path); err != nil {
 				return bs, fmt.Errorf("audit rule on %s: %w", f.Path, err)
 			}
 		}
@@ -106,30 +102,9 @@ func topMissingDir(dir string) string {
 //   - the same indexing setting as their neighbours. (ABA used to mark baits
 //     "don't index" to keep Windows Search away, which made them the only such
 //     files in Documents. Windows Search is ignored by name anyway.)
-
-func fileTime(t time.Time) *windows.Filetime {
-	ft := windows.NsecToFiletime(t.UnixNano())
-	return &ft
-}
-
-func setTimes(path string, created, accessed, written time.Time) {
-	p, _ := windows.UTF16PtrFromString(path)
-	h, err := windows.CreateFile(p, windows.FILE_WRITE_ATTRIBUTES, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
-	if err != nil {
-		return
-	}
-	defer windows.CloseHandle(h)
-	windows.SetFileTime(h, fileTime(created), fileTime(accessed), fileTime(written))
-}
-
-func getTimes(path string) (created, written time.Time, ok bool) {
-	var d windows.Win32FileAttributeData
-	p, err := windows.UTF16PtrFromString(path)
-	if err != nil || windows.GetFileAttributesEx(p, windows.GetFileExInfoStandard, (*byte)(unsafe.Pointer(&d))) != nil {
-		return created, written, false
-	}
-	return time.Unix(0, d.CreationTime.Nanoseconds()), time.Unix(0, d.LastWriteTime.Nanoseconds()), true
-}
+//
+// The logic here is the same everywhere. Reading and setting a file's dates,
+// owner and indexing flag is up to the operating system: blend_<os>.go.
 
 func jitter() time.Duration { return time.Duration(rint(1_000_000_000)) } // up to a second, to the 100 ns
 
@@ -179,45 +154,6 @@ func ageTree(dir, ownerSID string) time.Time {
 	setTimes(dir, created, newest.Add(jitter()), newest.Add(jitter()))
 	ownedBy(dir, ownerSID)
 	return created
-}
-
-// ownedBy makes sid the owner of path, when it isn't already. (Needs the
-// restore privilege, which an elevated installer and the service have.)
-func ownedBy(path, sid string) {
-	if sid == "" {
-		return
-	}
-	want, err := windows.StringToSid(sid)
-	if err != nil {
-		return
-	}
-	if sd, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION); err == nil {
-		if cur, _, err := sd.Owner(); err == nil && cur != nil && cur.Equals(want) {
-			return
-		}
-	}
-	if winsec.EnablePrivilege("SeRestorePrivilege") != nil {
-		return
-	}
-	windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION, want, nil, nil, nil)
-}
-
-// indexedLikeFolder gives a bait the same "index this file" setting as the
-// folder it's in (which is what any file created there gets).
-func indexedLikeFolder(path string) {
-	attrs := func(p string) (uint32, bool) {
-		u, _ := windows.UTF16PtrFromString(p)
-		a, err := windows.GetFileAttributes(u)
-		return a, err == nil
-	}
-	fa, ok1 := attrs(path)
-	da, ok2 := attrs(filepath.Dir(path))
-	const noIndex = windows.FILE_ATTRIBUTE_NOT_CONTENT_INDEXED
-	if !ok1 || !ok2 || fa&noIndex == da&noIndex {
-		return
-	}
-	u, _ := windows.UTF16PtrFromString(path)
-	windows.SetFileAttributes(u, fa&^noIndex|da&noIndex)
 }
 
 // legacyEmptyDB is the size of the empty, table-less database older versions
@@ -317,7 +253,7 @@ func Check(bs *config.BaitState) []Problem {
 			continue
 		}
 		if f.Audit {
-			if ok, err := winsec.HasBaitAudit(f.Path); err == nil && !ok {
+			if ok, err := HasTripwire(f.Path); err == nil && !ok {
 				out = append(out, Problem{File: f.Path, Kind: "no-audit", Detail: "audit rule was stripped (an editor rewrote the file?)"})
 			}
 		}
@@ -372,7 +308,7 @@ func Repair(bs *config.BaitState, s Spec, u config.UserInfo, g *Gen, probs []Pro
 			fallthrough
 		case "no-audit":
 			if bf.Audit {
-				if err := winsec.SetBaitAudit(p.File); err != nil && firstErr == nil {
+				if err := SetTripwire(p.File); err != nil && firstErr == nil {
 					firstErr = err
 				}
 			}
@@ -398,7 +334,7 @@ func Remove(bs *config.BaitState) error {
 	var firstErr error
 	for _, f := range bs.Files {
 		if f.Audit {
-			winsec.ClearAudit(f.Path)
+			ClearTripwire(f.Path)
 		}
 		// Only delete a file if it's still exactly what we planted. If anything
 		// rewrote it (e.g. the real app moved in and saved its own data there),

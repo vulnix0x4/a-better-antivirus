@@ -33,7 +33,7 @@ func Rule(a *alerts.Alert) (rule config.IgnoreRule, why string) {
 	}
 	exe := filepath.Base(p.Image)
 	swept := len(a.Verdict.Swept) > 0
-	windows := (&classify.Classifier{Env: classify.DefaultEnv()}).WindowsBinary(p.Image)
+	windows := (&classify.Classifier{Env: classify.DefaultEnv()}).SystemBinary(p.Image)
 
 	if a.Verdict.Evasion {
 		return rule, exe + " used a trick meant to dodge detection; that's never trusted from an alert (for a backup or security tool that really works that way: `aba ignore add --allow-tricks`)"

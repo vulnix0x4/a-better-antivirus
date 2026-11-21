@@ -5,11 +5,11 @@ import (
 	"testing"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/alerts"
-	"github.com/vulnix0x4/a-better-antivirus/internal/authenticode"
 	"github.com/vulnix0x4/a-better-antivirus/internal/classify"
+	"github.com/vulnix0x4/a-better-antivirus/internal/provenance"
 )
 
-func alert(image string, sig authenticode.Result, cmd string, baits ...string) *alerts.Alert {
+func alert(image string, sig provenance.Result, cmd string, baits ...string) *alerts.Alert {
 	a := &alerts.Alert{ID: "a1", Process: &alerts.Process{Image: image, Signature: sig, CommandLine: cmd, SHA256: "ABCDEF0123456789"}}
 	for _, b := range baits {
 		a.Baits = append(a.Baits, alerts.BaitHit{ID: b})
@@ -17,7 +17,7 @@ func alert(image string, sig authenticode.Result, cmd string, baits ...string) *
 	return a
 }
 
-var signed = authenticode.Result{Signed: true, Valid: true, Signer: "Anomaly Innovations, Inc."}
+var signed = provenance.Result{Signed: true, Valid: true, Signer: "Anomaly Innovations, Inc."}
 
 func TestSignedAppTrustedForWhatItRead(t *testing.T) {
 	a := alert(`C:\Users\bob\AppData\Local\Discord\app-1.0.9172\Discord.exe`, signed, "", "aws", "aws")
@@ -32,7 +32,7 @@ func TestSignedAppTrustedForWhatItRead(t *testing.T) {
 }
 
 func TestUnsignedPinnedToFile(t *testing.T) {
-	a := alert(`C:\Users\bob\Downloads\mytool.exe`, authenticode.Result{}, "", "discord")
+	a := alert(`C:\Users\bob\Downloads\mytool.exe`, provenance.Result{}, "", "discord")
 	r, why := Rule(a)
 	if why != "" || r.SHA256 != "abcdef0123456789" || r.Path != a.Process.Image || r.Signer != "" {
 		t.Fatalf("rule=%+v why=%q", r, why)
@@ -43,7 +43,7 @@ func TestUnsignedPinnedToFile(t *testing.T) {
 }
 
 func TestScriptHostPinnedToCommandLine(t *testing.T) {
-	py := authenticode.Result{Signed: true, Valid: true, Signer: "Python Software Foundation"}
+	py := provenance.Result{Signed: true, Valid: true, Signer: "Python Software Foundation"}
 	a := alert(`C:\Python312\python.exe`, py, `python.exe C:\me\sync.py`, "aws")
 	r, why := Rule(a)
 	if why != "" || r.CommandLine != `python.exe C:\me\sync.py` || r.Signer == "" {
@@ -65,7 +65,7 @@ func TestSweeps(t *testing.T) {
 	if why != "" || len(r.Baits) != 0 {
 		t.Fatalf("a program you say may read everything gets an all-bait rule: %+v %q", r, why)
 	}
-	w := alert(`C:\Windows\explorer.exe`, authenticode.Result{Signed: true, Valid: true, Signer: "Microsoft Windows"}, "", "aws", "discord", "chrome")
+	w := alert(`C:\Windows\explorer.exe`, provenance.Result{Signed: true, Valid: true, Signer: "Microsoft Windows"}, "", "aws", "discord", "chrome")
 	w.Verdict = a.Verdict
 	if _, why := Rule(w); why == "" {
 		t.Fatal("a Windows program that swept baits must never be trusted permanently")

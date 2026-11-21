@@ -1,0 +1,57 @@
+// Package detect is the shape of what a watcher tells the engine: "this
+// program touched that bait". It says nothing about how the operating system
+// noticed, which differs a lot:
+//
+//   - Windows: an oplock on every bait (package instant) pauses the opener
+//     inside its open, and the Security event log (package evtlog) reports the
+//     read a moment later, as a backup.
+//   - Linux: fanotify permission events pause the opener and name it.
+//   - macOS: Endpoint Security (or eslogger) may only report the open after it
+//     happened.
+//
+// So a watcher talks to the engine in one of two ways, depending on whether
+// the opener is being held at that moment:
+//
+//   - Held (it's paused inside the open and can't read yet): ask
+//     engine.DecideInstant whether it should be frozen now. If so, freeze it,
+//     let the open go through and report with engine.HandleOpen, passing what
+//     was frozen. If not, let it through; unless another watcher will report
+//     the read anyway, report it with engine.HandleAccess.
+//   - Not held (the access already happened): report an Access with
+//     engine.HandleAccess. The engine freezes the program itself if its verdict
+//     calls for it.
+package detect
+
+import "time"
+
+// Op is what was done to the bait.
+type Op int
+
+const (
+	// OpRead: opened to get at its contents (reading, or mapping or executing
+	// it, which reads without asking for read access).
+	OpRead Op = iota + 1
+	// OpDelete: deleted, or renamed away.
+	OpDelete
+)
+
+// Access is one program touching one bait.
+type Access struct {
+	Time time.Time // when it happened
+	Op   Op
+	// Path is the bait file. Alias is set when the program reached it under
+	// another name (a hard link to the bait): the name it actually used.
+	Path  string
+	Alias string
+
+	PID uint32
+	// Image is the program's executable as the watcher reported it ("" if it
+	// didn't). While the process is alive the engine asks the operating
+	// system which file is really running, and goes by that.
+	Image string
+	// User is the account it ran as, for display. UserID is the same account
+	// in the form procinfo.ServiceAccount takes (a SID on Windows): once the
+	// process is gone, that's what tells a person's program from a service.
+	User   string
+	UserID string
+}

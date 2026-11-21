@@ -1,5 +1,11 @@
 // Package procinfo inspects and controls processes: image path, command line,
 // parent chain, process trees, suspend/resume/kill, hashes and open connections.
+//
+// This file is the part that's the same on every operating system: walking
+// process trees and freezing or killing them, built on a handful of
+// primitives. The primitives themselves (list processes, name a process's
+// executable, suspend, resume, kill, hold frozen, list connections…) are in
+// the *_<os>.go files.
 package procinfo
 
 import (
@@ -8,12 +14,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"sort"
-	"strings"
-	"unsafe"
-
-	"golang.org/x/sys/windows"
 )
 
 // Entry is one row of a process snapshot.
@@ -21,88 +22,7 @@ type Entry struct {
 	PID        uint32
 	PPID       uint32
 	Exe        string // file name only
-	CreateTime int64  // 0 if unavailable
-}
-
-// Snapshot lists all processes.
-func Snapshot() (map[uint32]Entry, error) {
-	h, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
-	if err != nil {
-		return nil, err
-	}
-	defer windows.CloseHandle(h)
-	out := map[uint32]Entry{}
-	var pe windows.ProcessEntry32
-	pe.Size = uint32(unsafe.Sizeof(pe))
-	for err = windows.Process32First(h, &pe); err == nil; err = windows.Process32Next(h, &pe) {
-		e := Entry{PID: pe.ProcessID, PPID: pe.ParentProcessID, Exe: windows.UTF16ToString(pe.ExeFile[:])}
-		e.CreateTime, _ = CreateTime(pe.ProcessID)
-		out[pe.ProcessID] = e
-	}
-	return out, nil
-}
-
-func open(pid uint32, access uint32) (windows.Handle, error) {
-	return windows.OpenProcess(access, false, pid)
-}
-
-// CreateTime returns the process creation FILETIME as int64.
-func CreateTime(pid uint32) (int64, error) {
-	h, err := open(pid, windows.PROCESS_QUERY_LIMITED_INFORMATION)
-	if err != nil {
-		return 0, err
-	}
-	defer windows.CloseHandle(h)
-	var c, e, k, u windows.Filetime
-	if err := windows.GetProcessTimes(h, &c, &e, &k, &u); err != nil {
-		return 0, err
-	}
-	return int64(c.HighDateTime)<<32 | int64(c.LowDateTime), nil
-}
-
-// ImagePath returns the full path of the process executable.
-func ImagePath(pid uint32) (string, error) {
-	h, err := open(pid, windows.PROCESS_QUERY_LIMITED_INFORMATION)
-	if err != nil {
-		return "", err
-	}
-	defer windows.CloseHandle(h)
-	buf := make([]uint16, windows.MAX_LONG_PATH)
-	n := uint32(len(buf))
-	if err := windows.QueryFullProcessImageName(h, 0, &buf[0], &n); err != nil {
-		return "", err
-	}
-	return windows.UTF16ToString(buf[:n]), nil
-}
-
-// CommandLine returns the process command line (Windows 8.1+).
-func CommandLine(pid uint32) (string, error) {
-	h, err := open(pid, windows.PROCESS_QUERY_LIMITED_INFORMATION)
-	if err != nil {
-		return "", err
-	}
-	defer windows.CloseHandle(h)
-	var need uint32
-	buf := make([]byte, 4096)
-	for i := 0; i < 3; i++ {
-		err = windows.NtQueryInformationProcess(h, windows.ProcessCommandLineInformation, unsafe.Pointer(&buf[0]), uint32(len(buf)), &need)
-		if err == nil {
-			break
-		}
-		if need > uint32(len(buf)) {
-			buf = make([]byte, need)
-			continue
-		}
-		return "", err
-	}
-	if err != nil {
-		return "", err
-	}
-	us := (*windows.NTUnicodeString)(unsafe.Pointer(&buf[0]))
-	if us.Buffer == nil || us.Length == 0 {
-		return "", nil
-	}
-	return windows.UTF16ToString(unsafe.Slice(us.Buffer, us.Length/2)), nil
+	CreateTime int64  // when it started, in the operating system's own units (only ever compared); 0 if unavailable
 }
 
 // Parent describes one ancestor.
@@ -177,61 +97,6 @@ func Tree(snap map[uint32]Entry, pid uint32) []uint32 {
 	return out
 }
 
-var (
-	ntdll             = windows.NewLazySystemDLL("ntdll.dll")
-	procNtSuspendProc = ntdll.NewProc("NtSuspendProcess")
-	procNtResumeProc  = ntdll.NewProc("NtResumeProcess")
-)
-
-const processSuspendResume = 0x0800
-
-func ntCall(p *windows.LazyProc, pid uint32) error {
-	h, err := open(pid, processSuspendResume)
-	if err != nil {
-		return err
-	}
-	defer windows.CloseHandle(h)
-	r, _, _ := p.Call(uintptr(h))
-	if r != 0 {
-		return fmt.Errorf("%s: NTSTATUS 0x%08x", p.Name, uint32(r))
-	}
-	return nil
-}
-
-func Suspend(pid uint32) error { return ntCall(procNtSuspendProc, pid) }
-func Resume(pid uint32) error  { return ntCall(procNtResumeProc, pid) }
-
-// Kill terminates a process.
-func Kill(pid uint32) error {
-	h, err := open(pid, windows.PROCESS_TERMINATE)
-	if err != nil {
-		return err
-	}
-	defer windows.CloseHandle(h)
-	return windows.TerminateProcess(h, 0xF1)
-}
-
-// Alive reports whether pid exists and (if createTime != 0) is the same process.
-func Alive(pid uint32, createTime int64) bool {
-	ct, err := CreateTime(pid)
-	if err != nil {
-		return false
-	}
-	if createTime != 0 && ct != createTime {
-		return false
-	}
-	h, err := open(pid, windows.PROCESS_QUERY_LIMITED_INFORMATION)
-	if err != nil {
-		return false
-	}
-	defer windows.CloseHandle(h)
-	var code uint32
-	if err := windows.GetExitCodeProcess(h, &code); err != nil {
-		return false
-	}
-	return code == 259 // STILL_ACTIVE
-}
-
 // SuspendTree freezes pid and its descendants. It re-snapshots once to catch
 // children spawned while we were freezing. Returns the PIDs frozen.
 func SuspendTree(pid uint32) ([]uint32, error) {
@@ -240,7 +105,7 @@ func SuspendTree(pid uint32) ([]uint32, error) {
 	var firstErr error
 	// Freeze the reader itself immediately: every millisecond counts, and the
 	// process snapshot below takes a while on a busy machine.
-	if pid != 0 && pid != 4 && pid != uint32(os.Getpid()) {
+	if !systemPID(pid) && pid != uint32(os.Getpid()) {
 		done[pid] = true
 		if err := Suspend(pid); err != nil {
 			firstErr = err
@@ -254,7 +119,7 @@ func SuspendTree(pid uint32) ([]uint32, error) {
 			return frozen, err
 		}
 		for _, p := range Tree(snap, pid) {
-			if done[p] || p == 0 || p == 4 || p == uint32(os.Getpid()) {
+			if done[p] || systemPID(p) || p == uint32(os.Getpid()) {
 				continue
 			}
 			done[p] = true
@@ -303,48 +168,76 @@ func FileSHA256(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// BaseName is a case-preserving file name of a Windows path.
-func BaseName(p string) string {
-	if p == "" {
-		return ""
-	}
-	return filepath.Base(strings.ReplaceAll(p, "/", `\`))
+// Conn is one socket owned by a process.
+type Conn struct {
+	PID    uint32 `json:"pid"`
+	Proto  string `json:"proto"` // tcp | tcp6 | udp | udp6
+	Local  string `json:"local"`
+	Remote string `json:"remote,omitempty"`
+	State  string `json:"state,omitempty"`
 }
 
-// Integrity levels (the RID of the token's mandatory label).
-const (
-	IntegrityLow    = 0x1000
-	IntegrityMedium = 0x2000
-	IntegrityHigh   = 0x3000
-	IntegritySystem = 0x4000
-)
+// HoldName identifies a process for holds: its PID and creation time.
+func HoldName(pid uint32, createTime int64) string {
+	return fmt.Sprintf("%d-%x", pid, uint64(createTime))
+}
 
-// IntegrityLevel returns the process token's integrity RID.
-func IntegrityLevel(pid uint32) (uint32, error) {
-	h, err := open(pid, windows.PROCESS_QUERY_LIMITED_INFORMATION)
+// SuspendTreeExcept freezes pid and its descendants, leaving out the
+// processes in skip (already frozen: suspensions stack, so freezing one twice
+// would need two unfreezes) and any that ok (if given) turns down. Returns
+// the PIDs it froze.
+func SuspendTreeExcept(pid uint32, skip map[uint32]bool, ok func(pid uint32) bool) []uint32 {
+	var frozen []uint32
+	done := map[uint32]bool{}
+	for pass := 0; pass < 2; pass++ {
+		snap, err := Snapshot()
+		if err != nil {
+			return frozen
+		}
+		for _, p := range Tree(snap, pid) {
+			if done[p] || skip[p] || systemPID(p) || p == uint32(os.Getpid()) {
+				continue
+			}
+			done[p] = true
+			if ok != nil && !ok(p) {
+				continue
+			}
+			if Suspend(p) == nil {
+				frozen = append(frozen, p)
+			}
+		}
+	}
+	return frozen
+}
+
+// Ancestor is one process up the chain from a reader.
+type Ancestor struct {
+	PID        uint32
+	Image      string
+	CreateTime int64
+}
+
+// Ancestors walks up from pid: its parent, grandparent… (at most depth),
+// stopping where the chain can't be trusted (the parent exited and its PID
+// was reused).
+func Ancestors(pid uint32, depth int) []Ancestor {
+	snap, err := Snapshot()
 	if err != nil {
-		return 0, err
+		return nil
 	}
-	defer windows.CloseHandle(h)
-	var tok windows.Token
-	if err := windows.OpenProcessToken(h, windows.TOKEN_QUERY, &tok); err != nil {
-		return 0, err
+	var out []Ancestor
+	cur, ok := snap[pid]
+	for i := 0; ok && i < depth; i++ {
+		pp, found := snap[cur.PPID]
+		if !found || cur.PPID == 0 || cur.PPID == cur.PID {
+			break
+		}
+		if pp.CreateTime != 0 && cur.CreateTime != 0 && pp.CreateTime > cur.CreateTime {
+			break // created after its "child": a reused PID
+		}
+		img, _ := ImagePath(pp.PID)
+		out = append(out, Ancestor{PID: pp.PID, Image: img, CreateTime: pp.CreateTime})
+		cur = pp
 	}
-	defer tok.Close()
-	var n uint32
-	windows.GetTokenInformation(tok, windows.TokenIntegrityLevel, nil, 0, &n)
-	if n == 0 {
-		return 0, fmt.Errorf("no integrity level")
-	}
-	buf := make([]byte, n)
-	if err := windows.GetTokenInformation(tok, windows.TokenIntegrityLevel, &buf[0], n, &n); err != nil {
-		return 0, err
-	}
-	label := (*windows.Tokenmandatorylabel)(unsafe.Pointer(&buf[0]))
-	sid := label.Label.Sid
-	c := sid.SubAuthorityCount()
-	if c == 0 {
-		return 0, fmt.Errorf("bad integrity SID")
-	}
-	return sid.SubAuthority(uint32(c) - 1), nil
+	return out
 }

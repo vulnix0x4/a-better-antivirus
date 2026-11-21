@@ -8,15 +8,16 @@ import (
 	"time"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/alerts"
-	"github.com/vulnix0x4/a-better-antivirus/internal/authenticode"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
+	"github.com/vulnix0x4/a-better-antivirus/internal/detect"
 	"github.com/vulnix0x4/a-better-antivirus/internal/evtlog"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
+	"github.com/vulnix0x4/a-better-antivirus/internal/provenance"
 )
 
 type fakeOps struct {
 	mu        sync.Mutex
-	sigs      map[string]authenticode.Result
+	sigs      map[string]provenance.Result
 	suspended []uint32
 	resumed   []uint32
 	killed    []uint32
@@ -42,7 +43,7 @@ type fakeOps struct {
 }
 
 func newFake() *fakeOps {
-	return &fakeOps{images: map[uint32]string{}, sigs: map[string]authenticode.Result{}, saved: map[string]*alerts.Alert{}, state: config.NewState(),
+	return &fakeOps{images: map[uint32]string{}, sigs: map[string]provenance.Result{}, saved: map[string]*alerts.Alert{}, state: config.NewState(),
 		hashes: map[string]string{}, cmdlines: map[uint32]string{}, injected: map[uint32]string{}, elevated: map[uint32]bool{}, gone: map[uint32]bool{},
 		parents: map[uint32][]procinfo.Ancestor{}, running: map[string][]uint32{}, sideDLL: map[uint32]string{}}
 }
@@ -59,7 +60,7 @@ func (f *fakeOps) CreateTime(pid uint32) int64 {
 	}
 	return 1
 }
-func (f *fakeOps) Verify(p string) authenticode.Result {
+func (f *fakeOps) Verify(p string) provenance.Result {
 	time.Sleep(f.slowSig)
 	return f.sigs[p]
 }
@@ -132,8 +133,11 @@ func setup(preset string) (*Engine, *fakeOps) {
 	return e, f
 }
 
-func ev(pid uint32, image, obj string, mask uint32) *evtlog.ObjectAccess {
-	return &evtlog.ObjectAccess{ProcessID: pid, ProcessName: image, ObjectName: obj, AccessMask: mask, Time: time.Now()}
+// ev is a bait access the way the Windows event log reports it: mask is the
+// 4663 access mask (1 read, 0x20 execute, 0x10000 delete).
+func ev(pid uint32, image, obj string, mask uint32) *detect.Access {
+	a, _ := (&evtlog.ObjectAccess{ProcessID: pid, ProcessName: image, ObjectName: obj, AccessMask: mask, Time: time.Now()}).Access()
+	return a
 }
 
 func only(f *fakeOps) *alerts.Alert {
@@ -167,7 +171,7 @@ func TestStealerIsFrozenAndBlocked(t *testing.T) {
 func TestSignedUserFolderAppIsUnfrozen(t *testing.T) {
 	e, f := setup("balanced")
 	img := `C:\Users\bob\AppData\Local\Programs\Microsoft VS Code\Code.exe`
-	f.sigs[img] = authenticode.Result{Signed: true, Valid: true, Signer: "Microsoft Corporation"}
+	f.sigs[img] = provenance.Result{Signed: true, Valid: true, Signer: "Microsoft Corporation"}
 	e.HandleAccess(ev(200, img, desktopBait, 1))
 	a := only(f)
 	if a.Tier != config.TierWarn || len(f.suspended) != 1 || len(f.resumed) != 2 || len(f.state.Frozen) != 0 || len(f.blocked) != 0 {
@@ -197,7 +201,7 @@ func TestLearningModeHoldsBackWarn(t *testing.T) {
 	e, f := setup("strict") // strict freezes warn-tier readers
 	e.cfg.LearningUntil = time.Now().Add(time.Hour)
 	img := `C:\Users\bob\AppData\Local\Programs\SyncTool\sync.exe`
-	f.sigs[img] = authenticode.Result{Signed: true, Valid: true, Signer: "Sync Corp"}
+	f.sigs[img] = provenance.Result{Signed: true, Valid: true, Signer: "Sync Corp"}
 	e.HandleAccess(ev(300, img, desktopBait, 1))
 	a := only(f)
 	if a.Tier != config.TierWarn || len(f.state.Frozen) != 0 || len(a.Actions) != 0 || !a.Learning {
@@ -215,7 +219,7 @@ func TestSignedSDKReadOfAWSIsNotAnAlert(t *testing.T) {
 	st.Baits["aws"] = &config.BaitState{ID: "aws", Name: "AWS credentials", Files: []config.BaitFile{{Path: aws, Audit: true}}}
 	e.Configure(e.cfg, st)
 	oc := `C:\Users\bob\AppData\Roaming\npm\node_modules\@opencode\cli\bin\opencode.exe`
-	f.sigs[oc] = authenticode.Result{Signed: true, Valid: true, Signer: "Anomaly Innovations, Inc"}
+	f.sigs[oc] = provenance.Result{Signed: true, Valid: true, Signer: "Anomaly Innovations, Inc"}
 	e.HandleAccess(ev(400, oc, aws, 1))
 	if len(f.saved) != 0 {
 		t.Fatalf("signed SDK user reading ~/.aws must not alert: %+v", only(f))
@@ -229,7 +233,7 @@ func TestSignedSDKReadOfAWSIsNotAnAlert(t *testing.T) {
 func TestRepeatAlertsDontPopUpAgain(t *testing.T) {
 	e, f := setup("balanced") // warn = alert only
 	img := `C:\Users\bob\AppData\Local\Programs\Tool\tool.exe`
-	f.sigs[img] = authenticode.Result{Signed: true, Valid: true, Signer: "Tool Inc"}
+	f.sigs[img] = provenance.Result{Signed: true, Valid: true, Signer: "Tool Inc"}
 	e.HandleAccess(ev(500, img, desktopBait, 1))
 	e.HandleAccess(ev(501, img, desktopBait, 1))
 	if len(f.saved) != 2 || len(f.desktop) != 1 {
@@ -246,7 +250,7 @@ func TestIgnoredAndUnrelatedEvents(t *testing.T) {
 	e.HandleAccess(ev(1, `C:\Users\bob\Downloads\x.exe`, `C:\not\a\bait.txt`, 1))
 	e.HandleAccess(ev(999, `C:\Program Files\File Access Monitor\famsvc.exe`, desktopBait, 1)) // ourselves
 	def := `C:\ProgramData\Microsoft\Windows Defender\Platform\4.18.1-0\MsMpEng.exe`
-	f.sigs[def] = authenticode.Result{Signed: true, Valid: true, Signer: "Microsoft Corporation"}
+	f.sigs[def] = provenance.Result{Signed: true, Valid: true, Signer: "Microsoft Corporation"}
 	e.HandleAccess(ev(5, def, desktopBait, 1))
 	if len(f.saved) != 0 || len(f.suspended) != 0 {
 		t.Fatalf("should be silent: alerts=%d suspended=%v", len(f.saved), f.suspended)
@@ -256,7 +260,7 @@ func TestIgnoredAndUnrelatedEvents(t *testing.T) {
 func TestDecoyOwnerRetires(t *testing.T) {
 	e, f := setup("strict")
 	img := `C:\Users\bob\AppData\Local\Discord\app-1.0.9172\Discord.exe`
-	f.sigs[img] = authenticode.Result{Signed: true, Valid: true, Signer: "Discord Inc."}
+	f.sigs[img] = provenance.Result{Signed: true, Valid: true, Signer: "Discord Inc."}
 	e.HandleAccess(ev(400, img, `C:\Users\bob\AppData\Roaming\discord\Local Storage\leveldb\000005.ldb`, 1))
 	a := only(f)
 	if a.Kind != alerts.KindDecoyRetired || len(f.retired) != 1 || len(f.state.Frozen) != 0 || f.isolated != 0 {
@@ -300,7 +304,7 @@ func TestInstantFreezeDecisions(t *testing.T) {
 	f.images[100] = stealer
 	f.images[200] = code
 	f.images[300] = `C:\Windows\explorer.exe`
-	f.sigs[code] = authenticode.Result{Signed: true, Valid: true, Signer: "Microsoft Corporation"}
+	f.sigs[code] = provenance.Result{Signed: true, Valid: true, Signer: "Microsoft Corporation"}
 
 	if !e.DecideInstant(100, desktopBait) {
 		t.Error("unsigned program in Temp should be frozen mid-open")
@@ -437,7 +441,7 @@ func TestSweepCatchesInjectedTrustedApp(t *testing.T) {
 	// Discord and Chrome: the trust doesn't cover those, and reading three
 	// apps' data is a sweep, so it's stopped whatever it is.
 	oc := `C:\Users\bob\AppData\Roaming\npm\node_modules\opencode-ai\bin\opencode.exe`
-	f.sigs[oc] = authenticode.Result{Signed: true, Valid: true, Signer: "Anomaly Innovations, Inc."}
+	f.sigs[oc] = provenance.Result{Signed: true, Valid: true, Signer: "Anomaly Innovations, Inc."}
 	e.cfg.Ignore = []config.IgnoreRule{{Path: `C:\Users\*\AppData\Roaming\npm\**\opencode.exe`, Signer: "Anomaly", Baits: []string{"aws"}}}
 	e.Configure(e.cfg, stateWithAll())
 	e.HandleAccess(ev(800, oc, awsBait, 1))
@@ -469,7 +473,7 @@ func stateWithAll() *config.State {
 func TestSweepByWindowsProgram(t *testing.T) {
 	e, f := setup("balanced")
 	exp := `C:\Windows\explorer.exe`
-	f.sigs[exp] = authenticode.Result{Signed: true, Valid: true, Signer: "Microsoft Windows"}
+	f.sigs[exp] = provenance.Result{Signed: true, Valid: true, Signer: "Microsoft Windows"}
 	for _, b := range []string{discordBait, chromeBait, metamaskBait} {
 		e.HandleAccess(ev(900, exp, b, 1))
 	}
@@ -485,11 +489,11 @@ func TestSweepByWindowsProgram(t *testing.T) {
 func TestSweepNotForAdminToolsOrExemptPrograms(t *testing.T) {
 	e, f := setup("balanced")
 	bb := `C:\Program Files\Backblaze\bztransmit64.exe`
-	f.sigs[bb] = authenticode.Result{Signed: true, Valid: true, Signer: "Backblaze, Inc."}
+	f.sigs[bb] = provenance.Result{Signed: true, Valid: true, Signer: "Backblaze, Inc."}
 	e.cfg.Ignore = []config.IgnoreRule{{Path: bb, Signer: "Backblaze"}} // all baits
 	e.Configure(e.cfg, stateWithAll())
 	adm := `C:\Program Files\Tool\tool.exe`
-	f.sigs[adm] = authenticode.Result{Signed: true, Valid: true, Signer: "Tool Inc"}
+	f.sigs[adm] = provenance.Result{Signed: true, Valid: true, Signer: "Tool Inc"}
 	f.elevated[1001] = true
 	for _, b := range []string{discordBait, chromeBait, metamaskBait, awsBait} {
 		e.HandleAccess(ev(1000, bb, b, 1))
@@ -511,7 +515,7 @@ func TestInstantSweep(t *testing.T) {
 	e.cfg.InstantFreeze = true
 	code := `C:\Users\bob\AppData\Local\Programs\Microsoft VS Code\Code.exe`
 	f.images[200] = code
-	f.sigs[code] = authenticode.Result{Signed: true, Valid: true, Signer: "Microsoft Corporation"}
+	f.sigs[code] = provenance.Result{Signed: true, Valid: true, Signer: "Microsoft Corporation"}
 	if e.DecideInstant(200, discordBait) || e.DecideInstant(200, chromeBait) {
 		t.Fatal("a signed app opening one or two baits is only a warning in balanced")
 	}
@@ -525,7 +529,7 @@ func TestSweepSuspect(t *testing.T) {
 	e.cfg.InstantFreeze = true
 	find := `C:\Windows\System32\find.exe`
 	f.images[300], f.images[301] = find, find
-	f.sigs[find] = authenticode.Result{Signed: true, Valid: true, Signer: "Microsoft Windows"}
+	f.sigs[find] = provenance.Result{Signed: true, Valid: true, Signer: "Microsoft Windows"}
 	if e.SweepSuspect(metamaskBait, []uint32{300}) != 0 {
 		t.Fatal("nothing read yet: no suspect")
 	}
@@ -552,7 +556,7 @@ func TestSweepSuspect(t *testing.T) {
 func TestInjectedWindowsProgramIsCritical(t *testing.T) {
 	e, f := setup("balanced")
 	np := `C:\Windows\System32\notepad.exe`
-	f.sigs[np] = authenticode.Result{Signed: true, Valid: true, Signer: "Microsoft Windows"}
+	f.sigs[np] = provenance.Result{Signed: true, Valid: true, Signer: "Microsoft Windows"}
 	e.HandleAccess(ev(1100, np, desktopBait, 1))
 	if a := only(f); a.Tier != config.TierWarn {
 		t.Fatalf("clean notepad opening a bait: %+v", a)
@@ -578,7 +582,7 @@ func TestInjectedWindowsProgramIsCritical(t *testing.T) {
 func TestScriptHostRepeatsStillNotify(t *testing.T) {
 	e, f := setup("balanced")
 	py := `C:\Python312\python.exe`
-	f.sigs[py] = authenticode.Result{Signed: true, Valid: true, Signer: "Python Software Foundation"}
+	f.sigs[py] = provenance.Result{Signed: true, Valid: true, Signer: "Python Software Foundation"}
 	e.HandleAccess(ev(1400, py, desktopBait, 1))
 	e.HandleAccess(ev(1401, py, desktopBait, 1))
 	if len(f.desktop) != 2 {
@@ -596,7 +600,7 @@ func TestYourFilesCountAsOneInASweep(t *testing.T) {
 	e.Configure(e.cfg, st)
 	// OneDrive syncing Desktop and Documents reads all of those: not a sweep.
 	od := `C:\Users\bob\AppData\Local\Microsoft\OneDrive\OneDrive.exe`
-	f.sigs[od] = authenticode.Result{Signed: true, Valid: true, Signer: "Microsoft Corporation"}
+	f.sigs[od] = provenance.Result{Signed: true, Valid: true, Signer: "Microsoft Corporation"}
 	for _, b := range []string{desktopBait, docs, seed} {
 		e.HandleAccess(ev(1500, od, b, 1))
 	}
@@ -643,11 +647,11 @@ func TestSweepByProcessThatAlreadyExited(t *testing.T) {
 	// The account it read as decides: a user, not a service.
 	e, f := setup("balanced")
 	find := `C:\Windows\System32\find.exe`
-	f.sigs[find] = authenticode.Result{Signed: true, Valid: true, Signer: "Microsoft Windows"}
+	f.sigs[find] = provenance.Result{Signed: true, Valid: true, Signer: "Microsoft Windows"}
 	f.gone[1600] = true
 	for _, b := range []string{desktopBait, discordBait, chromeBait} {
 		x := ev(1600, find, b, 1)
-		x.UserSID = "S-1-5-21-1111-2222-3333-1001"
+		x.UserID = "S-1-5-21-1111-2222-3333-1001"
 		e.HandleAccess(x)
 	}
 	if a := lastAlert(f); a == nil || a.Tier != config.TierCritical || len(a.Verdict.Swept) != 3 || !a.Did(config.ActionBlockProgram) {
@@ -659,7 +663,7 @@ func TestSweepByProcessThatAlreadyExited(t *testing.T) {
 	f2.gone[1700] = true
 	for _, b := range []string{desktopBait, discordBait, chromeBait} {
 		x := ev(1700, find, b, 1)
-		x.UserSID = "S-1-5-18"
+		x.UserID = "S-1-5-18"
 		e2.HandleAccess(x)
 	}
 	for _, a := range f2.saved {

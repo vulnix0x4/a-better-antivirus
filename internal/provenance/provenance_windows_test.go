@@ -1,4 +1,4 @@
-package authenticode
+package provenance
 
 import (
 	"os"

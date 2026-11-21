@@ -96,7 +96,7 @@ func resumeWhere(frozen []config.FrozenProcess, alertID string, rep *Report) []c
 // released tells the service that frozen processes were just taken off the
 // record, so that it lets go of its holds on them: only then do the ones
 // that were resumed actually run again. (No service, no holds.)
-func released() { svcctl.Control(svcctl.ControlReleased) }
+func released() { svcctl.Send(svcctl.Released) }
 
 func unblockWhere(blocked []config.BlockedProgram, alertID string, rep *Report) []config.BlockedProgram {
 	var keep []config.BlockedProgram

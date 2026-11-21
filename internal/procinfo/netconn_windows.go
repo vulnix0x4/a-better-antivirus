@@ -9,15 +9,6 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// Conn is one socket owned by a process.
-type Conn struct {
-	PID    uint32 `json:"pid"`
-	Proto  string `json:"proto"` // tcp | tcp6 | udp | udp6
-	Local  string `json:"local"`
-	Remote string `json:"remote,omitempty"`
-	State  string `json:"state,omitempty"`
-}
-
 var (
 	iphlpapi                = windows.NewLazySystemDLL("iphlpapi.dll")
 	procGetExtendedTcpTable = iphlpapi.NewProc("GetExtendedTcpTable")

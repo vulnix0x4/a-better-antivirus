@@ -143,7 +143,7 @@ func TestAncestorsAndUser(t *testing.T) {
 	if a := Ancestors(pid, 4); len(a) == 0 || a[0].PID == pid {
 		t.Fatalf("Ancestors = %+v", a)
 	}
-	sid, err := UserSID(pid)
+	sid, err := UserID(pid)
 	if err != nil || len(sid) < 8 || sid[:4] != "S-1-" {
 		t.Fatalf("UserSID = %q, %v", sid, err)
 	}

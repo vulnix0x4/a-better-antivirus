@@ -15,6 +15,9 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/vulnix0x4/a-better-antivirus/internal/detect"
+	"github.com/vulnix0x4/a-better-antivirus/internal/winsec"
 )
 
 var (
@@ -267,6 +270,22 @@ func (e *Event) AsObjectAccess() (*ObjectAccess, bool) {
 	oa.ProcessID = uint32(parseNum(e.Data["ProcessId"]))
 	oa.AccessMask = uint32(parseNum(e.Data["AccessMask"]))
 	return oa, true
+}
+
+// Access is the event in the form the engine takes. ok is false for an access
+// that neither reads nor deletes (attributes, permissions…): nothing to report.
+func (oa *ObjectAccess) Access() (a *detect.Access, ok bool) {
+	a = &detect.Access{Time: oa.Time, Path: oa.ObjectName, Alias: oa.Alias,
+		PID: oa.ProcessID, Image: oa.ProcessName, User: oa.User, UserID: oa.UserSID}
+	switch {
+	case winsec.AccessMaskIsRead(oa.AccessMask):
+		a.Op = detect.OpRead
+	case winsec.AccessMaskIsDelete(oa.AccessMask):
+		a.Op = detect.OpDelete
+	default:
+		return a, false
+	}
+	return a, true
 }
 
 func parseNum(s string) uint64 {

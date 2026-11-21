@@ -1,6 +1,8 @@
-// Package authenticode verifies Windows code signatures (embedded and
-// catalog-signed) and extracts the signer's name.
-package authenticode
+package provenance
+
+// On Windows, who made a program is its Authenticode signature: embedded in
+// the file, or (how most of Windows itself is signed) listed in a system
+// catalog. Signer is the certificate's display name.
 
 import (
 	"encoding/hex"
@@ -12,29 +14,6 @@ import (
 
 	"golang.org/x/sys/windows"
 )
-
-// Result of a signature check.
-type Result struct {
-	Signed  bool   `json:"signed"`           // has a signature at all
-	Valid   bool   `json:"valid"`            // chain + hash verified
-	Signer  string `json:"signer,omitempty"` // subject simple display name
-	Catalog bool   `json:"catalog,omitempty"`
-	Error   string `json:"error,omitempty"`
-}
-
-func (r Result) String() string {
-	switch {
-	case r.Valid:
-		s := "signed by " + r.Signer
-		if r.Catalog {
-			s += " (catalog)"
-		}
-		return s
-	case r.Signed:
-		return "INVALID signature (" + r.Error + ")"
-	}
-	return "unsigned"
-}
 
 var (
 	wintrust                                 = windows.NewLazySystemDLL("wintrust.dll")
