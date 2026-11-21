@@ -67,7 +67,22 @@ function Fail($m) {
     $r = Start-Process -FilePath $Aba -ArgumentList 'release' -NoNewWindow -PassThru
     if (-not $r.WaitForExit(60000)) { $r.Kill() }
     if (Test-Path "$data\service.log") { Write-Host '--- service.log (tail) ---'; Get-Content "$data\service.log" -Tail 120 }
-    if (Test-Path "$data\crash.log") { Write-Host '--- crash.log ---'; Get-Content "$data\crash.log" -Tail 200 }
+    if (Test-Path "$data\crash.log") {
+        # Every service start adds a "--- service ... started" line; anything after
+        # one is that instance crashing. The reason is in a crash's first lines
+        # (the rest is one stack per goroutine), so print how each crash begins.
+        Write-Host '--- crash.log ---'
+        $lines = @(Get-Content "$data\crash.log")
+        $starts = @(for ($i = 0; $i -lt $lines.Count; $i++) { if ($lines[$i] -like '--- service * started *') { $i } })
+        for ($i = 0; $i -lt $starts.Count; $i++) {
+            $from = $starts[$i]
+            $to = if ($i + 1 -lt $starts.Count) { $starts[$i + 1] - 1 } else { $lines.Count - 1 }
+            if ($to -gt $from) {
+                Write-Host "--- a crash ($($to - $from) lines; the first 80 follow) ---"
+                $lines[$from..([Math]::Min($to, $from + 80))]
+            }
+        }
+    }
     exit 1
 }
 
