@@ -83,7 +83,7 @@ func cmdSig(args []string) {
 			continue
 		}
 		sev, why := judgeOne(procFacts{Pid: pid, Path: path, Platform: s.Platform(), TeamID: s.TeamID, SigningID: s.SigningID, CSFlags: s.Flags})
-		fmt.Printf("%d %s\n  %s\n  csops took %s; on its own this program would be: %s (%s)\n", pid, path, s, d, sev, why)
+		fmt.Printf("%d %s (parent %d)\n  %s\n  csops took %s; on its own this program would be: %s (%s)\n", pid, path, parentOf(pid), s, d, sev, why)
 		if *nota {
 			ok, took, msg := notarized(path)
 			fmt.Printf("  notarized=%v (%s) %s\n", ok, took.Round(time.Millisecond), msg)

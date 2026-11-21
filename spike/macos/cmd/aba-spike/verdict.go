@@ -3,10 +3,14 @@
 package main
 
 import (
+	"bytes"
+	"encoding/binary"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
+	"unsafe"
 )
 
 // A first cut of ABA's severity table for macOS, enough for the spike to make
@@ -125,6 +129,12 @@ func judge(opener procFacts) verdict {
 			return v
 		}
 		cur = factsForPid(ppid)
+		if cur.Path == "" {
+			// The parent has exited too: nothing left to judge or freeze.
+			v.Severity, v.Reason = sevWarn, "script host or copy tool ("+filepath.Base(opener.Path)+") whose parent has already exited"
+			v.Culprit = v.Chain[len(v.Chain)-1]
+			return v
+		}
 		v.Chain = append(v.Chain, cur)
 	}
 	v.Culprit = cur
@@ -146,21 +156,43 @@ func factsForPid(pid int) procFacts {
 	return procFacts{Pid: pid, PPid: parentOf(pid), Path: pathOfPid(pid), Platform: s.Platform(), TeamID: s.TeamID, SigningID: s.SigningID, CSFlags: s.Flags}
 }
 
-// ps is plenty for a spike; the real backend would use proc_pidinfo/sysctl.
-func psField(pid int, field string) string {
-	out, err := exec.Command("/bin/ps", "-o", field+"=", "-p", strconv.Itoa(pid)).Output()
-	if err != nil {
+// proc_info(2), the call behind libproc's proc_pidpath and proc_pidinfo,
+// straight from Go: no cgo, no exec.
+const (
+	sysProcInfo         = 336
+	procInfoCallPidinfo = 2
+	procPidTBSDInfo     = 3
+	procPidPathInfo     = 11
+)
+
+func procInfo(pid, flavor int, buf []byte) int {
+	n, _, e := syscall.Syscall6(sysProcInfo, procInfoCallPidinfo, uintptr(pid), uintptr(flavor), 0,
+		uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
+	if e != 0 {
+		return -1
+	}
+	return int(n)
+}
+
+func pathOfPid(pid int) string {
+	buf := make([]byte, 4096)
+	if procInfo(pid, procPidPathInfo, buf) < 0 {
 		return ""
 	}
-	return strings.TrimSpace(string(out))
+	if i := bytes.IndexByte(buf, 0); i >= 0 {
+		buf = buf[:i]
+	}
+	return string(buf)
 }
 
+// struct proc_bsdinfo starts: flags, status, xstatus, pid, ppid (uint32 each).
 func parentOf(pid int) int {
-	n, _ := strconv.Atoi(psField(pid, "ppid"))
-	return n
+	buf := make([]byte, 136)
+	if procInfo(pid, procPidTBSDInfo, buf) < 0 || int(binary.LittleEndian.Uint32(buf[12:16])) != pid {
+		return 0
+	}
+	return int(binary.LittleEndian.Uint32(buf[16:20]))
 }
-
-func pathOfPid(pid int) string { return psField(pid, "comm") }
 
 // descendants returns every process below pid.
 func descendants(pid int) []int {

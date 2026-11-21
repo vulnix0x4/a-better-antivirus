@@ -24,6 +24,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"syscall"
 	"time"
@@ -34,7 +35,8 @@ func main() {
 	loot := flag.String("loot", "", "folder of made-up files to keep reading afterwards")
 	stamp := flag.String("stamp", "", "file to write progress into")
 	logPath := flag.String("log", "", "file to write the step log into")
-	how := flag.String("how", "open", "open: open and read the bait; mmap: map it instead of read(); stat: only stat it")
+	how := flag.String("how", "open", "open: open and read the bait; mmap: map it instead of read(); finder: have Finder copy it (AppleScript), as Atomic does; stat: only stat it")
+	stage := flag.String("stage", "", "with -how finder: folder Finder copies the bait into (default: next to the stamp file)")
 	rate := flag.Int("rate", 0, "loot files to read per second after the bait (0: as fast as possible)")
 	before := flag.Int("before", 0, "loot files to read before touching the bait, as a grabber walking a folder would")
 	flag.Parse()
@@ -91,6 +93,18 @@ func main() {
 	case "stat":
 		_, err := os.Stat(*bait)
 		step("stat_done", map[string]any{"err": fmt.Sprint(err)})
+	case "finder":
+		dst := *stage
+		if dst == "" {
+			dst = filepath.Dir(*stamp)
+		}
+		script := fmt.Sprintf(`tell application "Finder" to duplicate (POSIX file %q as alias) to folder (POSIX file %q as alias) with replacing`, *bait, dst)
+		step("pre_open", nil)
+		out, err := exec.Command("/usr/bin/osascript", "-e", script).CombinedOutput()
+		step("opened", map[string]any{"err": fmt.Sprint(err), "out": string(out)})
+		if _, err := os.Stat(filepath.Join(dst, filepath.Base(*bait))); err == nil {
+			step("read", map[string]any{"how": "Finder made the copy"})
+		}
 	case "mmap":
 		step("pre_open", nil)
 		f, err := os.Open(*bait)

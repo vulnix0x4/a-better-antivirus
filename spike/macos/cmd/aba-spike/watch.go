@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -42,6 +43,9 @@ type hit struct {
 	JudgedTime time.Time `json:"t_judged"`
 	ActedTime  time.Time `json:"t_acted"` // when the opener was stopped
 	FromSelf   bool      `json:"-"`
+	// Finder copies: how the asker was found, and how late Finder's log line was.
+	FinderVia      string  `json:"finder_via,omitempty"`
+	FinderLogLagMs float64 `json:"finder_log_lag_ms,omitempty"`
 }
 
 type watcher struct {
@@ -51,6 +55,8 @@ type watcher struct {
 	onHit   func(h *hit)
 	// Programs this watcher must never act on.
 	selfPid int
+	// Who has been driving Finder (nil: not followed).
+	finder *finderLog
 }
 
 func newWatcher(baits []string, action string) *watcher {
@@ -107,6 +113,42 @@ func (w *watcher) handle(line []byte) {
 	for _, c := range v.Chain {
 		h.Chain = append(h.Chain, fmt.Sprintf("%s[%d]", filepath.Base(c.Path), c.Pid))
 	}
+	// 1b. The opener is Apple's Finder copy helper: the program that matters
+	//     is whoever told Finder to copy. Judge every running process that
+	//     has been sending Finder Apple events; the worst verdict wins.
+	var targets []int
+	if isFinderCopier(h.Opener) && w.finder != nil {
+		// Finder's log line is written ~25 ms before its helper opens the
+		// file, but reaches us 15-30 ms after it is written: the open can win
+		// the race. Give the log a moment before deciding nobody asked.
+		// (Here this blocks the event loop; the real thing would not.)
+		sus := w.finder.suspects()
+		for wait := 0; len(sus) == 0 && wait < 10; wait++ {
+			time.Sleep(10 * time.Millisecond)
+			sus = w.finder.suspects()
+		}
+		h.FinderVia = "Finder's log"
+		if len(sus) == 0 {
+			sus = runningScriptHosts()
+			h.FinderVia = "running AppleScript (Finder's log line had not arrived after 100 ms)"
+		}
+		for _, s := range sus {
+			sv := judge(s.Facts)
+			if sevRank[sv.Severity] > sevRank[h.Severity] || len(targets) == 0 && sevRank[sv.Severity] == sevRank[h.Severity] {
+				h.Severity, h.Culprit = sv.Severity, sv.Culprit
+				h.Reason = "copied by Finder on behalf of " + filepath.Base(s.Facts.Path) + ": " + sv.Reason
+				h.Chain = []string{fmt.Sprintf("%s[%d]", filepath.Base(h.Opener.Path), h.Opener.Pid), "(Finder, asked by)"}
+				for _, c := range sv.Chain {
+					h.Chain = append(h.Chain, fmt.Sprintf("%s[%d]", filepath.Base(c.Path), c.Pid))
+				}
+				targets = []int{s.Facts.Pid}
+				h.FinderLogLagMs = float64(s.LogLag.Microseconds()) / 1000
+			}
+		}
+	}
+	if targets == nil {
+		targets = []int{h.Opener.Pid}
+	}
 	h.JudgedTime = time.Now()
 
 	// 2. Stop it. The opener first (that is the one holding the data), then
@@ -129,15 +171,19 @@ func (w *watcher) handle(line []byte) {
 			h.Action = "frozen (pid_suspend)"
 			stop = func(pid int) bool { return pidSuspend(pid) == nil || syscall.Kill(pid, syscall.SIGSTOP) == nil }
 		}
-		if h.Opener.Pid > 1 && stop(h.Opener.Pid) {
-			h.Stopped = append(h.Stopped, h.Opener.Pid)
+		// Never Apple's own copy helper: it serves this one copy, but it is
+		// a system process and ABA does not act on those.
+		for _, t := range targets {
+			if t > 1 && t != w.selfPid && !isFinderCopier(factsForPid(t)) && stop(t) {
+				h.Stopped = append(h.Stopped, t)
+			}
 		}
 		h.ActedTime = time.Now()
-		if c := h.Culprit.Pid; c > 1 && c != h.Opener.Pid && stop(c) {
+		if c := h.Culprit.Pid; c > 1 && c != targets[0] && stop(c) {
 			h.Stopped = append(h.Stopped, c)
 		}
 		for _, k := range descendants(h.Culprit.Pid) {
-			if k != h.Opener.Pid && k != w.selfPid && stop(k) {
+			if k != targets[0] && k != w.selfPid && stop(k) {
 				h.Stopped = append(h.Stopped, k)
 			}
 		}
@@ -178,6 +224,7 @@ func cmdWatch(args []string) {
 	var baits multiFlag
 	fs.Var(&baits, "bait", "bait file (repeatable)")
 	baitDir := fs.String("baitdir", "", "treat every file directly inside this folder as a bait")
+	followFinder := fs.Bool("finder", true, "follow Finder's log to find who asked it to copy a bait")
 	fs.Parse(args)
 	if *baitDir != "" {
 		ents, _ := os.ReadDir(*baitDir)
@@ -196,6 +243,13 @@ func cmdWatch(args []string) {
 		}
 	}
 	w := newWatcher(baits, *action)
+	if *followFinder {
+		f, err := startFinderLog()
+		if err != nil {
+			die("log stream: %v", err)
+		}
+		w.finder = f
+	}
 	var jf *os.File
 	if *jsonOut != "" {
 		jf, _ = os.OpenFile(*jsonOut, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
@@ -216,6 +270,20 @@ func cmdWatch(args []string) {
 		time.AfterFunc(time.Duration(*seconds)*time.Second, s.stop)
 	}
 	err = s.each(w.handle)
+	if w.finder != nil {
+		w.finder.mu.Lock()
+		var l []float64
+		for _, d := range w.finder.Lags {
+			if d >= 0 {
+				l = append(l, float64(d.Microseconds())/1000)
+			}
+		}
+		w.finder.mu.Unlock()
+		sort.Float64s(l)
+		if len(l) > 0 {
+			fmt.Printf("Finder log lines: %d, reached us %.0f-%.0f ms (median %.0f) after Finder wrote them\n", len(l), l[0], l[len(l)-1], l[len(l)/2])
+		}
+	}
 	fmt.Printf("\neslogger ended (%v) after %d events, %.1f MB\n", err, s.Lines.Load(), float64(s.Bytes.Load())/1e6)
 }
 
