@@ -32,7 +32,7 @@ jobs:
       # The release's own configuration, stopping short of the two things only
       # a real release can do: signing (the key is a secret) and publishing.
       - name: Build everything a release publishes
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@v7
         with:
           version: "~> v2"
           args: release --snapshot --clean --skip=sign

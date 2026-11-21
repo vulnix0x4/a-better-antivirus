@@ -24,7 +24,7 @@ jobs:
       - name: Get the Inno Setup compiler
         shell: pwsh
         run: ./installer/get-inno.ps1
-      - uses: goreleaser/goreleaser-action@v6
+      - uses: goreleaser/goreleaser-action@v7
         with:
           version: "~> v2"
           args: release --clean
