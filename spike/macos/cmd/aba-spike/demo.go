@@ -101,6 +101,8 @@ func cmdDemo(args []string) {
 	how := fs.String("how", "open", "how the fake stealer reads the bait: open, mmap")
 	events := fs.String("events", strings.Join(detectEvents, ","), "eslogger events")
 	jsonOut := fs.String("json", "", "write results as JSON to this file")
+	rate := fs.Int("rate", 0, "files per second the fake stealer reads after the bait (0: flat out)")
+	before := fs.Int("before", 0, "files the fake stealer reads before the bait")
 	fs.Parse(args)
 	if *stealer == "" {
 		die("demo: -stealer is required")
@@ -181,7 +183,8 @@ func cmdDemo(args []string) {
 		os.Chown(exe, *uid, *gid)
 		stamp := filepath.Join(*dir, fmt.Sprintf("stamp-%d", i))
 		logf := filepath.Join(*dir, fmt.Sprintf("steps-%d.jsonl", i))
-		c := exec.Command(exe, "-bait", bait, "-loot", loot, "-stamp", stamp, "-log", logf, "-how", *how)
+		c := exec.Command(exe, "-bait", bait, "-loot", loot, "-stamp", stamp, "-log", logf, "-how", *how,
+			"-rate", fmt.Sprint(*rate), "-before", fmt.Sprint(*before))
 		c.SysProcAttr = asUser
 		if err := c.Start(); err != nil {
 			die("start stealer: %v", err)
@@ -192,10 +195,10 @@ func cmdDemo(args []string) {
 		for {
 			select {
 			case h = <-hits:
-				if h.Bait == bait {
+				if h.Bait == bait && h.Opener.Pid == c.Process.Pid {
 					break wait
 				}
-			case <-time.After(5 * time.Second):
+			case <-time.After(40 * time.Second):
 				h = nil
 				break wait
 			}
@@ -237,6 +240,27 @@ func cmdDemo(args []string) {
 		results = append(results, r)
 		fmt.Printf("run %2d: caught=%v right-process=%v %s frozen=%v | open->event %.2f ms, ->received %.2f ms, ->SIGSTOP %.2f ms | last sign of life %.2f ms after open, read bait=%v, other files read=%d\n",
 			i, r.Caught, r.RightProcess, r.Severity, r.Frozen, r.OpenToEventMs, r.OpenToRecvMs, r.OpenToSignalMs, r.OpenToFrozenMs, r.ReadBait, r.LootAfterBait)
+		// Let eslogger catch up before the next run, so that runs do not
+		// inherit each other's backlog: read the probe file and wait for
+		// that open to come out the other end.
+		d0 := time.Now()
+		pc := exec.Command("/bin/cat", probe)
+		pc.SysProcAttr = asUser
+		pc.Run()
+	drain:
+		for {
+			select {
+			case ph := <-hits:
+				if ph.Bait == probe && ph.Opener.Pid == pc.Process.Pid {
+					break drain
+				}
+			case <-time.After(60 * time.Second):
+				break drain
+			}
+		}
+		if d := time.Since(d0); d > 100*time.Millisecond {
+			fmt.Printf("        (eslogger needed %.2f s to work through what this run left queued)\n", d.Seconds())
+		}
 		time.Sleep(200 * time.Millisecond)
 	}
 

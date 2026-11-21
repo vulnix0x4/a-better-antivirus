@@ -57,13 +57,13 @@ func userWritable(path string) bool {
 }
 
 type procFacts struct {
-	Pid        int
-	Path       string
-	Platform   bool
-	TeamID     string
-	SigningID  string
-	CSFlags    uint32
-	Translocated bool
+	Pid       int
+	PPid      int // from the event when known: the opener may be gone before anyone can ask
+	Path      string
+	Platform  bool
+	TeamID    string
+	SigningID string
+	CSFlags   uint32
 }
 
 type verdict struct {
@@ -113,7 +113,12 @@ func judge(opener procFacts) verdict {
 		if !(cur.Platform && errandRunners[base]) {
 			break
 		}
-		ppid := parentOf(cur.Pid)
+		// A tool like cat lives for a millisecond: by now it has usually
+		// exited, so its parent has to come from the event, not from asking.
+		ppid := cur.PPid
+		if ppid == 0 {
+			ppid = parentOf(cur.Pid)
+		}
 		if ppid <= 1 {
 			v.Severity, v.Reason = sevCritical, "script host or copy tool ("+filepath.Base(opener.Path)+") with no program above it"
 			v.Culprit = cur
@@ -138,7 +143,7 @@ func judge(opener procFacts) verdict {
 
 func factsForPid(pid int) procFacts {
 	s := signInfoForPid(pid)
-	return procFacts{Pid: pid, Path: pathOfPid(pid), Platform: s.Platform(), TeamID: s.TeamID, SigningID: s.SigningID, CSFlags: s.Flags}
+	return procFacts{Pid: pid, PPid: parentOf(pid), Path: pathOfPid(pid), Platform: s.Platform(), TeamID: s.TeamID, SigningID: s.SigningID, CSFlags: s.Flags}
 }
 
 // ps is plenty for a spike; the real backend would use proc_pidinfo/sysctl.

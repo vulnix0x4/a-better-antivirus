@@ -35,6 +35,8 @@ func main() {
 	stamp := flag.String("stamp", "", "file to write progress into")
 	logPath := flag.String("log", "", "file to write the step log into")
 	how := flag.String("how", "open", "open: open and read the bait; mmap: map it instead of read(); stat: only stat it")
+	rate := flag.Int("rate", 0, "loot files to read per second after the bait (0: as fast as possible)")
+	before := flag.Int("before", 0, "loot files to read before touching the bait, as a grabber walking a folder would")
 	flag.Parse()
 	if *bait == "" || *stamp == "" || *logPath == "" {
 		fmt.Fprintln(os.Stderr, "usage: fake-stealer -bait FILE -loot DIR -stamp FILE -log FILE")
@@ -67,7 +69,24 @@ func main() {
 	}
 	writeStamp(0)
 
+	var files []string
+	if *loot != "" {
+		files, _ = filepath.Glob(filepath.Join(*loot, "*"))
+	}
+	b := make([]byte, 1<<16)
+	readLoot := func(n uint64) {
+		if len(files) > 0 {
+			if f, err := os.Open(files[int(n)%len(files)]); err == nil {
+				f.Read(b)
+				f.Close()
+			}
+		}
+	}
+
 	step("start", nil)
+	for i := 0; i < *before; i++ {
+		readLoot(uint64(i))
+	}
 	switch *how {
 	case "stat":
 		_, err := os.Stat(*bait)
@@ -100,20 +119,16 @@ func main() {
 
 	// Keep collecting, the way a grabber moves on to the next file. Each pass
 	// reads one loot file and bumps the stamp.
-	var files []string
-	if *loot != "" {
-		files, _ = filepath.Glob(filepath.Join(*loot, "*"))
-	}
-	b := make([]byte, 1<<16)
-	deadline := time.Now().Add(20 * time.Second)
+	t0 := time.Now()
+	deadline := t0.Add(20 * time.Second)
 	for n := uint64(1); time.Now().Before(deadline); n++ {
-		if len(files) > 0 {
-			if f, err := os.Open(files[int(n)%len(files)]); err == nil {
-				f.Read(b)
-				f.Close()
+		readLoot(n)
+		writeStamp(n)
+		if *rate > 0 {
+			if ahead := time.Duration(n)*time.Second/time.Duration(*rate) - time.Since(t0); ahead > 0 {
+				time.Sleep(ahead)
 			}
 		}
-		writeStamp(n)
 	}
 	step("gave_up_nobody_stopped_me", nil)
 }

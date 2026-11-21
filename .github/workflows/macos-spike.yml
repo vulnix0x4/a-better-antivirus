@@ -58,6 +58,7 @@ jobs:
       - name: Full Disk Access and eslogger
         if: always()
         continue-on-error: true
+        timeout-minutes: 6
         run: |
           build/aba-spike fda || true
           sudo build/aba-spike fda || true
@@ -67,25 +68,32 @@ jobs:
       - name: "Prototype: catch the fake stealer, freeze it (20 runs)"
         if: always()
         continue-on-error: true
-        run: sudo build/aba-spike demo -runs 20 -uid $(id -u) -gid $(id -g) -stealer "$PWD/build/fake-stealer"
+        timeout-minutes: 6
+        run: |
+          sudo build/aba-spike demo -runs 20 -rate 500 -uid $(id -u) -gid $(id -g) -stealer "$PWD/build/fake-stealer"
+          echo "=== the fake stealer first reads 10000 other files, then the bait"
+          sudo build/aba-spike demo -runs 5 -before 10000 -rate 500 -uid $(id -u) -gid $(id -g) -stealer "$PWD/build/fake-stealer"
 
       - name: "Prototype: kill instead of freeze (10 runs)"
         if: always()
         continue-on-error: true
-        run: sudo build/aba-spike demo -runs 10 -action kill -uid $(id -u) -gid $(id -g) -stealer "$PWD/build/fake-stealer"
+        timeout-minutes: 6
+        run: sudo build/aba-spike demo -runs 10 -rate 500 -action kill -uid $(id -u) -gid $(id -g) -stealer "$PWD/build/fake-stealer"
 
-      - name: "Prototype under load: 20 runs while another program opens files flat out"
+      - name: "Prototype under load: 10 runs while another program opens 3000 files a second"
         if: always()
         continue-on-error: true
+        timeout-minutes: 6
         run: |
-          build/aba-spike storm -dir /tmp/aba-storm -seconds 60 &
+          build/aba-spike storm -dir /tmp/aba-storm -seconds 45 -rate 3000 &
           sleep 1
-          sudo build/aba-spike demo -runs 20 -uid $(id -u) -gid $(id -g) -stealer "$PWD/build/fake-stealer"
+          sudo build/aba-spike demo -runs 10 -rate 500 -uid $(id -u) -gid $(id -g) -stealer "$PWD/build/fake-stealer"
           wait
 
       - name: CPU cost of watching every open
         if: always()
         continue-on-error: true
+        timeout-minutes: 6
         run: |
           sudo build/aba-spike cpu -seconds 30 -label "idle runner, all detection events"
           sudo build/aba-spike cpu -seconds 30 -events open -label "idle runner, open only" -top 0
@@ -101,16 +109,19 @@ jobs:
       - name: Root-only probes (ES entitlement, leases, suspend, other detectors, dialogs)
         if: always()
         continue-on-error: true
+        timeout-minutes: 6
         run: sudo experiments/root-probes.sh $(id -u)
 
       - name: pf isolation with alerts still getting out
         if: always()
         continue-on-error: true
+        timeout-minutes: 6
         run: sudo experiments/pf-isolate.sh $(id -u) 6
 
       - name: "Attribution: who shows up as the opener for each way of reading"
         if: always()
         continue-on-error: true
+        timeout-minutes: 6
         run: |
           D=/Users/Shared/aba-spike-readers
           rm -rf $D; experiments/readers.sh plant $D

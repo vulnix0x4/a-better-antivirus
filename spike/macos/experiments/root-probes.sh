@@ -14,6 +14,8 @@ W=$(mktemp -d /tmp/aba-probes.XXXXXX)
 chmod 755 "$W"
 chown "$U" "$W"
 asuser() { sudo -u "#$U" "$@"; }
+# run something with a time limit (macOS has no timeout(1))
+limit() { perl -e 'alarm shift; exec @ARGV or die' "$@"; }
 moving() { # is the spinner's heartbeat advancing?
 	a=$(cut -d' ' -f1 "$W/hb.txt"); sleep 0.3; b=$(cut -d' ' -f1 "$W/hb.txt")
 	[ "$a" = "$b" ] && echo "      => FROZEN" || echo "      => running"
@@ -65,21 +67,23 @@ kill -9 "$P"
 echo
 echo "### 5. Other ways to see an open, without Endpoint Security"
 echo "  a. fs_usage (kernel trace; one tracer at a time)"
-( fs_usage -w -f pathname 2>&1 | grep --line-buffered "aba-probes" > "$W/fsusage.txt" ) &
-sleep 2
-T0=$(python3 -c 'import time; print(time.time())')
+( limit 12 fs_usage -w -f pathname 2>&1 | grep --line-buffered "bait.txt" | while IFS= read -r l; do echo "$(python3 -c 'import time; t=time.time(); print(time.strftime("%H:%M:%S", time.localtime(t)) + ("%.3f" % (t % 1))[1:])') got: $l"; done > "$W/fsusage.txt" ) &
+sleep 3
+C0=$(ps -o cputime= -p "$(pgrep -x fs_usage | head -1)" 2>/dev/null)
+echo "      cat runs at $(python3 -c 'import time; t=time.time(); print(time.strftime("%H:%M:%S", time.localtime(t)) + ("%.3f" % (t % 1))[1:])')"
 asuser /bin/cat "$W/bait.txt" > /dev/null
-sleep 2
+sleep 5
+echo "      fs_usage CPU time used in ~8 s of watching the whole system: $(ps -o cputime= -p "$(pgrep -x fs_usage | head -1)" 2>/dev/null)"
 pkill -x fs_usage
-head -3 "$W/fsusage.txt" | cut -c1-200
-echo "      (cat ran at $(python3 -c "import time; print(time.strftime('%H:%M:%S', time.localtime($T0)) + ('%.6f' % ($T0 % 1))[1:])"))"
+sleep 1
+grep -E "open|read" "$W/fsusage.txt" | head -3 | tr -s ' ' | cut -c1-230
 echo "  b. OpenBSM audit (deprecated since macOS 11)"
 ls -la /dev/auditpipe 2>&1
 audit -c 2>&1 | head -2 || true
 [ -f /etc/security/audit_control ] && echo "      audit_control present" || echo "      /etc/security/audit_control absent: auditing is not configured"
 launchctl print system/com.apple.auditd 2>&1 | grep -E "state|disabled" | head -3
 echo "  c. dtrace with System Integrity Protection on"
-( dtrace -q -n 'syscall::open:entry /execname == "cat"/ { printf("dtrace saw %s open %s\n", execname, copyinstr(arg0)); }' > "$W/dtrace.txt" 2>&1 ) &
+( limit 8 dtrace -q -n 'syscall::open:entry /execname == "cat"/ { printf("dtrace saw %s open %s\n", execname, copyinstr(arg0)); }' > "$W/dtrace.txt" 2>&1 ) &
 sleep 3
 asuser /bin/cat "$W/bait.txt" > /dev/null
 "$B/spin" /dev/null & SP=$!; sleep 0.2; kill $SP
@@ -92,9 +96,9 @@ echo
 echo "### 6. A root daemon talking to the logged-in user"
 CU=$(stat -f %u /dev/console)
 echo "  console user uid: $CU"
-launchctl asuser "$CU" /usr/bin/osascript -e 'display notification "Test notification from a root process (ABA spike)" with title "ABA spike"' 2>&1 | head -2
+limit 15 launchctl asuser "$CU" /usr/bin/osascript -e 'display notification "Test notification from a root process (ABA spike)" with title "ABA spike"' 2>&1 | head -2
 echo "      display notification exit: $?"
-R=$(launchctl asuser "$CU" /usr/bin/osascript -e 'display dialog "ABA spike: can a root daemon ask you a question?\n\nThis closes by itself in 5 seconds." with title "ABA spike" buttons {"Kill it", "It is mine"} default button 1 giving up after 5' 2>&1)
+R=$(limit 20 launchctl asuser "$CU" /usr/bin/osascript -e 'display dialog "ABA spike: can a root daemon ask you a question?\n\nThis closes by itself in 5 seconds." with title "ABA spike" buttons {"Kill it", "It is mine"} default button 1 giving up after 5' 2>&1)
 echo "      display dialog via launchctl asuser: $R"
 
 rm -rf "$W"

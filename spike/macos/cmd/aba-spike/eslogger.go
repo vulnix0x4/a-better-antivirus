@@ -73,7 +73,7 @@ func (p *esProcess) facts() procFacts {
 	if p.TeamID != nil {
 		team = *p.TeamID
 	}
-	return procFacts{Pid: p.AuditToken.Pid, Path: p.Executable.Path, Platform: p.IsPlatformBinary,
+	return procFacts{Pid: p.AuditToken.Pid, PPid: p.PPid, Path: p.Executable.Path, Platform: p.IsPlatformBinary,
 		TeamID: team, SigningID: p.SigningID, CSFlags: p.CodesigningFlags}
 }
 
