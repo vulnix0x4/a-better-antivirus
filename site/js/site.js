@@ -175,7 +175,11 @@
       S = { state: "idle", loot: [], t0: 0, raf: 0, frozenAt: 0, ms: 0, hits: 0, unfrozen: false, busy: null };
       root.classList.remove("is-frozen", "is-revealed", "is-uploading");
       document.documentElement.classList.remove("world-frozen");
-      files.forEach(function (li) { li.classList.remove("is-taken", "is-reading", "is-hit", "is-open"); $(".f-act", li).textContent = "take"; $(".f-btn", li).removeAttribute("aria-expanded"); });
+      files.forEach(function (li) {
+        li.classList.remove("is-taken", "is-reading", "is-hit", "is-open");
+        var b = $(".f-btn", li); $(".f-act", li).textContent = "take"; b.removeAttribute("aria-expanded");
+        b.setAttribute("aria-label", "Take " + $(".f-name", li).textContent);
+      });
       frost.clear(); stamp.hidden = true; modal.hidden = true; modal.innerHTML = ""; modal.className = "heist-modal";
       clockEl.textContent = "t+0.000s";
       upBtn.disabled = true;
@@ -247,6 +251,7 @@
         if (my !== round) return;
         li.classList.remove("is-reading"); li.classList.add("is-taken");
         $(".f-act", li).textContent = "✓ taken";
+        $(".f-btn", li).setAttribute("aria-label", $(".f-name", li).textContent + ", taken");
         S.loot.push(li); S.busy = null;
         lootTxt.innerHTML = lootLine();
         upBtn.disabled = false;
@@ -254,7 +259,7 @@
       }, calm() ? 0 : readTime(li));
     }
 
-    function freeze(li, ms) {
+    function freeze(li, ms) { // severity: unsigned program in Downloads = critical; Balanced: freeze + cut its internet
       var old = $(".heist-toast", root); if (old) old.remove();
       S.state = "frozen"; S.busy = null; S.ms = ms; S.hits++;
       S.hitWhat = li.getAttribute("data-what");
@@ -328,6 +333,12 @@
       document.documentElement.classList.remove("world-frozen");
       frost.clear();
       root.classList.add("is-revealed");
+      files.forEach(function (li) {
+        var b = $(".f-btn", li);
+        b.setAttribute("aria-label", $(".f-name", li).textContent + ": " + (li.getAttribute("data-kind") === "bait" ? "bait" : "real") + ". Show why");
+        b.setAttribute("aria-expanded", li.classList.contains("is-hit"));
+        if (li.classList.contains("is-hit")) li.classList.add("is-open");
+      });
       files.forEach(function (li) { $(".f-btn", li).disabled = false; });
       var baits = files.filter(function (li) { return li.getAttribute("data-kind") === "bait"; }).length;
       var took = S.loot.length;
@@ -455,7 +466,8 @@
     var score = $("[data-react-score]", box), you = $("[data-react-you]", box);
     pad.hidden = false;
     var st = "idle", timer = 0, t0 = 0, best = 0;
-    function set(cls, b, s) { pad.className = "react-pad " + cls; big.textContent = b; small.textContent = s; }
+    var live = el("p", "sr-only"); live.setAttribute("aria-live", "assertive"); box.appendChild(live);
+    function set(cls, b, s) { pad.className = "react-pad " + cls; big.textContent = b; small.textContent = s; live.textContent = b + ". " + s; }
     function hit() {
       if (st === "idle" || st === "done" || st === "early") {
         st = "wait"; set("is-wait", "Wait for red…", "Don't click yet");
