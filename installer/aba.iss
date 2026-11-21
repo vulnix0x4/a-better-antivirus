@@ -739,24 +739,28 @@ function RunAba(var Problem: String): Boolean;
 var
   Lines: TArrayOfString;
   I: Integer;
-  Ending: String;
+  Ending, Ok, Bad: String;
 begin
   Ending := Lowercase(Param('PREVIEWRESULT', 'ok'));
+  Log('A real build would run: aba.exe ' + AbaArguments);
   SetArrayLength(Lines, 8);
+  // The marks ABA prints: a tick and a cross.
+  Ok := #$2713;
+  Bad := #$2717;
   Lines[0] := 'Setting up A Better Antivirus';
-  Lines[1] := '+ Checking this PC protecting PC\you';
-  Lines[2] := '+ Installing program files ' + ProgramDir;
-  Lines[3] := '+ Saving your settings Balanced';
-  Lines[4] := '+ Turning on Windows file auditing how ABA sees who opens a bait';
-  Lines[5] := '+ Planting baits 14 in place';
+  Lines[1] := Ok + ' Checking this PC protecting PC\you';
+  Lines[2] := Ok + ' Installing program files ' + ProgramDir;
+  Lines[3] := Ok + ' Saving your settings Balanced';
+  Lines[4] := Ok + ' Turning on Windows file auditing how ABA sees who opens a bait';
+  Lines[5] := Ok + ' Planting baits 14 in place';
   if Ending = 'fail' then
-    Lines[6] := 'x Starting the background service: the service did not start (preview)'
+    Lines[6] := Bad + ' Starting the background service: the service did not start (preview)'
   else
-    Lines[6] := '+ Starting the background service "File Access Monitor", starts with Windows';
+    Lines[6] := Ok + ' Starting the background service "File Access Monitor", starts with Windows';
   if Ending = 'warn' then
     Lines[7] := '! Sending a test to your phone: couldn''t reach ntfy (preview)'
   else
-    Lines[7] := '+ Adding ABA to Installed apps and the Start menu listed as "A Better Antivirus"';
+    Lines[7] := Ok + ' Adding ABA to Installed apps and the Start menu listed as "A Better Antivirus"';
   for I := 0 to GetArrayLength(Lines) - 1 do begin
     Sleep(350);
     OnAbaOutput(Lines[I], False, I = 0);
@@ -815,7 +819,7 @@ end;
 // result stops Setup on a page showing it, with exit code 7.
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
-  Problem: String;
+  Problem, Next: String;
 begin
   Result := '';
   StepsDone := 0;
@@ -833,11 +837,16 @@ begin
   ProgressPage.SetProgress(0, StepsExpected + 1);
   ProgressPage.Show;
   try
-    if not RunAba(Problem) then
+    if not RunAba(Problem) then begin
+      if WizardSilent then
+        Next := 'run this installer again.'
+      else
+        Next := 'click Back and then Install to try again.';
       Result :=
         'Setup stopped at this step:' + #13#10#13#10 +
         Problem + #13#10#13#10 +
-        'What to do next: run this installer again. If it stops at the same step, please report it at {#AppURL}/issues and include the text above.';
+        'What to do next: ' + Next + ' If it stops at the same step, please report it at {#AppURL}/issues and include the text above.';
+    end;
     if Result = '' then
       ProgressPage.SetProgress(StepsExpected + 1, StepsExpected + 1);
   finally
