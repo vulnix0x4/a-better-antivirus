@@ -17,7 +17,7 @@ Everything in this folder is the site, exactly as it is served. There is no buil
 ## What's on the page
 
 1. **Be the stealer** (hero). A file list of a made-up PC, "Sam's", as a stealer sees it. Visitors grab files;
-   opening a bait freezes them, with ice, a FROZEN stamp and an imitation of ABA's alert. Uploading without
+   opening a bait freezes them, with ice, a FROZEN stamp, "in the act." in the headline turning to ice, and an imitation of ABA's alert. Uploading without
    touching a bait "wins", and the page says why: that's ABA's first honest limitation. The freeze time is
    drawn from 72–151 ms, the range ABA measures in CI. Without JavaScript it's a plain list with baits marked.
    On first view, a ghost cursor plays one round by itself (not with reduced motion).
@@ -48,6 +48,8 @@ switched off for the project.
   Setting `element.style` from `site.js` is fine.
 - **Links inside the site are relative**, so it works on any address. `404.html` is the exception.
 - **Text follows CONTRIBUTING.md:** plain words, short sentences. Claim nothing the README doesn't.
+- **Call the threat "infostealer(s)".** The hero explains the word once, in plain terms; "stealer" alone is fine where
+  the README uses it and in the game. Not "password-stealing malware".
 - Keep every file under 25 MB (a Cloudflare Pages limit).
 
 ## Things that will change

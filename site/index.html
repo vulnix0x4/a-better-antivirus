@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>A Better Antivirus: fake passwords for real thieves</title>
-<meta name="description" content="Free, open-source Windows tool. ABA hides fake passwords, wallets and app data where password-stealing malware looks, and freezes whatever opens them. Works alongside Windows Defender, not instead of it.">
+<title>A Better Antivirus: catch infostealers in the act</title>
+<meta name="description" content="Free, open-source Windows tool. ABA plants fake passwords, wallets and app data where infostealers look, and freezes whatever opens them. Works alongside Windows Defender, not instead of it.">
 <meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#0b0c0b" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#f2f0e9" media="(prefers-color-scheme: light)">
@@ -14,8 +14,8 @@
 <link rel="preload" href="fonts/jetbrains-mono.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="css/site.css">
 <meta property="og:type" content="website">
-<meta property="og:title" content="A Better Antivirus: fake passwords for real thieves">
-<meta property="og:description" content="Decoy passwords, wallets and tokens that only malware opens. Touch one, get frozen. Free and open source, for Windows. Keep Defender on.">
+<meta property="og:title" content="A Better Antivirus: catch infostealers in the act">
+<meta property="og:description" content="Decoy passwords, wallets and tokens that only an infostealer would open. Touch one, get frozen. Free and open source, for Windows. Keep Defender on.">
 <!-- Link previews need a full address for the picture. Once the site has its
      final address, change this to https://<that address>/og.jpg and add og:url. -->
 <meta property="og:image" content="og.jpg">
@@ -53,8 +53,8 @@
   <div class="wrap hero-grid">
     <div class="hero-copy">
       <p class="kicker"><span class="k-dot" aria-hidden="true"></span>Free, open source, for Windows 10 &amp; 11</p>
-      <h1 id="hero-title">Fake passwords<br> for real <span class="h-thief">thieves.</span></h1>
-      <p class="lede">ABA hides decoy passwords, crypto wallets and app logins where password&#8209;stealing malware looks. Your own apps have no reason to open them. When something suspicious does, ABA <strong class="freeze-word">freezes&nbsp;it</strong>, typically about a tenth of a second later.</p>
+      <h1 id="hero-title">Catch infostealers <span class="h-act">in the act.</span></h1>
+      <p class="lede">Infostealers are programs that sweep the saved passwords, crypto wallets and app logins off your PC and upload them, usually within seconds. ABA plants fake ones exactly where they look. Your own apps have no reason to open them. When something suspicious does, ABA <strong class="freeze-word">freezes&nbsp;it</strong>, typically about a tenth of a second later.</p>
       <div class="cta">
         <a class="btn btn-solid btn-lg" href="#download"><span class="btn-ico" aria-hidden="true">↓</span> Download for Windows</a>
         <a class="btn btn-line btn-lg" href="#proof">Watch a real one get caught <span class="btn-meta">47 s</span></a>
@@ -162,7 +162,7 @@
   <div class="wrap">
     <div class="sec-head">
       <p class="label">Not a simulation</p>
-      <h2 id="proof-title">A real stealer. Defender off.<br><span class="red">Frozen in 158&nbsp;ms.</span></h2>
+      <h2 id="proof-title">A real infostealer. Defender off.<br><span class="red">Frozen in 158&nbsp;ms.</span></h2>
     </div>
     <figure class="film">
       <div class="film-frame">
@@ -214,7 +214,7 @@
   <div class="wrap">
     <div class="sec-head">
       <p class="label">Why it works</p>
-      <h2 id="why-title">Stealers grab first and upload last. <span class="dim">ABA lives in the gap.</span></h2>
+      <h2 id="why-title">Infostealers grab first and upload last. <span class="dim">ABA lives in the gap.</span></h2>
     </div>
     <div class="why-text">
       <p>Infostealers (Lumma, RedLine, Vidar, StealC…) are the most common malware on personal PCs. They sweep your browsers, wallets, Discord and Telegram sessions and documents, zip it all up and upload it, usually within seconds.</p>
@@ -222,7 +222,7 @@
     </div>
 
     <figure class="run" aria-labelledby="run-cap">
-      <p class="run-head"><span class="run-proc">A typical stealer's run</span><span class="run-arrow" aria-hidden="true">collect first ─── upload last ──▶</span></p>
+      <p class="run-head"><span class="run-proc">A typical infostealer's run</span><span class="run-arrow" aria-hidden="true">collect first ─── upload last ──▶</span></p>
       <ol class="run-steps">
         <li class="rs is-done"><span class="rs-n">Chrome profile</span><span class="rs-s">collected</span></li>
         <li class="rs is-done"><span class="rs-n">Documents</span><span class="rs-s">collected</span></li>
@@ -258,7 +258,7 @@
         <p>The fake AWS keys and a link in <code>passwords.txt</code> can be real <a href="https://canarytokens.org">canarytokens.org</a> tokens. If someone uses them later, you get an email, even if your PC was never online to tell you.</p>
       </li>
     </ul>
-    <p class="big-claim">It catches stealers by <em>what they do</em>, not by recognising the file. So it works on brand-new ones no antivirus has a signature for yet.</p>
+    <p class="big-claim">It catches infostealers by <em>what they do</em>, not by recognising the file. So it works on brand-new ones no antivirus has a signature for yet.</p>
   </div>
 </section>
 
@@ -385,7 +385,7 @@
     </div>
     <ol class="lim">
       <li>
-        <h3>It only catches stealers that touch a bait</h3>
+        <h3>It only catches infostealers that touch a bait</h3>
         <p>A stealer that only grabs your real browser data and never touches a bait won't trip it. ABA is open source, so a stealer can be written to know it. What it can't do cheaply is tell which files are baits. But one that reads each browser's own list of profiles, takes only those and nothing else on the PC, stays under the wire.</p>
       </li>
       <li>

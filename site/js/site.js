@@ -376,7 +376,7 @@
       $('[data-a="see"]', modal).addEventListener("click", function () { modal.hidden = true; frost.clear(); root.classList.remove("is-frozen"); document.documentElement.classList.remove("world-frozen"); var f = $(".f-btn", root); if (f) f.focus({ preventScroll: true }); showAgain(); });
       var sh = $('[data-a="share"]', modal);
       if (sh) sh.addEventListener("click", function () {
-        var text = "I played the stealer against A Better Antivirus and got frozen " + S.ms + " ms after I opened a fake " + S.hitWhat + ".";
+        var text = "I played the infostealer against A Better Antivirus and got frozen " + S.ms + " ms after I opened a fake " + S.hitWhat + ".";
         var url = location.href.split("#")[0];
         if (navigator.share) navigator.share({ title: "A Better Antivirus", text: text, url: url }).catch(function () {});
         else copyText(text + " " + url).then(function () { sh.textContent = "Copied"; }, function () {});
