@@ -12,6 +12,7 @@ that only malware would ever read, and freezes whatever touches them.
 [![Downloads](https://img.shields.io/github/downloads/vulnix0x4/a-better-antivirus/total?style=flat-square&color=blue)](https://github.com/vulnix0x4/a-better-antivirus/releases)
 [![Windows 10/11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6?style=flat-square)](#install)
 [![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)](LICENSE)
+[![GitGem](https://gitgem.org/api/badge/github/vulnix0x4/a-better-antivirus.svg)](https://gitgem.org/github/vulnix0x4/a-better-antivirus)
 
 <a href="docs/demo.mp4"><img src="docs/demo.gif" alt="A real Discord token stealer, Windows Defender off: ABA freezes it the moment it opens a bait" width="800"></a>
 
