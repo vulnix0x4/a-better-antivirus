@@ -25,9 +25,11 @@ package provenance
 import (
 	"bytes"
 	"context"
+	"hash/fnv"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -227,12 +229,193 @@ func Owner(path string) string {
 	if ok {
 		return pkg
 	}
-	pkg = lookupOwner("/", path)
+	if ix := currentIndex(stamp); ix != nil && !unindexed(path) {
+		pkg, ok = ix.find(path)
+		if !ok && ix.rpm {
+			pkg = rpmOwner(path)
+		}
+	} else {
+		pkg = lookupOwner("/", path)
+	}
 	ownMu.Lock()
 	ownCache[path] = pkg
 	ownMu.Unlock()
 	return pkg
 }
+
+// The answer has to come while a program is stopped inside its open of a
+// bait, for it and for everything that started it, and reading every
+// package's file list for each of them takes most of a second. So the lists
+// are read once, into an index of path hashes (a few megabytes), and again
+// whenever the package database changes. Until the index is there, and for
+// the kinds of file it leaves out, the lists are searched directly.
+
+type ownerIndex struct {
+	stamp string
+	names []string
+	ents  []ownerEnt // sorted by hash
+	rpm   bool       // there's an rpm database too, which isn't indexed
+}
+
+type ownerEnt struct {
+	hash uint64
+	pkg  uint32
+}
+
+func pathHash(p string) uint64 {
+	h := fnv.New64a()
+	h.Write([]byte(p))
+	return h.Sum64()
+}
+
+// unindexed reports whether path is under a folder the index leaves out:
+// documentation, translations, icons, headers… the bulk of what packages
+// install, and nothing that runs.
+func unindexed(path string) bool {
+	for _, d := range []string{"/usr/share/doc/", "/usr/share/man/", "/usr/share/locale/", "/usr/share/icons/", "/usr/share/help/",
+		"/usr/share/fonts/", "/usr/share/zoneinfo/", "/usr/share/info/", "/usr/share/licenses/", "/usr/share/gtk-doc/", "/usr/share/terminfo/",
+		"/usr/share/i18n/", "/usr/share/pixmaps/", "/usr/share/texmf", "/usr/share/texlive/", "/usr/include/", "/usr/src/", "/usr/lib/modules/",
+		"/lib/modules/", "/usr/lib/firmware/", "/lib/firmware/", "/boot/"} {
+		if strings.HasPrefix(path, d) {
+			return true
+		}
+	}
+	return false
+}
+
+// buildIndex reads the package databases under root.
+func buildIndex(root string) *ownerIndex {
+	ix := &ownerIndex{}
+	pkgIDs := map[string]uint32{}
+	add := func(pkg, path string) {
+		if path == "" || unindexed(path) {
+			return
+		}
+		id, ok := pkgIDs[pkg]
+		if !ok {
+			id = uint32(len(ix.names))
+			pkgIDs[pkg] = id
+			ix.names = append(ix.names, pkg)
+		}
+		ix.ents = append(ix.ents, ownerEnt{pathHash(path), id})
+	}
+	lines := func(data []byte, each func(line string)) {
+		for len(data) > 0 {
+			i := bytes.IndexByte(data, '\n')
+			if i < 0 {
+				i = len(data)
+			}
+			each(string(data[:i]))
+			if i == len(data) {
+				break
+			}
+			data = data[i+1:]
+		}
+	}
+	// dpkg: info/<package>[:arch].list, a path per line.
+	info := filepath.Join(root, "var/lib/dpkg/info")
+	if ents, err := os.ReadDir(info); err == nil {
+		for _, e := range ents {
+			name, ok := strings.CutSuffix(e.Name(), ".list")
+			if !ok {
+				continue
+			}
+			pkg, _, _ := strings.Cut(name, ":")
+			if data, err := os.ReadFile(filepath.Join(info, e.Name())); err == nil {
+				lines(data, func(l string) { add(pkg, l) })
+			}
+		}
+	}
+	// pacman: local/<name-version-release>/files, paths without the leading slash.
+	local := filepath.Join(root, "var/lib/pacman/local")
+	if ents, err := os.ReadDir(local); err == nil {
+		for _, e := range ents {
+			data, err := os.ReadFile(filepath.Join(local, e.Name(), "files"))
+			if err != nil {
+				continue
+			}
+			pkg := e.Name()
+			for i := 0; i < 2; i++ {
+				if j := strings.LastIndexByte(pkg, '-'); j > 0 {
+					pkg = pkg[:j]
+				}
+			}
+			in := false
+			lines(data, func(l string) {
+				switch {
+				case strings.HasPrefix(l, "%"):
+					in = l == "%FILES%"
+				case in && l != "" && !strings.HasSuffix(l, "/"):
+					add(pkg, "/"+l)
+				}
+			})
+		}
+	}
+	// apk: one file, a block per package.
+	if data, err := os.ReadFile(filepath.Join(root, "lib/apk/db/installed")); err == nil {
+		pkg, dir := "", ""
+		lines(data, func(l string) {
+			switch {
+			case strings.HasPrefix(l, "P:"):
+				pkg = l[2:]
+			case strings.HasPrefix(l, "F:"):
+				dir = l[2:]
+			case strings.HasPrefix(l, "R:"):
+				add(pkg, "/"+dir+"/"+l[2:])
+			}
+		})
+	}
+	sort.Slice(ix.ents, func(i, j int) bool { return ix.ents[i].hash < ix.ents[j].hash })
+	for _, db := range []string{"var/lib/rpm", "usr/lib/sysimage/rpm"} {
+		if ents, err := os.ReadDir(filepath.Join(root, db)); err == nil && len(ents) > 0 {
+			ix.rpm = true
+		}
+	}
+	return ix
+}
+
+// find looks path up under each name it may be listed by.
+func (ix *ownerIndex) find(path string) (string, bool) {
+	for _, n := range aliases(path) {
+		h := pathHash(n)
+		i := sort.Search(len(ix.ents), func(i int) bool { return ix.ents[i].hash >= h })
+		if i < len(ix.ents) && ix.ents[i].hash == h {
+			return ix.names[ix.ents[i].pkg], true
+		}
+	}
+	return "", false
+}
+
+var (
+	ixMu       sync.Mutex
+	ix         *ownerIndex
+	ixBuilding bool
+)
+
+// currentIndex returns the index if it's up to date, and otherwise starts
+// building one in the background (nil for now).
+func currentIndex(stamp string) *ownerIndex {
+	ixMu.Lock()
+	defer ixMu.Unlock()
+	if ix != nil && ix.stamp == stamp {
+		return ix
+	}
+	if !ixBuilding {
+		ixBuilding = true
+		go func() {
+			built := buildIndex("/")
+			built.stamp = stamp
+			ixMu.Lock()
+			ix, ixBuilding = built, false
+			ixMu.Unlock()
+		}()
+	}
+	return nil
+}
+
+// Warm gets the index ready ahead of the first question (the service calls
+// it when it starts).
+func Warm() { currentIndex(dbStamp()) }
 
 // dbStamp changes whenever packages are installed or removed.
 func dbStamp() string {

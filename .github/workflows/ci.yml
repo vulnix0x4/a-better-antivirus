@@ -44,6 +44,21 @@ jobs:
         shell: pwsh
         run: ./scripts/e2e.ps1 -Aba ./dist/aba.exe -Medium ./dist/medium.exe -Ghost ./dist/ghost.exe
 
+      # TEMPORARY, while the Linux port (PR #10) is being brought to green: the
+      # end-to-end script prints only the end of the service's crash log, and
+      # what a crash starts with is the part that says why. To be removed.
+      - name: Crash log, from the top (after a failure)
+        if: failure()
+        shell: pwsh
+        run: |
+          $f = "$env:ProgramData\FileAccessMonitor\crash.log"
+          if (Test-Path $f) {
+            $l = @(Get-Content $f)
+            for ($i = 0; $i -lt $l.Count; $i++) {
+              if ($l[$i] -like '--- service*') { $l[$i..([Math]::Min($i + 70, $l.Count - 1))] | Write-Host; Write-Host '......' }
+            }
+          } else { Write-Host 'no crash log' }
+
   # Linux and macOS: everything that builds there. For macOS that's still the
   # OS-neutral core plus stubs, so its job mostly guards the boundary (see
   # "Platforms" in CONTRIBUTING.md). Linux has a backend, and GitHub's Linux

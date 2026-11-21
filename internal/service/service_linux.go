@@ -18,7 +18,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime/debug"
-	"strconv"
 	"syscall"
 	"time"
 
@@ -32,6 +31,7 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/fanwatch"
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
+	"github.com/vulnix0x4/a-better-antivirus/internal/provenance"
 	"github.com/vulnix0x4/a-better-antivirus/internal/svcctl"
 )
 
@@ -131,6 +131,9 @@ func (s *server) initWatchers() {}
 func (s *server) prepare() {
 	// Whatever the service writes (its log, the alerts) is root's alone.
 	unix.Umask(0o077)
+	// Who owns which program is asked while an opener is held: have the
+	// answers ready.
+	provenance.Warm()
 	w, err := fanwatch.New()
 	if err != nil {
 		s.fanErr = err
@@ -273,26 +276,57 @@ func (s *server) timedOut(ev fanwatch.Event) (deny bool) {
 
 // watchEscapes puts a frozen process that got out of the frozen group back,
 // and says so (see procinfo.Escaped).
+//
+// It can happen without ill will: a desktop that starts an app asks systemd
+// to give the new process a group of its own, and that request can arrive
+// just after ABA froze it. Put back, it stays put. A helper of a stealer
+// would ask again and again, and every time the frozen program runs until
+// ABA looks next. So ABA looks often while it holds anything, and a process
+// that gets out a third time within a minute is ended: nothing asks three
+// times by accident.
 func (s *server) watchEscapes(ctx context.Context) {
-	t := time.NewTicker(250 * time.Millisecond)
-	defer t.Stop()
+	const often, idle = 20 * time.Millisecond, 500 * time.Millisecond
+	seen := map[uint32][]time.Time{}
 	for {
+		wait := idle
+		if procinfo.Held() > 0 {
+			wait = often
+		}
 		select {
 		case <-ctx.Done():
 			return
-		case <-t.C:
+		case <-time.After(wait):
 		}
 		if procinfo.Held() == 0 {
 			continue
 		}
 		for _, pid := range procinfo.Escaped() {
 			img, _ := procinfo.ImagePath(pid)
-			s.log.Printf("pid %d (%s) was moved out of the frozen group by something other than ABA; frozen again", pid, img)
-			if s.once("escape|"+strconv.Itoa(int(pid)), time.Minute) {
+			var recent []time.Time
+			for _, t := range seen[pid] {
+				if time.Since(t) < time.Minute {
+					recent = append(recent, t)
+				}
+			}
+			recent = append(recent, time.Now())
+			seen[pid] = recent
+			if len(recent) >= 3 {
+				err := procinfo.Kill(pid)
+				delete(seen, pid)
+				s.log.Printf("pid %d (%s) was moved out of the frozen group a third time within a minute; ended it (%v)", pid, img, err)
 				pid, img := pid, img
 				go s.safe("escape alert", func() {
-					s.eng.SystemAlert(alerts.KindTamper, config.TierCritical, "Something tried to un-freeze a frozen program",
-						fmt.Sprintf("%s (pid %d), which ABA froze, was moved out of the frozen group by another program. ABA froze it again. Only a stealer's helper has a reason to do that: look at what's frozen with `aba alerts` and end it with `aba kill <id>`.", img, pid), nil)
+					s.eng.SystemAlert(alerts.KindTamper, config.TierCritical, "Ended a frozen program that something kept un-freezing",
+						fmt.Sprintf("%s (pid %d), which ABA froze, was moved out of the frozen group three times within a minute by another program, and ran for a moment each time. ABA ended it. Something running as you is helping it: look at what else is frozen with `aba alerts`.", img, pid), nil)
+				})
+				continue
+			}
+			s.log.Printf("pid %d (%s) was moved out of the frozen group by something other than ABA; frozen again", pid, img)
+			if len(recent) == 1 {
+				pid, img := pid, img
+				go s.safe("escape alert", func() {
+					s.eng.SystemAlert(alerts.KindTamper, config.TierWarn, "A frozen program was briefly un-frozen",
+						fmt.Sprintf("%s (pid %d), which ABA froze, was moved out of the frozen group by another program, through the system's service manager. ABA froze it again within moments. A desktop does this to a program it has just started; a stealer's helper does it on purpose, and if it happens again ABA ends the program.", img, pid), nil)
 				})
 			}
 		}

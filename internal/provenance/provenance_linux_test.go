@@ -59,6 +59,33 @@ func TestOwnerLookup(t *testing.T) {
 	}
 }
 
+// The index gives the same answers as searching the lists.
+func TestOwnerIndex(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(root, "var/lib/dpkg/info/coreutils.list"), "/.\n/bin\n/bin/cat\n/usr/share/doc/coreutils/README\n")
+	write(t, filepath.Join(root, "var/lib/dpkg/info/libc6:amd64.list"), "/usr/lib/x86_64-linux-gnu/libc.so.6")
+	write(t, filepath.Join(root, "var/lib/pacman/local/python-pip-24.0-2/files"), "%FILES%\nusr/bin/\nusr/bin/pip\n\n%BACKUP%\netc/pip.conf\n")
+	write(t, filepath.Join(root, "lib/apk/db/installed"), "P:curl\nF:usr/bin\nR:curl\n")
+	ix := buildIndex(root)
+	for path, want := range map[string]string{
+		"/usr/bin/cat": "coreutils", "/bin/cat": "coreutils", "/usr/lib/x86_64-linux-gnu/libc.so.6": "libc6",
+		"/usr/bin/pip": "python-pip", "/usr/bin/curl": "curl", "/usr/bin/nope": "", "/etc/pip.conf": "", "/usr/bin": "",
+	} {
+		if got, _ := ix.find(path); got != want {
+			t.Errorf("index: owner of %s = %q, want %q", path, got, want)
+		}
+	}
+	if !unindexed("/usr/share/doc/coreutils/README") {
+		t.Error("documentation is left out of the index")
+	}
+	if _, ok := ix.find("/usr/share/doc/coreutils/README"); ok {
+		t.Error("…so it shouldn't be in it")
+	}
+	if ix.rpm {
+		t.Error("no rpm database here")
+	}
+}
+
 // A file in a folder that isn't root's is never vouched for, whatever it is.
 func TestUserFoldersAreNotRootOnly(t *testing.T) {
 	if os.Geteuid() == 0 {

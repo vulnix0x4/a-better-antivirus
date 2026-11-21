@@ -24,7 +24,7 @@ UNIT=file-access-monitor.service
 FROZEN=file-access-monitor.frozen
 ME=$(id -un); MY_UID=$(id -u); MY_GID=$(id -g)
 OUT=$(mktemp -d /tmp/aba-e2e.XXXXXX); chmod 755 "$OUT"
-TOPIC="aba-e2e-$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+PHONE=127.0.0.1:18723   # where the stand-in for the phone listens
 
 say()  { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 ok()   { printf '   \033[32mok\033[0m  %s\n' "$*"; }
@@ -131,7 +131,7 @@ note "a used Chrome profile to plant inside: ${CHROME:-no}"
 
 # =====================================================================
 say "Install"
-sudo "$ABA_BIN" install --yes --preset balanced --learning 0 --ntfy-topic "$TOPIC" --auto-update=false || fail "aba install"
+sudo "$ABA_BIN" install --yes --preset balanced --learning 0 --auto-update=false || fail "aba install"
 check "the service is running" test "$(systemctl is-active "$UNIT")" = active
 check "aba is on the PATH" test "$(readlink -f /usr/local/bin/aba)" = "$PROG/aba"
 check "the program belongs to root" test "$(stat -c '%U %a' "$PROG/famsvc")" = "root 755"
@@ -145,6 +145,19 @@ aba status --once | sed 's/^/      /'
 sudo aba doctor | sed 's/^/      /'
 has "Watching baits" sudo aba doctor || fail "aba doctor doesn't report on watching baits"
 sudo aba status --once >/dev/null || fail "aba status as root"
+
+say "Phone alerts"
+# The phone is a stand-in on this machine: ntfy.sh has a daily quota per
+# address, and GitHub's runners share addresses. ABA is pointed at it the way
+# a self-hosted ntfy server would be set up, in its (root-only) secrets file.
+sudo systemd-run --quiet --collect --unit "aba-e2e-phone" --uid "$MY_UID" --gid "$MY_GID" "$GRABBER" -serve "$PHONE" -out "$OUT/phone" || fail "couldn't start the stand-in phone"
+echo aba-e2e-phone >> "$OUT/units"
+printf '{"phone":{"kind":"ntfy","ntfy":{"server":"http://%s","topic":"aba-e2e"}},"canary":{}}' "$PHONE" | base64 -w0 | sudo tee "$DATA/secrets.json" >/dev/null
+check "secrets are still root's alone" test "$(sudo stat -c '%U %a' "$DATA/secrets.json")" = "root 600"
+r=$(reloads); sudo systemctl kill -s HUP "$UNIT" || fail "couldn't tell the service to reload"; wait_reloaded "$r"
+sudo aba phone test || fail "aba phone test"
+wait_until 50 has_line 'POST /aba-e2e | A Better Antivirus test alert' "$OUT/phone" || fail "the test alert didn't reach the phone: $(cat "$OUT/phone" 2>/dev/null)"
+ok "aba phone test reached the phone"
 
 say "Baits"
 sudo aba bait list | sed 's/^/      /'
@@ -194,7 +207,8 @@ sleep 1
 frozen "$pid" && ! has_line '^READ' "$OUT/s1" || fail "the stealer got going again"
 ok "still frozen after SIGCONT, and it never read the bait"
 wait_until 200 sudo grep -q "phone alert sent for $id" "$DATA/service.log" || fail "the phone alert for $id didn't go out"
-ok "the phone alert went out (ntfy)"
+wait_until 25 has_line 'POST /aba-e2e | .*free-game' "$OUT/phone" || fail "the alert didn't reach the phone: $(cat "$OUT/phone" 2>/dev/null)"
+ok "the phone got the alert: $(grep 'free-game' "$OUT/phone" | head -1 | cut -c1-150)"
 sudo aba alerts | sed 's/^/      /'
 sudo aba alerts show "$id" | sed 's/^/      /'
 has "frozen" aba status --once || fail "the dashboard doesn't show that something is frozen"
