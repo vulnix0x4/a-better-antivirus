@@ -1,0 +1,141 @@
+name: macOS spike
+
+# Research only (see spike/macos). Runs the spike's experiments on GitHub's
+# throwaway Macs, to learn what a macOS port could test in CI. Not a gate:
+# every step reports and carries on.
+
+on:
+  push:
+    branches: [macos-spike]
+    paths:
+      - "spike/macos/**"
+      - ".github/workflows/macos-spike.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  spike:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: spike/macos
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: spike/macos/go.mod
+          cache: false
+
+      - name: What this Mac is
+        run: |
+          sw_vers; uname -m; sysctl -n hw.ncpu hw.memsize machdep.cpu.brand_string
+          csrutil status
+          id
+          sudo -n true && echo "passwordless sudo: yes"
+          echo "--- processes above this step"
+          p=$$; while [ "$p" -gt 1 ]; do ps -o pid=,user=,comm= -p $p; p=$(ps -o ppid= -p $p | tr -d ' '); done
+          echo "--- console user: $(stat -f %Su /dev/console)"
+          echo "--- pf: $(sudo pfctl -s info 2>/dev/null | grep -m1 Status)"
+          echo "--- spotlight: $(mdutil -s / 2>&1 | tail -1)"
+          echo "--- signing identities:"; security find-identity -v -p codesigning | tail -1
+
+      - name: Build
+        run: |
+          go vet ./...
+          mkdir -p build
+          go build -o build/aba-spike ./cmd/aba-spike
+          go build -o build/fake-stealer ./cmd/fake-stealer
+          (cd experiments/esnative && CGO_ENABLED=1 go build -o ../../build/esnative .)
+          codesign -dv build/fake-stealer 2>&1 | grep -E "flags|Signature"
+
+      - name: Full Disk Access and eslogger
+        if: always()
+        continue-on-error: true
+        run: |
+          build/aba-spike fda || true
+          sudo build/aba-spike fda || true
+          echo "--- one raw event from eslogger:"
+          (sudo eslogger open 2>&1 & sleep 4; sudo pkill -x eslogger) | head -c 2500; echo
+
+      - name: "Prototype: catch the fake stealer, freeze it (20 runs)"
+        if: always()
+        continue-on-error: true
+        run: sudo build/aba-spike demo -runs 20 -uid $(id -u) -gid $(id -g) -stealer "$PWD/build/fake-stealer"
+
+      - name: "Prototype: kill instead of freeze (10 runs)"
+        if: always()
+        continue-on-error: true
+        run: sudo build/aba-spike demo -runs 10 -action kill -uid $(id -u) -gid $(id -g) -stealer "$PWD/build/fake-stealer"
+
+      - name: "Prototype under load: 20 runs while another program opens files flat out"
+        if: always()
+        continue-on-error: true
+        run: |
+          build/aba-spike storm -dir /tmp/aba-storm -seconds 60 &
+          sleep 1
+          sudo build/aba-spike demo -runs 20 -uid $(id -u) -gid $(id -g) -stealer "$PWD/build/fake-stealer"
+          wait
+
+      - name: CPU cost of watching every open
+        if: always()
+        continue-on-error: true
+        run: |
+          sudo build/aba-spike cpu -seconds 30 -label "idle runner, all detection events"
+          sudo build/aba-spike cpu -seconds 30 -events open -label "idle runner, open only" -top 0
+          build/aba-spike storm -dir /tmp/aba-storm -seconds 40 -rate 2000 &
+          sleep 1
+          sudo build/aba-spike cpu -seconds 30 -label "2000 opens/s from one program" -top 0
+          wait
+          build/aba-spike storm -dir /tmp/aba-storm -seconds 40 &
+          sleep 1
+          sudo build/aba-spike cpu -seconds 30 -label "one program opening files flat out" -top 3
+          wait
+
+      - name: Root-only probes (ES entitlement, leases, suspend, other detectors, dialogs)
+        if: always()
+        continue-on-error: true
+        run: sudo experiments/root-probes.sh $(id -u)
+
+      - name: pf isolation with alerts still getting out
+        if: always()
+        continue-on-error: true
+        run: sudo experiments/pf-isolate.sh $(id -u) 6
+
+      - name: "Attribution: who shows up as the opener for each way of reading"
+        if: always()
+        continue-on-error: true
+        run: |
+          D=/Users/Shared/aba-spike-readers
+          rm -rf $D; experiments/readers.sh plant $D
+          sudo build/aba-spike watch -baitdir $D/baits -action none -seconds 150 > /tmp/watch.log 2>&1 &
+          sudo build/aba-spike capture -events open,clone,copyfile,rename,link,exec -seconds 150 -match aba-spike-readers -out /tmp/raw.jsonl -max 400 &
+          sleep 8
+          experiments/readers.sh run $D 2>&1 | tee /tmp/readers.log
+          sleep 5
+          sudo pkill -x eslogger || true
+          wait || true
+          echo "=================== what the watcher saw"
+          cat /tmp/watch.log
+          echo "=================== raw event kinds per bait"
+          python3 - <<'EOF'
+          import json, collections
+          c = collections.Counter()
+          for l in open('/tmp/raw.jsonl'):
+              try: e = json.loads(l)
+              except Exception: continue
+              k = next(iter(e['event']))
+              p = e['process']['executable']['path'].split('/')[-1]
+              s = json.dumps(e['event'])
+              import re
+              for b in set(re.findall(r'baits\\?/([a-z\-]+)\.txt', s)):
+                  c[(b, k, p)] += 1
+          for (b, k, p), n in sorted(c.items()): print(f"{b:28} {k:10} {p:28} x{n}")
+          EOF
+          rm -rf $D
