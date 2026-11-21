@@ -254,14 +254,18 @@ $legit = Join-Path $env:TEMP 'legit-curl.exe'   # Microsoft-signed (catalog), so
 Copy-Item "$env:SystemRoot\System32\curl.exe" $legit -Force
 $legitOut = Join-Path $env:TEMP 'legit-out.txt'
 $sw = [Diagnostics.Stopwatch]::StartNew()
-$c = Start-Process -FilePath $legit -ArgumentList '-s', '-o', "`"$legitOut`"", ("file:///" + ($desktopBait -replace '\\', '/')) -NoNewWindow -PassThru
+# Bait names differ per install and can contain a space ("my passwords.txt").
+# Start-Process doesn't quote arguments, so an unquoted URL reached curl as two.
+$legitUrl = 'file:///' + (($desktopBait -replace '\\', '/') -replace ' ', '%20')
+$c = Start-Process -FilePath $legit -ArgumentList '-sS', '-o', "`"$legitOut`"", "`"$legitUrl`"" -NoNewWindow -PassThru
 $null = $c.Handle
 if (-not $c.WaitForExit(20000)) {
     $verdict = Alerts | Where-Object { $_.process.pid -eq $c.Id } | Select-Object -Last 1
     Fail "signed curl was still stuck after 20 s; ABA's verdict: $($verdict.tier) / $($verdict.process.signature | ConvertTo-Json -Compress) / $($verdict.summary)"
 }
 $sw.Stop()
-Check ($c.ExitCode -eq 0 -and (Get-Item $legitOut).Length -gt 0) "it got the file ($((Get-Item $legitOut).Length) bytes, paused $($sw.ElapsedMilliseconds) ms in total)"
+$legitGot = if (Test-Path $legitOut) { (Get-Item $legitOut).Length } else { 0 }
+Check ($c.ExitCode -eq 0 -and $legitGot -gt 0) "it got the file ($legitGot bytes, curl exit code $($c.ExitCode), paused $($sw.ElapsedMilliseconds) ms in total)"
 Check (-not ((State).frozen | Where-Object { $_.image -like '*legit-curl*' })) 'it was not frozen'
 
 Step 'False positive: resume + ignore'
