@@ -85,13 +85,16 @@ type esStream struct {
 	Bytes  atomic.Uint64
 }
 
-// startEslogger runs eslogger for the given events. eslogger leaves out
-// everything done by its own process group, which here means this daemon and
-// whatever it starts without a new process group: the watcher never sees
-// itself.
+// startEslogger runs eslogger for the given events, in a process group of its
+// own (see below).
 func startEslogger(events []string) (*esStream, error) {
 	s := &esStream{}
 	s.cmd = exec.Command("/usr/bin/eslogger", events...)
+	// eslogger ignores every process in its own process group. Left in ours,
+	// that would include whatever started us (a CI step, a shell) and all of
+	// its children: measured on GitHub's runners, a program started from the
+	// same step was invisible. In a group of its own it ignores only itself.
+	s.cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	s.cmd.Stderr = &s.stderr
 	var err error
 	if s.out, err = s.cmd.StdoutPipe(); err != nil {
