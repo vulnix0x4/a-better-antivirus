@@ -30,6 +30,7 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/detect"
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
+	"github.com/vulnix0x4/a-better-antivirus/internal/platform"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
 	"github.com/vulnix0x4/a-better-antivirus/internal/provenance"
 )
@@ -614,7 +615,7 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 		cls.SystemBinary(image) && e.Ops.UserSession(oa.PID) && !e.Ops.Elevated(oa.PID) {
 		if detail, found := e.Ops.InjectedCode(oa.PID); found {
 			v = classify.Verdict{Tier: config.TierCritical,
-				Reasons: append([]string{filepath.Base(image) + " is part of Windows, but " + detail}, v.Reasons...)}
+				Reasons: append([]string{filepath.Base(image) + " is part of " + platform.OSName() + ", but " + detail}, v.Reasons...)}
 		}
 	}
 	// Tricks that only evasion explains make it critical whatever it is, trusted
