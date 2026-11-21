@@ -20,7 +20,12 @@ moving() { # is the spinner's heartbeat advancing?
 	a=$(cut -d' ' -f1 "$W/hb.txt"); sleep 0.3; b=$(cut -d' ' -f1 "$W/hb.txt")
 	[ "$a" = "$b" ] && echo "      => FROZEN" || echo "      => running"
 }
-spinner() { asuser "$B/spin" "$W/hb.txt" & sleep 0.5; P=$(pgrep -n -u "$U" spin); }
+spinner() {
+	asuser "$B/spin" "$W/hb.txt" > /dev/null 2>&1 &
+	sleep 0.5
+	P=$(pgrep -n -u "$U" -x spin)
+	if [ -z "$P" ]; then echo "could not start the spinner"; exit 1; fi
+}
 
 echo "### 1. Endpoint Security client, as root, without the entitlement"
 if [ -x build/esnative ]; then build/esnative; else echo "(build/esnative not built)"; fi
@@ -42,6 +47,11 @@ asuser "$B/susp" cont "$P"; moving
 asuser "$B/susp" pid_resume "$P"; moving
 echo "     root pid_resume"
 "$B/susp" pid_resume "$P"; moving
+echo "     pid_suspend again, then the user sends SIGKILL"
+"$B/susp" pid_suspend "$P"
+asuser kill -KILL "$P"; sleep 0.3
+kill -0 "$P" 2>/dev/null && echo "      => still there" || echo "      => gone: a suspended process can still be killed"
+spinner
 echo "  c. root task_for_pid + task_suspend, then the user tries SIGCONT and task_resume"
 "$B/susp" task_suspend "$P"; moving
 asuser "$B/susp" cont "$P"; moving
@@ -86,7 +96,6 @@ echo "  c. dtrace with System Integrity Protection on"
 ( limit 8 dtrace -q -n 'syscall::open:entry /execname == "cat"/ { printf("dtrace saw %s open %s\n", execname, copyinstr(arg0)); }' > "$W/dtrace.txt" 2>&1 ) &
 sleep 3
 asuser /bin/cat "$W/bait.txt" > /dev/null
-"$B/spin" /dev/null & SP=$!; sleep 0.2; kill $SP
 sleep 1
 pkill -x dtrace
 head -4 "$W/dtrace.txt" | cut -c1-200
@@ -96,9 +105,20 @@ echo
 echo "### 6. A root daemon talking to the logged-in user"
 CU=$(stat -f %u /dev/console)
 echo "  console user uid: $CU"
-limit 15 launchctl asuser "$CU" /usr/bin/osascript -e 'display notification "Test notification from a root process (ABA spike)" with title "ABA spike"' 2>&1 | head -2
-echo "      display notification exit: $?"
-R=$(limit 20 launchctl asuser "$CU" /usr/bin/osascript -e 'display dialog "ABA spike: can a root daemon ask you a question?\n\nThis closes by itself in 5 seconds." with title "ABA spike" buttons {"Kill it", "It is mine"} default button 1 giving up after 5' 2>&1)
-echo "      display dialog via launchctl asuser: $R"
+# Run each in the background and give up after a while: without a real
+# desktop session these can wait forever, and nothing may be left behind
+# holding this script's output open.
+bg() { # seconds, output file, command...
+	t=$1; out=$2; shift 2
+	"$@" > "$out" 2>&1 &
+	bp=$!
+	for i in $(seq $((t * 5))); do kill -0 $bp 2>/dev/null || break; sleep 0.2; done
+	if kill -0 $bp 2>/dev/null; then kill -9 $bp 2>/dev/null; pkill -9 -x osascript 2>/dev/null; echo "(gave up after ${t} s)" >> "$out"; fi
+	wait $bp 2>/dev/null
+}
+bg 15 "$W/n.txt" launchctl asuser "$CU" /usr/bin/osascript -e 'display notification "Test notification from a root process (ABA spike)" with title "ABA spike"'
+echo "      display notification via launchctl asuser: $(tr '\n' ' ' < "$W/n.txt" | cut -c1-200) [done]"
+bg 20 "$W/d.txt" launchctl asuser "$CU" /usr/bin/osascript -e 'display dialog "ABA spike: can a root daemon ask you a question?\n\nThis closes by itself in 5 seconds." with title "ABA spike" buttons {"Kill it", "It is mine"} default button 1 giving up after 5'
+echo "      display dialog via launchctl asuser: $(tr '\n' ' ' < "$W/d.txt" | cut -c1-200)"
 
 rm -rf "$W"
