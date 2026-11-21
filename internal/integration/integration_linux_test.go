@@ -460,12 +460,19 @@ func TestFrozenProcessCannotBeMovedOutThroughSystemd(t *testing.T) {
 		procinfo.Kill(pid)
 	}()
 
-	c := exec.Command(busctl, "--system", "call", "org.freedesktop.systemd1", "/org/freedesktop/systemd1",
-		"org.freedesktop.systemd1.Manager", "AttachProcessesToUnit", "ssau", unit, "/aba-escape", "1", strconv.Itoa(int(pid)))
-	c.SysProcAttr = &syscall.SysProcAttr{Credential: cred}
-	out, err := c.CombinedOutput()
-	t.Logf("asking systemd to move the frozen process into %s: err=%v out=%q", unit, err, strings.TrimSpace(string(out)))
-	time.Sleep(200 * time.Millisecond)
+	// Into a group of the user's that exists (its manager's own), into the
+	// unit itself, and into one that doesn't exist.
+	for _, sub := range []string{"/init.scope", "", "/aba-escape"} {
+		c := exec.Command(busctl, "--system", "call", "org.freedesktop.systemd1", "/org/freedesktop/systemd1",
+			"org.freedesktop.systemd1.Manager", "AttachProcessesToUnit", "ssau", unit, sub, "1", strconv.Itoa(int(pid)))
+		c.SysProcAttr = &syscall.SysProcAttr{Credential: cred}
+		out, err := c.CombinedOutput()
+		t.Logf("asking systemd to move the frozen process into %s%s: err=%v out=%q", unit, sub, err, strings.TrimSpace(string(out)))
+		time.Sleep(200 * time.Millisecond)
+		if !procinfo.Frozen(pid) {
+			break
+		}
+	}
 	if procinfo.Frozen(pid) {
 		t.Logf("systemd left it in the frozen group (cgroup %s)", readCgroup(pid))
 		return

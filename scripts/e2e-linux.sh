@@ -148,14 +148,20 @@ sudo aba status --once >/dev/null || fail "aba status as root"
 
 say "Baits"
 sudo aba bait list | sed 's/^/      /'
-for id in home-passwords documents-passwords vivaldi brave electrum ssh-key git-credentials aws gcloud; do
+for id in home-passwords documents-passwords vivaldi brave electrum ssh-key git-credentials aws; do
   f=$(bait_file "$id"); [ -n "$f" ] && [ -f "$f" ] || fail "bait $id wasn't planted ($f)"
   [ "$(stat -c %U "$f")" = "$ME" ] || fail "bait $f belongs to $(stat -c %U "$f"), not $ME"
 done
 ok "the starter set is planted, and the files are $ME's"
 check "app data is private (600)" test "$(stat -c %a "$(bait_file vivaldi)")" = 600
 check "its folder too (700)" test "$(stat -c %a "$HOME/.config/vivaldi")" = 700
-check "no decoy for a browser that's installed" test -z "$(bait_file chrome)"
+# Decoys are only for apps that aren't there. (GitHub's runners come with the
+# Google Cloud SDK; a machine without it gets the fake gcloud login.)
+if command -v gcloud >/dev/null || [ -e "$HOME/.config/gcloud" ]; then
+  check "no fake gcloud login where gcloud is installed" test -z "$(bait_file gcloud)"
+else
+  check "a fake gcloud login where gcloud isn't installed" test -n "$(bait_file gcloud)"
+fi
 if [ -n "$CHROME" ]; then
   check "a fake profile inside the real Chrome" test -n "$(bait_file chrome-profile)"
 fi
@@ -275,7 +281,7 @@ ok "everything frozen runs again"
 
 # =====================================================================
 say "A sweep: an installed program going through several apps' data"
-pid=$(launch sweep /usr/bin/git hash-object "$(bait_file vivaldi)" "$(bait_file electrum)" "$(bait_file ssh-key)" "$(bait_file gcloud)") || fail "couldn't start git"
+pid=$(launch sweep /usr/bin/git hash-object "$(bait_file vivaldi)" "$(bait_file electrum)" "$(bait_file ssh-key)" "$(bait_file aws)") || fail "couldn't start git"
 a=$(wait_alert ".process.pid == $pid and .tier == \"critical\"") || fail "a sweep by a package-owned program wasn't critical"
 [ "$(field "$a" '.verdict.swept | length')" -ge 3 ] || fail "not reported as a sweep: $(field "$a" '.verdict | tostring')"
 frozen "$pid" || fail "the sweeping program wasn't frozen"
