@@ -44,14 +44,16 @@ jobs:
         shell: pwsh
         run: ./scripts/e2e.ps1 -Aba ./dist/aba.exe -Medium ./dist/medium.exe -Ghost ./dist/ghost.exe
 
-  # Linux and macOS: everything that builds there. Until their backends are
-  # written that's the OS-neutral core plus stubs, so this mostly guards the
-  # boundary (see "Platforms" in CONTRIBUTING.md). CGO stays off, like in the
+  # Linux and macOS: everything that builds there. For macOS that's still the
+  # OS-neutral core plus stubs, so its job mostly guards the boundary (see
+  # "Platforms" in CONTRIBUTING.md). Linux has a backend, and GitHub's Linux
+  # runners have passwordless sudo, a real kernel and systemd, so its steps go
+  # on to the real thing, like the Windows job. CGO stays off, like in the
   # release builds.
   test-unix:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -70,5 +72,38 @@ jobs:
       - name: Unit tests
         run: go test ./...
 
+      # As root: fanotify permission events, the cgroup freezer, the package
+      # database, planting with the user's rights. The test binaries are built
+      # as the runner's user and play the fake stealer as that user.
+      - name: Integration tests (root)
+        if: runner.os == 'Linux'
+        run: |
+          sudo loginctl enable-linger "$USER" || true
+          go test -c -o dist/integration.test ./internal/integration
+          go test -c -o dist/baits.test ./internal/baits
+          sudo env ABA_INTEGRATION=1 ABA_TEST_USER="$USER" ./dist/integration.test -test.v -test.count=1
+          sudo env ABA_INTEGRATION=1 ABA_TEST_USER="$USER" ./dist/baits.test -test.v -test.count=1 -test.run 'Linux|Planting'
+
       - name: Build
         run: go build -o dist/aba ./cmd/aba
+
+      - name: Build for the end-to-end run
+        if: runner.os == 'Linux'
+        run: |
+          go build -ldflags "-s -w -X main.version=ci-${{ github.sha }}" -o dist/aba ./cmd/aba
+          go build -o dist/grabber ./scripts/grabber
+
+      # Every feature on a throwaway machine: install as a systemd service,
+      # fake stealers frozen inside their open, kill, legitimate readers let
+      # through, resume, trust, release, a sweep, a hard-link trick, bait
+      # repair, uninstall, and nothing left behind.
+      - name: End-to-end
+        if: runner.os == 'Linux'
+        run: bash scripts/e2e-linux.sh ./dist/aba ./dist/grabber
+
+      - name: Service log (after a failure)
+        if: failure() && runner.os == 'Linux'
+        run: |
+          sudo tail -n 300 /var/lib/file-access-monitor/service.log || true
+          sudo cat /var/lib/file-access-monitor/crash.log || true
+          sudo journalctl -u file-access-monitor.service -n 200 --no-pager || true

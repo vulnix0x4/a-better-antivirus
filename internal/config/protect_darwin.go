@@ -32,3 +32,6 @@ func lockDir(dir, public string) error {
 func lockState() (func(), error) {
 	return nil, platform.Unsupported("ABA's state file")
 }
+
+// readableByAll opens the published status file to everyone. Not written for macOS yet.
+func readableByAll(path string) error { return nil }

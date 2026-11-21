@@ -81,7 +81,15 @@ func (p *Public) View() (*Config, *State) {
 	return cfg, st
 }
 
-func SavePublic(p *Public) error { return writeJSONAtomic(paths.PublicStatusFile(), p) }
+// SavePublic writes the status file anyone may read. Where a new file isn't
+// readable by everyone just because of the folder it's in, readableByAll
+// (protect_<os>.go) opens it up.
+func SavePublic(p *Public) error {
+	if err := writeJSONAtomic(paths.PublicStatusFile(), p); err != nil {
+		return err
+	}
+	return readableByAll(paths.PublicStatusFile())
+}
 
 func LoadPublic() (*Public, error) {
 	b, err := os.ReadFile(paths.PublicStatusFile())
