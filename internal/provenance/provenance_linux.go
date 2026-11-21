@@ -254,7 +254,7 @@ type ownerIndex struct {
 	stamp string
 	names []string
 	ents  []ownerEnt // sorted by hash
-	rpm   bool       // there's an rpm database too, which isn't indexed
+	rpm   bool       // packages are rpm's here: its database isn't indexed, rpm is asked
 }
 
 type ownerEnt struct {
@@ -366,9 +366,14 @@ func buildIndex(root string) *ownerIndex {
 		})
 	}
 	sort.Slice(ix.ents, func(i, j int) bool { return ix.ents[i].hash < ix.ents[j].hash })
-	for _, db := range []string{"var/lib/rpm", "usr/lib/sysimage/rpm"} {
-		if ents, err := os.ReadDir(filepath.Join(root, db)); err == nil && len(ents) > 0 {
-			ix.rpm = true
+	// rpm is only asked where it is the system's package manager. (Debian and
+	// Ubuntu machines often have the rpm tool and an empty database of its
+	// own, and asking it costs a process per question.)
+	if len(ix.ents) == 0 {
+		for _, db := range []string{"var/lib/rpm", "usr/lib/sysimage/rpm"} {
+			if ents, err := os.ReadDir(filepath.Join(root, db)); err == nil && len(ents) > 0 {
+				ix.rpm = true
+			}
 		}
 	}
 	return ix
@@ -442,10 +447,16 @@ func lookupOwner(root, path string) string {
 	if pkg := apkOwner(filepath.Join(root, "lib/apk/db/installed"), names); pkg != "" {
 		return pkg
 	}
-	if root == "/" {
-		return rpmOwner(path)
+	// rpm only where it's the system's package manager (see buildIndex).
+	if root != "/" {
+		return ""
 	}
-	return ""
+	for _, db := range []string{"/var/lib/dpkg/info", "/var/lib/pacman/local", "/lib/apk/db/installed"} {
+		if _, err := os.Stat(db); err == nil {
+			return ""
+		}
+	}
+	return rpmOwner(path)
 }
 
 // aliases are the names a file may be listed under. Systems that merged /bin
