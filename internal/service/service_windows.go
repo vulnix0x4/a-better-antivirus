@@ -135,6 +135,7 @@ func (s *server) initWatchers() {
 	s.baitIDs, s.notBait, s.opens = map[string]string{}, map[string]time.Time{}, map[uint32]openSeen{}
 	s.watch = &instant.Watcher{Self: uint32(os.Getpid()), OnOpen: s.onOpen, OnGhost: s.onGhost, OnBlocked: s.onBlocked,
 		Suspect: s.eng.SweepSuspect, Logf: s.log.Printf}
+	s.admit = s.admitAudited
 }
 
 // prepare gets the process ready to protect, before anything else runs.
@@ -204,24 +205,35 @@ func (s *server) heard(ctx context.Context, x string) {
 	if !ok {
 		return
 	}
-	if _, isBait := s.eng.IsBait(oa.ObjectName); !isBait {
-		bait, gone := s.baitFor(oa.ObjectName)
-		switch {
-		case bait != "":
-			s.log.Printf("bait %s was opened under another name: %s", bait, oa.ObjectName)
-			oa.Alias, oa.ObjectName = oa.ObjectName, bait
-		case gone && winsec.AccessMaskIsRead(oa.AccessMask):
-			oa.Alias, oa.ObjectName = oa.ObjectName, "" // resolved by its worker: see lateAlias
-		default:
-			return
-		}
-	}
+	// Whether it's about a bait is decided on the main loop (see admitAudited),
+	// not here: this runs alongside it, and would judge an access to a bait
+	// added a moment ago against the list from before the reload.
 	// (An access that neither reads nor deletes goes on too: the engine drops it.)
 	a, _ := oa.Access()
 	select {
 	case s.accesses <- a:
 	case <-ctx.Done():
 	}
+}
+
+// admitAudited says whether an audited access is about a bait, and names the
+// bait when the program reached it under another name. It is the service's
+// admit: the main loop calls it, after any reload that came first.
+func (s *server) admitAudited(a *detect.Access) bool {
+	if _, isBait := s.eng.IsBait(a.Path); isBait {
+		return true
+	}
+	bait, gone := s.baitFor(a.Path)
+	switch {
+	case bait != "":
+		s.log.Printf("bait %s was opened under another name: %s", bait, a.Path)
+		a.Alias, a.Path = a.Path, bait
+	case gone && a.Op == detect.OpRead:
+		a.Alias, a.Path = a.Path, "" // resolved by its worker: see lateAlias
+	default:
+		return false
+	}
+	return true
 }
 
 // indexBaitFiles notes each bait file's identity on disk, so a bait opened
