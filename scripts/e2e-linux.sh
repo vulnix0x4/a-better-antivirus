@@ -89,6 +89,12 @@ wait_alert() {
 wait_until() { local i; for i in $(seq 1 "$1"); do if "${@:2}"; then return 0; fi; sleep 0.2; done; return 1; }
 has_line() { grep -q "$1" "$2" 2>/dev/null; }
 field() { jq -r "$2" <<<"$1"; }
+# A command that changes settings (aba trust, aba bait add) signals the
+# service and returns at once; the service takes the change in a moment
+# later. So: r=$(reloads); sudo aba trust ...; wait_reloaded "$r"
+reloads() { sudo grep -c 'configuration reloaded' "$DATA/service.log" 2>/dev/null || true; }
+reloaded_since() { [ "$(reloads)" -gt "$1" ]; }
+wait_reloaded() { wait_until 75 reloaded_since "$1" || fail "the service didn't take in the new settings within 15 s"; }
 
 # expect_frozen PID OUTFILE WHAT: an alert for PID that froze it on the spot,
 # and nothing read. Prints the alert's ID.
@@ -241,7 +247,9 @@ kill -9 "$pid" 2>/dev/null
 say "aba trust"
 pid=$(launch stealer "$HOME/Downloads/free-game" -out "$OUT/s3" "$PASSWORDS") || fail "couldn't start the fake stealer"
 id=$(expect_frozen "$pid" "$OUT/s3" "fake stealer") || exit 1
+r=$(reloads)
 sudo aba trust "$id" || fail "aba trust"
+wait_reloaded "$r"
 wait_until 50 has_line '^DONE' "$OUT/s3" || fail "the trusted program didn't carry on"
 kill -9 "$pid" 2>/dev/null
 count=$(alerts | jq length)
