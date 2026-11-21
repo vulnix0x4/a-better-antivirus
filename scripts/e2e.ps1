@@ -116,6 +116,14 @@ function WaitFor([scriptblock]$cond, [int]$seconds = 20) {
 }
 function AlertFor([int]$procId, [int]$seconds = 20) { WaitFor { Alerts | Where-Object { $_.process.pid -eq $procId } | Select-Object -Last 1 } $seconds }
 function State { Get-Content "$data\state.json" -Raw | ConvertFrom-Json }
+# A command that changes settings tells the service to re-read them and returns
+# at once; the service takes them in a moment later (about a second here). A
+# step that depends on the new settings waits for that, or it races the service:
+#   $reloads = Reloads; Aba trust ...; WaitReloaded $reloads
+function Reloads { @(Select-String -Path "$data\service.log" -Pattern 'configuration reloaded' -ErrorAction SilentlyContinue).Count }
+function WaitReloaded([int]$since) {
+    if (-not (WaitFor { (Reloads) -gt $since } 15)) { Fail 'the service did not take in the new settings within 15 s' }
+}
 function Did($alert, $action) { [bool]($alert.actions | Where-Object { $_.action -eq $action -and $_.ok }) }
 
 # A fake stealer: a copy of aba.exe in Temp (unsigned, user-writable -> critical)
@@ -272,7 +280,9 @@ Step 'False positive: resume + ignore'
 $s2 = Stealer 'mytool' $desktopBait
 $a2 = AlertFor $s2.Id
 Check ($a2 -and (Did $a2 'freeze')) 'second reader frozen'
+$reloads = Reloads
 Aba resume $a2.id --ignore
+WaitReloaded $reloads
 Check (WaitFor { -not (IsSuspended $s2.Id) } 5) 'resumed'
 Check ((& $Aba ignore list | Out-String) -match 'mytool') 'ignore rule added'
 Stop-Process -Id $s2.Id -Force -ErrorAction SilentlyContinue
@@ -295,7 +305,9 @@ Aba install --yes --preset balanced --learning 3 --ntfy-topic $topic
 $s5 = Stealer 'devtool' $desktopBait
 $a5 = AlertFor $s5.Id
 Check ($a5 -and (Did $a5 'freeze')) 'critical reader frozen during learning mode'
+$reloads = Reloads
 Aba trust $a5.id
+WaitReloaded $reloads
 Check (WaitFor { -not (IsSuspended $s5.Id) } 5) 'trust unfroze it'
 Check ((& $Aba ignore list | Out-String) -match 'devtool') 'trust added an ignore rule'
 Stop-Process -Id $s5.Id -Force -ErrorAction SilentlyContinue
