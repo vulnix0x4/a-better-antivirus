@@ -140,6 +140,8 @@ func updateApplyCmd() *cobra.Command {
 }
 
 func recordUpdated(from, to string) {
+	// Windows' "Installed apps" list shows the version too.
+	install.RefreshApp(to)
 	config.UpdateState(func(st *config.State) error {
 		if st.Update == nil {
 			st.Update = &config.UpdateStatus{}

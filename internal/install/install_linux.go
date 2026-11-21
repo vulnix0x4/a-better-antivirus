@@ -38,3 +38,15 @@ func deleteProgramFiles() (string, error) {
 
 // scheduleDelete deletes p now, or as soon as it's no longer in use.
 func scheduleDelete(p string) {}
+
+// appSteps put ABA where people look for an installed program (on Windows,
+// the "Installed apps" list and the Start menu), with an entry that runs
+// `aba uninstall`. removeAppSteps undo it on uninstall.
+func appSteps(version string) []Step { return nil }
+func removeAppSteps() []Step         { return nil }
+
+// RefreshApp runs after an update: wherever the system lists ABA as an
+// installed program, it now shows the new version.
+func RefreshApp(version string) error {
+	return platform.Unsupported("listing ABA as an installed program")
+}
