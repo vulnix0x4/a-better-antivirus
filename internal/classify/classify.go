@@ -98,6 +98,9 @@ func (c *Classifier) SweepExempt(image string, pid uint32, sig *provenance.Resul
 	if sig != nil {
 		signer = sig.Signer
 	}
+	if c.sweepsAllowed(image, pid) {
+		return true
+	}
 	for _, p := range builtinIgnore {
 		if Glob(c.Env.expand(p), image) && (sig == nil || (sig.Valid && osVendor(signer))) {
 			return true
@@ -205,6 +208,13 @@ func (c *Classifier) decide(image string, pid uint32, bait Bait, sig *provenance
 	sigNote := "signature not checked yet"
 	if sig != nil {
 		sigNote = sig.String()
+	}
+
+	// Where the program's own file says too little about who is behind a
+	// read, the operating system's rules judge first: on Linux a shell or a
+	// tool like cat is judged by what started it (byOrigin, rules_<os>.go).
+	if v, ok := c.byOrigin(image, name, pid, sig, sigNote); ok {
+		return v
 	}
 
 	if lolbins[name] {

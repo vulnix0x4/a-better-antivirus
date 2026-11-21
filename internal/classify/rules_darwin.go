@@ -65,3 +65,13 @@ func Glob(pattern, path string) bool { return pattern == path }
 // GeneralizePath turns a version-specific path into a pattern that still
 // matches after the app updates itself (…/app-1.0.9172/… -> …/app-*/…).
 func GeneralizePath(image string) string { return image }
+
+// byOrigin lets an operating system judge a reader by more than its own
+// program, ahead of the rules in classify.go. macOS has no such rules yet.
+func (c *Classifier) byOrigin(image, name string, pid uint32, sig *provenance.Result, sigNote string) (Verdict, bool) {
+	return Verdict{}, false
+}
+
+// sweepsAllowed reports whether the operating system's rules let this reader
+// go through many apps' data (besides builtinIgnore and your own rules).
+func (c *Classifier) sweepsAllowed(image string, pid uint32) bool { return false }
