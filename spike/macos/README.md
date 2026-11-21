@@ -13,6 +13,7 @@ is recommended, is in the pull request that added this folder.
 | `experiments/root-probes.sh` | What root can and cannot do without Full Disk Access: an Endpoint Security client without the entitlement, file leases, three ways to suspend a process and who can undo each, `fs_usage`, dtrace, auditing, a dialog from a root process. |
 | `experiments/pf-isolate.sh` | Cuts one user's internet, then the whole Mac's, with pf, while a root process still reaches the alert server. Always cleans up. |
 | `experiments/readers.sh` | Sixteen ways to get at a file (cat, cp, clone, zip, Python, AppleScript, Finder duplicate…), each on its own bait, to see what the kernel reports for each. |
+| `experiments/finder-demo.sh` | The Atomic-style case: the fake stealer has Finder copy the bait, so Apple's `DesktopServicesHelper` opens it. Checks that the watcher still finds and freezes the fake stealer (it follows Finder's log for who has been sending it Apple events). |
 | `experiments/soak.sh` | Plants fake baits where macOS stealers look, to record which legitimate software reads them. |
 | `experiments/local-daemon.sh`, `job.sh` | Installs the prototype the way the product would be installed (an app-like bundle run by a LaunchDaemon), so that it can be granted Full Disk Access, and runs commands inside it. |
 | `experiments/esnative` | A cgo program that asks for a native Endpoint Security client, to show what happens without Apple's entitlement. |
