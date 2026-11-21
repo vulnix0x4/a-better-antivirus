@@ -153,7 +153,10 @@
     // Turn each row into a button. The "why" text is shown after the round.
     files.forEach(function (li) {
       var b = el("button", "f-btn"); b.type = "button";
-      while (li.firstChild) b.appendChild(li.firstChild);
+      var main = el("span", "f-main"), sub = $(".f-sub", li);
+      main.appendChild($(".f-name", li)); if (sub) main.appendChild(sub);
+      b.appendChild($(".f-ico", li)); b.appendChild(main); b.appendChild($(".tag", li));
+      li.textContent = "";
       var act = el("span", "f-act", "take"); b.appendChild(act);
       var why = el("span", "f-why", li.getAttribute("data-why")); b.appendChild(why);
       li.appendChild(b);
@@ -214,9 +217,10 @@
       return "Loot: <b>" + n + " file" + (n > 1 ? "s" : "") + "</b> · " + size + " · not sent yet";
     }
 
-    function toast(msg, ms) {
+    function toast(msg, ms, li) {
       var old = $(".heist-toast", root); if (old) old.remove();
       var t = el("div", "heist-toast", msg); win.appendChild(t);
+      if (li) t.style.top = Math.min(win.clientHeight - t.offsetHeight - 12, li.offsetTop + li.offsetHeight + 6) + "px";
       setTimeout(function () { if (t.parentNode) t.remove(); }, ms || 3200);
     }
 
@@ -246,11 +250,12 @@
         S.loot.push(li); S.busy = null;
         lootTxt.innerHTML = lootLine();
         upBtn.disabled = false;
-        if (li.getAttribute("data-hint") === "profiles") toast('Local State lists Chrome\'s profiles: <b>"Default"</b>. Nothing else.', 4200);
+        if (li.getAttribute("data-hint") === "profiles") toast('Local State lists Chrome\'s profiles: <b>"Default"</b>. Nothing else.', 4200, li);
       }, calm() ? 0 : readTime(li));
     }
 
     function freeze(li, ms) {
+      var old = $(".heist-toast", root); if (old) old.remove();
       S.state = "frozen"; S.busy = null; S.ms = ms; S.hits++;
       S.hitWhat = li.getAttribute("data-what");
       S.hitName = $(".f-name", li).textContent;
@@ -308,7 +313,7 @@
         clockRun();
         upBtn.disabled = !S.loot.length;
         lootTxt.innerHTML = lootLine();
-        toast("Unfrozen, this once. It isn't signed, so ABA won't trust it for good.", 4200);
+        toast("Unfrozen, this once. It isn't signed, so ABA won't trust it for good.", 4200, S.hitLi);
         announce.textContent = "Unfrozen this once. You can keep going.";
         var f = $(".file.is-hit .f-btn", root); if (f) f.focus({ preventScroll: true });
         return;
@@ -319,6 +324,9 @@
     function over(how) {
       S.state = "over";
       stamp.hidden = true;
+      root.classList.remove("is-frozen");
+      document.documentElement.classList.remove("world-frozen");
+      frost.clear();
       root.classList.add("is-revealed");
       files.forEach(function (li) { $(".f-btn", li).disabled = false; });
       var baits = files.filter(function (li) { return li.getAttribute("data-kind") === "bait"; }).length;
@@ -326,7 +334,7 @@
       var head, body, cls = "heist-modal is-good";
       if (how === "killed") {
         head = 'frozen <span aria-hidden="true">→</span> <span class="red">killed.</span>';
-        body = "It got " + (took ? took + " file" + (took > 1 ? "s" : "") + " together and sent none of them" : "nothing at all") + ". The thing it opened was a fake " + esc(S.hitWhat) + ".";
+        body = (took ? "It had collected " + took + " file" + (took > 1 ? "s" : "") + " and sent none of them" : "It took nothing and sent nothing") + ". What it opened was a fake " + esc(S.hitWhat) + ".";
       } else if (how === "pending") {
         head = "Still frozen.";
         body = "It stays frozen, internet cut, until someone decides (<code>aba alerts</code>). It sent nothing.";

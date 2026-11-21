@@ -76,7 +76,7 @@
         <div class="heist-proc" aria-hidden="true">
           <span><span class="proc-ico">▶</span> game_setup.exe</span>
           <span class="proc-meta">unsigned · Downloads</span>
-          <span class="heist-clock" data-clock>t+0.000s</span>
+          <span class="heist-clock js-only" data-clock>t+0.000s</span>
         </div>
 
         <div class="heist-intro" data-intro>
@@ -222,17 +222,17 @@
     </div>
 
     <figure class="run" aria-labelledby="run-cap">
-      <ol class="run-track">
-        <li class="run-seg run-start"><span class="run-k">0 s</span><span class="run-v">Starts</span></li>
-        <li class="run-seg run-collect">
-          <span class="run-k">Collects</span>
-          <span class="run-items"><span>browsers</span><span>wallets</span><span class="run-hit">discord</span><span>docs</span></span>
-          <span class="run-trip"><span class="run-trip-dot"></span>opens a bait: <b>frozen</b></span>
-        </li>
-        <li class="run-seg run-zip is-never"><span class="run-k">Zips</span><span class="run-v">never</span></li>
-        <li class="run-seg run-up is-never"><span class="run-k">Uploads</span><span class="run-v">never</span></li>
+      <p class="run-head"><span class="run-proc">A typical stealer's run</span><span class="run-arrow" aria-hidden="true">collect first ─── upload last ──▶</span></p>
+      <ol class="run-steps">
+        <li class="rs is-done"><span class="rs-n">Chrome profile</span><span class="rs-s">collected</span></li>
+        <li class="rs is-done"><span class="rs-n">Documents</span><span class="rs-s">collected</span></li>
+        <li class="rs is-hit"><span class="rs-n">Discord token</span><span class="rs-s"><b>a bait: frozen</b></span></li>
+        <li class="rs is-never"><span class="rs-n">Wallets</span><span class="rs-s">never</span></li>
+        <li class="rs is-never"><span class="rs-n">Telegram</span><span class="rs-s">never</span></li>
+        <li class="rs is-never"><span class="rs-n">Zip it up</span><span class="rs-s">never</span></li>
+        <li class="rs is-never rs-up"><span class="rs-n">Upload</span><span class="rs-s">never</span></li>
       </ol>
-      <figcaption id="run-cap">A typical stealer's run. The tripwire sits in the collecting part, before anything leaves the PC.</figcaption>
+      <figcaption id="run-cap">The tripwire sits in the collecting part. What it gathered before the bait hasn't been sent yet, and now it won't be.</figcaption>
     </figure>
 
     <h3 class="sub-h">Four kinds of bait</h3>
@@ -458,7 +458,7 @@
         </div>
         <a class="btn btn-solid btn-xl dl" href="https://github.com/vulnix0x4/a-better-antivirus/releases/latest/download/ABA-Setup.exe">
           <span class="btn-ico" aria-hidden="true">↓</span>
-          <span class="dl-txt"><span class="dl-main">Download ABA-Setup.exe</span><span class="dl-sub">One installer for x64 and ARM64 · from GitHub Releases</span></span>
+          <span class="dl-txt"><span class="dl-main">Download <span class="nw">ABA-Setup.exe</span></span><span class="dl-sub">One installer for x64 and ARM64 · from GitHub Releases</span></span>
         </a>
         <p class="os-fine">The newest version, straight from <a href="https://github.com/vulnix0x4/a-better-antivirus/releases/latest">ABA's releases on GitHub</a>. It shows up as “A Better Antivirus” in Windows' installed apps.</p>
       </li>
@@ -533,8 +533,7 @@
           <div class="term-body" data-term-body>
 <pre class="term-out" data-term-out><span class="t-prompt">PS C:\Users\you&gt;</span> aba test
 
- A harmless copy of ABA in your Temp folder is about to read passwords.txt on the Desktop,
- exactly the way a stealer would. Nothing leaves your PC and your network isn't touched.
+ A harmless copy of ABA in your Temp folder is about to read passwords.txt on the Desktop, exactly the way a stealer would. Nothing leaves your PC and your network isn't touched.
 
  <span class="t-ok">✓</span> <span class="t-k">Caught</span>      critical: unsigned program running from a user-writable folder: typical of stealers
  <span class="t-ok">✓</span> <span class="t-k">Frozen</span>      72 ms after it opened the bait, before it could read a byte
