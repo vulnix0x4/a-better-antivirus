@@ -1,0 +1,20 @@
+# Cloudflare Pages response headers. https://developers.cloudflare.com/pages/configuration/headers/
+#
+# The Content-Security-Policy lists exactly what the pages load: their own
+# stylesheet, script, images and video, and nothing from anywhere else. There
+# are no inline scripts or styles, so neither needs 'unsafe-inline'. If you add
+# anything hosted elsewhere, it will be blocked until it is added here, which
+# is the point: ABA promises no telemetry and the site keeps to it.
+
+/*
+  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; media-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; upgrade-insecure-requests
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: no-referrer
+  Permissions-Policy: accelerometer=(), autoplay=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), midi=(), payment=(), usb=(), browsing-topics=()
+  Cross-Origin-Opener-Policy: same-origin
+  Strict-Transport-Security: max-age=31536000
+
+# The demo media only changes when a new demo is recorded.
+/media/*
+  Cache-Control: public, max-age=604800
