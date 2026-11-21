@@ -27,7 +27,7 @@ func TestTestReaderCantBeSwapped(t *testing.T) {
 		t.Fatal("not started")
 	}
 	if lvl, err := procinfo.IntegrityLevel(r.PID); err == nil && lvl >= procinfo.IntegrityHigh {
-		t.Fatalf("the fake stealer runs with admin rights (integrity 0x%x)", lvl)
+		t.Fatalf("the fake stealer runs with admin rights (integrity 0x%x, started %s)", lvl, r.As)
 	}
 	// While it's held: no writing, no replacing, no deleting, no renaming.
 	if err := os.WriteFile(r.Path, []byte("something else"), 0o644); err == nil {

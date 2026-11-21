@@ -13,6 +13,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
 )
 
 // The fake stealer for `aba test` runs from your Temp folder, where real ones
@@ -193,6 +195,11 @@ func desktopToken() (windows.Token, error) {
 	}
 	var pid uint32
 	procGetWindowThreadProcess.Call(hwnd, uintptr(unsafe.Pointer(&pid)))
+	// With UAC switched off (or signed in as the built-in Administrator) the
+	// desktop itself runs with admin rights: its token sheds nothing.
+	if lvl, err := procinfo.IntegrityLevel(pid); err != nil || lvl >= procinfo.IntegrityHigh {
+		return 0, fmt.Errorf("the desktop runs with admin rights itself")
+	}
 	ph, err := windows.OpenProcess(windows.PROCESS_QUERY_INFORMATION, false, pid)
 	if err != nil {
 		return 0, err
