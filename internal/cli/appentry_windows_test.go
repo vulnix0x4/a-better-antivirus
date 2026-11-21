@@ -47,3 +47,15 @@ func TestInstallFlagsTheSetupProgramUses(t *testing.T) {
 		t.Error("--auto-update=false wasn't read")
 	}
 }
+
+// The last page of the setup program offers "Run the safe test" and starts
+// this. The hidden flag keeps the window open so the result can be read.
+func TestSetupProgramsSafeTestIsARealCommand(t *testing.T) {
+	c, flags, err := newRoot().Find([]string{"test", "--elevated-pause"})
+	if err != nil || c.Name() != "test" {
+		t.Fatalf("runs %q, want test (%v)", c.Name(), err)
+	}
+	if err := c.ParseFlags(flags); err != nil {
+		t.Fatal(err)
+	}
+}
