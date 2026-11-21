@@ -125,3 +125,6 @@ func lockState() (func(), error) {
 		inProcess.Unlock()
 	}, nil
 }
+
+// readableByAll opens the published status file to everyone. The public folder's permissions are inherited by what's written into it.
+func readableByAll(path string) error { return nil }

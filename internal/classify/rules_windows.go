@@ -287,3 +287,14 @@ func GeneralizePath(image string) string {
 	}
 	return strings.Join(segs, `\`)
 }
+
+// byOrigin lets an operating system judge a reader by more than its own
+// program, ahead of the rules in classify.go. Windows doesn't need to: who
+// signed the program settles it.
+func (c *Classifier) byOrigin(image, name string, pid uint32, sig *provenance.Result, sigNote string) (Verdict, bool) {
+	return Verdict{}, false
+}
+
+// sweepsAllowed reports whether the operating system's rules let this reader
+// go through many apps' data (besides builtinIgnore and your own rules).
+func (c *Classifier) sweepsAllowed(image string, pid uint32) bool { return false }

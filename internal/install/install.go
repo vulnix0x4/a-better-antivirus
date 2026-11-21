@@ -467,7 +467,9 @@ func CopyFile(src, dst string) error {
 	}
 	defer in.Close()
 	tmp := dst + ".new"
-	out, err := os.Create(tmp)
+	os.Remove(tmp)
+	// A program: executable, where the operating system keeps track of that.
+	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
 	if err != nil {
 		return err
 	}
