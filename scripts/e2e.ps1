@@ -462,7 +462,10 @@ Check (AlertFor $s4.Id) 'reading the custom bait alerts'
 Aba release
 Stop-Process -Id $s4.Id -Force -ErrorAction SilentlyContinue
 Aba bait remove $cid
-Check (-not (Test-Path $custom)) 'custom bait removed'
+# The file's name stays visible until every handle on it is closed. The service
+# lets go of its guard when it next re-reads its settings, which can take a few
+# seconds when it is busy; `aba bait remove` itself only waits one.
+Check (WaitFor { -not (Test-Path $custom) } 15) 'custom bait removed'
 
 Step 'Read-only commands'
 $before = @(Alerts).Count
