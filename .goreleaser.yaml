@@ -11,6 +11,17 @@ builds:
     goarch: [amd64, arm64]
     flags: [-trimpath]
     ldflags: ["-s -w -X main.version={{.Tag}}"]
+    # ABA-Setup.exe, the click-through installer, carries both aba.exe files.
+    # Each build hands its finished binary to installer/build; the second one
+    # to arrive compiles the installer (Inno Setup) into dist/installer. So the
+    # installer holds the same bytes as the aba_<tag>_windows_<arch>.exe
+    # downloads, and it exists before the checksums are made and signed.
+    hooks:
+      post:
+        - cmd: go run ./installer/build -arch {{ .Arch }} -bin "{{ .Path }}" -version {{ .Tag }}
+          # `go run` must build for this machine, not for the target above.
+          env: [GOOS=, GOARCH=]
+          output: true
 
 archives:
   # Plain .exe downloads: the simplest thing to double-click.
@@ -25,6 +36,9 @@ archives:
 checksum:
   name_template: "SHA256SUMS.txt"
   algorithm: sha256
+  # The installer's hash goes in the same signed list as everything else.
+  extra_files:
+    - glob: ./dist/installer/ABA-Setup.exe
 
 # Sign the checksum list with the release key (ed25519). ABA's auto-updater
 # refuses any release whose SHA256SUMS.txt signature doesn't verify.
@@ -36,6 +50,10 @@ signs:
     signature: "${artifact}.sig"
 
 release:
+  # No version in the name: the website links to
+  # releases/latest/download/ABA-Setup.exe, which must keep working.
+  extra_files:
+    - glob: ./dist/installer/ABA-Setup.exe
   header: |
     ## A Better Antivirus {{ .Tag }}
 
@@ -44,7 +62,9 @@ release:
     Plants fake passwords, wallets and app data that only malware would read, and freezes
     whatever touches them. Windows 10/11, 64-bit (x64 and ARM).
 
-    **Install** (PowerShell; downloads this release, checks its hash, runs the guided setup):
+    **Install:** download `ABA-Setup.exe` below, double-click it and follow the steps.
+
+    Or in PowerShell (downloads this release, checks its hash, runs the guided setup):
     ```powershell
     irm https://raw.githubusercontent.com/vulnix0x4/a-better-antivirus/main/install.ps1 | iex
     ```
@@ -55,9 +75,10 @@ release:
   footer: |
     **Verify a manual download** before running it:
     ```powershell
-    (Get-FileHash .\aba_{{ .Tag }}_windows_amd64.exe -Algorithm SHA256).Hash
+    (Get-FileHash .\ABA-Setup.exe -Algorithm SHA256).Hash
     ```
-    and compare with `SHA256SUMS.txt`. `SHA256SUMS.txt.sig` is the ed25519 signature the auto-updater checks
+    and compare with `SHA256SUMS.txt` (the same goes for `aba_{{ .Tag }}_windows_amd64.exe`; `ABA-Setup.exe` holds
+    exactly the two `aba_{{ .Tag }}_windows_*.exe` files and installs the one for your PC). `SHA256SUMS.txt.sig` is the ed25519 signature the auto-updater checks
     before installing anything. Releases aren't code-signed yet, so Windows SmartScreen may warn: click
     "More info" → "Run anyway" only if the hash matches.
 
