@@ -188,10 +188,13 @@
       modal.style.top = modal.style.bottom = stamp.style.top = "";
     }
 
+    // Where a row sits inside the window, in px (offsetTop would be relative to its folder group).
+    function relTop(li) { return li.getBoundingClientRect().top - win.getBoundingClientRect().top - win.clientTop; }
+
     // Put an overlay (stamp, alert) next to the row that was hit, inside the
     // window, and make sure the visitor can see it.
     function placeNear(node, li, mode) {
-      var wh = win.clientHeight, top = li.offsetTop + $(".f-btn", li).offsetTop, rh = li.offsetHeight, nh = node.offsetHeight;
+      var wh = win.clientHeight, top = relTop(li), rh = li.offsetHeight, nh = node.offsetHeight;
       var y;
       if (mode === "center") y = Math.max(nh / 2 + 50, Math.min(wh - nh / 2 - 20, top + rh / 2));
       else { y = top + rh + 10; if (y + nh > wh - 12) y = top - nh - 10; y = Math.max(12, Math.min(wh - nh - 12, y)); }
@@ -224,7 +227,7 @@
     function toast(msg, ms, li) {
       var old = $(".heist-toast", root); if (old) old.remove();
       var t = el("div", "heist-toast", msg); win.appendChild(t);
-      if (li) t.style.top = Math.min(win.clientHeight - t.offsetHeight - 12, li.offsetTop + li.offsetHeight + 6) + "px";
+      if (li) t.style.top = Math.min(win.clientHeight - t.offsetHeight - 12, relTop(li) + li.offsetHeight + 6) + "px";
       setTimeout(function () { if (t.parentNode) t.remove(); }, ms || 3200);
     }
 
