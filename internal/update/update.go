@@ -66,9 +66,14 @@ func (r *Release) asset(name string) (Asset, bool) {
 	return Asset{}, false
 }
 
-// AssetName is the release file for this PC's architecture.
+// AssetName is the release file for this PC's operating system and
+// architecture: aba_v1.2.3_windows_amd64.exe.
 func AssetName(tag string) string {
-	return fmt.Sprintf("aba_%s_windows_%s.exe", tag, runtime.GOARCH)
+	name := fmt.Sprintf("aba_%s_%s_%s", tag, runtime.GOOS, runtime.GOARCH)
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	return name
 }
 
 // Latest asks GitHub for the newest published release.
