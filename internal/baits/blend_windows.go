@@ -84,3 +84,12 @@ func indexedLikeFolder(path string) {
 	u, _ := windows.UTF16PtrFromString(path)
 	windows.SetFileAttributes(u, fa&^noIndex|da&noIndex)
 }
+
+// asOwner runs fn, which plants or removes files at or around path. On
+// Windows there's nothing to guard against here: making a link that leads
+// an administrator's program somewhere else takes rights an ordinary
+// program doesn't have, and ownedBy hands the file to you afterwards.
+func asOwner(path string, fn func()) error {
+	fn()
+	return nil
+}

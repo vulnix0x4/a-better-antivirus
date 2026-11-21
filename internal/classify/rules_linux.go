@@ -57,7 +57,7 @@ func init() {
 	}
 	add(kindShell, "sh", "bash", "dash", "zsh", "fish", "ksh", "ksh93", "mksh", "tcsh", "csh", "ash", "busybox", "rbash", "yash", "elvish", "nu", "xonsh")
 	add(kindInterp, "python", "python2", "python3", "pypy", "pypy3", "perl", "ruby", "php", "node", "nodejs", "deno", "bun",
-		"lua", "luajit", "java", "tclsh", "wish", "Rscript", "gjs", "guile", "pwsh", "expect", "make", "gmake", "julia", "groovy", "jshell")
+		"lua", "luajit", "java", "tclsh", "wish", "Rscript", "rscript", "gjs", "guile", "pwsh", "expect", "make", "gmake", "julia", "groovy", "jshell")
 	for _, v := range []string{"2.7", "3.6", "3.7", "3.8", "3.9", "3.10", "3.11", "3.12", "3.13", "3.14", "3.15"} {
 		add(kindInterp, "python"+v)
 	}
@@ -376,11 +376,14 @@ func shellCode(args []string) (operand string, code int, rc string) {
 		case a == "-o" || a == "+o" || a == "-O" || a == "+O":
 			i++
 		case strings.HasPrefix(a, "--") || a == "-":
-		case len(a) > 1 && a[0] == '-':
-			if strings.ContainsRune(a[1:], 'c') {
+		case len(a) > 1 && (a[0] == '-' || a[0] == '+'):
+			if a[0] == '-' && strings.ContainsRune(a[1:], 'c') {
 				return "", codeGiven, rc
 			}
-		case len(a) > 1 && a[0] == '+':
+			// A cluster ending in o takes the option's name next (-euo pipefail).
+			if a[len(a)-1] == 'o' || a[len(a)-1] == 'O' {
+				i++
+			}
 		default:
 			return a, codeScript, rc
 		}
@@ -400,10 +403,13 @@ func interpCode(name string, args []string, cwd string) (operand string, code in
 	// Options that take a value as the next argument, per language; preload
 	// are those whose value is code that gets loaded: a script by another name.
 	var value, preload, given, hidden []string
+	// clusters: several one-letter options may be written as one (perl -lne).
+	clusters := true
 	switch lang {
 	case "python", "pypy":
 		value, given, hidden = []string{"-W", "-X", "-Q", "--check-hash-based-pycs"}, []string{"-c"}, []string{"-m"}
 	case "node":
+		clusters = false
 		value = []string{"-C", "--conditions", "--title", "--env-file", "--input-type", "--inspect-port", "--max-http-header-size"}
 		preload = []string{"-r", "--require", "--import", "--loader", "--experimental-loader"}
 		given = []string{"-e", "--eval", "-p", "--print"}
@@ -416,6 +422,7 @@ func interpCode(name string, args []string, cwd string) (operand string, code in
 	case "lua", "luajit":
 		value, preload, given = nil, []string{"-l"}, []string{"-e"}
 	case "java":
+		clusters = false
 		value = []string{"-cp", "-classpath", "--class-path", "-p", "--module-path", "--add-modules", "--upgrade-module-path"}
 		preload, hidden = []string{"-jar"}, []string{"-m", "--module"}
 	case "make":
@@ -475,6 +482,9 @@ func interpCode(name string, args []string, cwd string) (operand string, code in
 			// A cluster of short options (perl -lne, python -Ic): the first one
 			// that stands for code decides.
 			for _, ch := range a[1:] {
+				if !clusters {
+					break
+				}
 				s := "-" + string(ch)
 				if in(given, s) {
 					return "", codeGiven

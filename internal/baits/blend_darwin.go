@@ -41,3 +41,12 @@ func ownedBy(path, userID string) {}
 // indexedLikeFolder gives a bait the same "index this file" setting as the
 // folder it's in, where the operating system has such a setting.
 func indexedLikeFolder(path string) {}
+
+// asOwner runs fn, which plants or removes files at or around path. Where
+// a program running as the user could lead an administrator's writes
+// elsewhere with a link, this is the place to do the work as the user
+// instead (see blend_linux.go). Not written for macOS yet.
+func asOwner(path string, fn func()) error {
+	fn()
+	return nil
+}

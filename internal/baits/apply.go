@@ -18,7 +18,23 @@ var legacyMarkers = []string{"j.marsh.1987@outlook.com"}
 
 // Create plants a bait and returns its state. Existing files are adopted, not
 // overwritten (the user may have customised them). Requires admin for audit rules.
-func Create(s Spec, u config.UserInfo, g *Gen) (*config.BaitState, error) {
+//
+// Create, Repair, Blend and Remove change files in folders that belong to the
+// user while running as administrator. Each does its work through asOwner
+// (blend_<os>.go), which is how an operating system keeps that from being
+// turned against it.
+func Create(s Spec, u config.UserInfo, g *Gen) (bs *config.BaitState, err error) {
+	files := s.Files(u)
+	if len(files) == 0 {
+		return create(s, u, g)
+	}
+	if e := asOwner(files[0].Path, func() { bs, err = create(s, u, g) }); e != nil {
+		return &config.BaitState{ID: s.ID, Name: s.Name, Kind: s.Kind, Status: "error", CreatedAt: time.Now()}, e
+	}
+	return bs, err
+}
+
+func create(s Spec, u config.UserInfo, g *Gen) (*config.BaitState, error) {
 	bs := &config.BaitState{ID: s.ID, Name: s.Name, Kind: s.Kind, Status: "ok", CreatedAt: time.Now()}
 	created := map[string]bool{}
 	for _, f := range s.Files(u) {
@@ -165,6 +181,14 @@ const legacyEmptyDB = 4096
 // the empty ones (see sqlite.go). Only files ABA created itself and nothing
 // has written to since. It reports whether it rewrote anything.
 func Blend(bs *config.BaitState, s Spec, u config.UserInfo, g *Gen) (changed bool) {
+	if len(bs.Files) == 0 {
+		return false
+	}
+	asOwner(bs.Files[0].Path, func() { changed = blend(bs, s, u, g) })
+	return changed
+}
+
+func blend(bs *config.BaitState, s Spec, u config.UserInfo, g *Gen) (changed bool) {
 	gens := map[string]FileSpec{}
 	if s.Files != nil {
 		for _, f := range s.Files(u) {
@@ -265,7 +289,17 @@ func Check(bs *config.BaitState) []Problem {
 }
 
 // Repair fixes problems: recreates missing files and re-applies audit rules.
-func Repair(bs *config.BaitState, s Spec, u config.UserInfo, g *Gen, probs []Problem) error {
+func Repair(bs *config.BaitState, s Spec, u config.UserInfo, g *Gen, probs []Problem) (err error) {
+	if len(probs) == 0 {
+		return nil
+	}
+	if e := asOwner(probs[0].File, func() { err = repair(bs, s, u, g, probs) }); e != nil {
+		return e
+	}
+	return err
+}
+
+func repair(bs *config.BaitState, s Spec, u config.UserInfo, g *Gen, probs []Problem) error {
 	specs := map[string]FileSpec{}
 	for _, f := range s.Files(u) {
 		specs[strings.ToLower(f.Path)] = f
@@ -330,7 +364,17 @@ func Repair(bs *config.BaitState, s Spec, u config.UserInfo, g *Gen, probs []Pro
 // Remove takes a bait away: audit rules first (so deleting doesn't alert),
 // then files ABA created, then folders it created if they're now empty.
 // Adopted files the user made themselves are kept.
-func Remove(bs *config.BaitState) error {
+func Remove(bs *config.BaitState) (err error) {
+	if len(bs.Files) == 0 {
+		return remove(bs)
+	}
+	if e := asOwner(bs.Files[0].Path, func() { err = remove(bs) }); e != nil {
+		return e
+	}
+	return err
+}
+
+func remove(bs *config.BaitState) error {
 	var firstErr error
 	for _, f := range bs.Files {
 		if f.Audit {
