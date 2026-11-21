@@ -22,6 +22,7 @@ type installFlags struct {
 	ntfyTopic   string
 	baits       []string
 	autoUpdate  bool
+	keep        bool
 }
 
 func theme() *huh.Theme { return ui.Theme() }
@@ -35,7 +36,8 @@ func installCmd() *cobra.Command {
 		Example: "  aba install\n" +
 			"  aba install --yes --preset balanced\n" +
 			"  aba install --yes --preset strict --learning 3 --ntfy-topic my-secret-topic\n" +
-			"  aba install --yes --auto-update=false",
+			"  aba install --yes --auto-update=false\n" +
+			"  aba install --yes --keep-settings",
 		RunE: func(cmd *cobra.Command, args []string) error { return runInstall(false, f) },
 	}
 	c.Flags().BoolVarP(&f.yes, "yes", "y", false, "non-interactive: use defaults and flags")
@@ -45,6 +47,7 @@ func installCmd() *cobra.Command {
 	c.Flags().StringVar(&f.ntfyTopic, "ntfy-topic", "", "send phone alerts to this ntfy.sh topic")
 	c.Flags().StringSliceVar(&f.baits, "baits", nil, "bait IDs to plant (default: recommended); see `aba bait catalog`")
 	c.Flags().BoolVar(&f.autoUpdate, "auto-update", true, "install new signed releases automatically (--auto-update=false to turn off)")
+	c.Flags().BoolVar(&f.keep, "keep-settings", false, "with --yes, when ABA is already installed: repair or upgrade it and keep every setting (the other flags then only count on a first install)")
 	return c
 }
 
@@ -80,7 +83,11 @@ func runInstall(reconfigure bool, f installFlags) error {
 	fmt.Println()
 
 	var o install.Options
-	if f.yes {
+	if f.yes && f.keep && existing != nil {
+		// What "Keep my settings" does in the guided setup, without the questions.
+		sec, _ := config.LoadSecrets()
+		o = ui.KeepOptions(ui.WizardInput{User: u, Plan: plan, Existing: existing, Secrets: sec})
+	} else if f.yes {
 		o = install.Options{Preset: f.preset, LearningDays: f.learning, CanaryEmail: f.canaryEmail, CleanRecent: true, PhoneMinTier: config.TierWarn, AutoUpdate: f.autoUpdate}
 		if f.ntfyTopic != "" {
 			o.Phone = config.PhoneConfig{Kind: "ntfy", Ntfy: config.NtfyConfig{Server: "https://ntfy.sh", Topic: f.ntfyTopic}}

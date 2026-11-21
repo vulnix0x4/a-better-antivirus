@@ -31,3 +31,19 @@ func TestInstalledAppsUninstallIsARealCommand(t *testing.T) {
 		}
 	}
 }
+
+// The setup program always passes these; they must keep existing.
+func TestInstallFlagsTheSetupProgramUses(t *testing.T) {
+	c := installCmd()
+	args := []string{"--yes", "--keep-settings", "--preset", "balanced", "--learning", "0", "--auto-update=false", "--ntfy-topic", "aba-abc123",
+		"--canary-email", "me@example.com", "--baits", "desktop-passwords,discord"}
+	if err := c.ParseFlags(args); err != nil {
+		t.Fatal(err)
+	}
+	if keep, _ := c.Flags().GetBool("keep-settings"); !keep {
+		t.Error("--keep-settings wasn't read")
+	}
+	if auto, _ := c.Flags().GetBool("auto-update"); auto {
+		t.Error("--auto-update=false wasn't read")
+	}
+}

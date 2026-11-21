@@ -154,3 +154,45 @@ func TestSetupGoBackAndChangeYourMind(t *testing.T) {
 		t.Fatalf("went back and chose Not now, got %+v", o.Phone)
 	}
 }
+
+// `aba install --yes --keep-settings` (what the setup program runs on a PC
+// that already has ABA): the same result as choosing "Keep my settings", with
+// no form shown.
+func TestKeepOptionsChangesNothing(t *testing.T) {
+	in := wizardInput()
+	ex := config.Default()
+	ex.ApplyPreset("strict")
+	ex.AutoUpdate = false
+	ex.CleanRecent = false
+	ex.PhoneMinTier = config.TierCritical
+	ex.Version = config.CurrentConfigVersion
+	ex.Baits = []config.BaitConfig{{ID: "desktop-passwords"}, {ID: "discord"}, {ID: "custom-1234", Path: `D:\secret.txt`}}
+	in.Existing = ex
+	in.Secrets = &config.Secrets{Phone: config.PhoneConfig{Kind: "ntfy", Ntfy: config.NtfyConfig{Server: "https://ntfy.sh", Topic: "aba-keepme"}}}
+	in.Secrets.Canary.Email = "me@example.com"
+
+	o := KeepOptions(in)
+	if o.Preset != "strict" || o.AutoUpdate || o.CleanRecent || o.PhoneMinTier != config.TierCritical || !o.KeepLearning {
+		t.Fatalf("settings changed: %+v", o)
+	}
+	if o.Phone.Ntfy.Topic != "aba-keepme" || o.CanaryEmail != "me@example.com" {
+		t.Fatalf("phone alerts or canary tokens changed: %+v", o)
+	}
+	if len(o.Baits) != 2 || len(o.CustomBaits) != 1 || o.CustomBaits[0] != `D:\secret.txt` {
+		t.Fatalf("baits changed: %v + %v", o.Baits, o.CustomBaits)
+	}
+}
+
+// An install from before automatic updates existed was never asked about
+// them. The guided setup asks; a setup with no questions leaves them off.
+func TestKeepOptionsDoesNotTurnOnUpdatesUnasked(t *testing.T) {
+	in := wizardInput()
+	ex := config.Default()
+	ex.Version = 1
+	ex.AutoUpdate = false
+	ex.Baits = []config.BaitConfig{{ID: "desktop-passwords"}}
+	in.Existing = ex
+	if o := KeepOptions(in); o.AutoUpdate {
+		t.Fatal("automatic updates were switched on without asking")
+	}
+}
