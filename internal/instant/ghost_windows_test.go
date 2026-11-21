@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 	"unsafe"
@@ -128,7 +130,15 @@ func watch(t *testing.T, bait string) (*Watcher, chan opened) {
 	t.Helper()
 	ch := make(chan opened, 8)
 	had := func() bool { b, _ := os.ReadFile(bait + ".got"); return len(b) > 0 }
-	w := &Watcher{Self: uint32(os.Getpid()),
+	// What the watcher logged is printed if the test fails: a wrong answer here
+	// is rare and timing-dependent, and the log says how it was reached.
+	lg := &watchLog{}
+	t.Cleanup(func() { // registered before w.Stop, so it runs after it
+		if t.Failed() {
+			t.Logf("the watcher logged:\n%s", lg)
+		}
+	})
+	w := &Watcher{Self: uint32(os.Getpid()), Logf: lg.add,
 		OnOpen: func(_ string, _ time.Time, pids []uint32) { ch <- opened{pids: pids, got: had()} },
 		OnGhost: func(_ string, _ time.Time, pids []uint32, ahead bool) {
 			ch <- opened{pids: pids, ghost: true, ahead: ahead, got: had()}
@@ -137,6 +147,43 @@ func watch(t *testing.T, bait string) (*Watcher, chan opened) {
 	t.Cleanup(w.Stop)
 	time.Sleep(150 * time.Millisecond)
 	return w, ch
+}
+
+// watchLog keeps what a Watcher logs during a test.
+type watchLog struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func (l *watchLog) add(format string, args ...any) {
+	l.mu.Lock()
+	l.lines = append(l.lines, time.Now().Format("15:04:05.000 ")+fmt.Sprintf(format, args...))
+	l.mu.Unlock()
+}
+
+func (l *watchLog) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return strings.Join(l.lines, "\n")
+}
+
+// who names the programs behind pids, for a failure message: when the watcher
+// blames the wrong one, which program it was is the first thing to know.
+func who(pids []uint32) string {
+	var out []string
+	for _, pid := range pids {
+		name := "gone, or not ours to look at"
+		if h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid); err == nil {
+			buf := make([]uint16, windows.MAX_LONG_PATH)
+			n := uint32(len(buf))
+			if windows.QueryFullProcessImageName(h, 0, &buf[0], &n) == nil {
+				name = windows.UTF16ToString(buf[:n])
+			}
+			windows.CloseHandle(h)
+		}
+		out = append(out, fmt.Sprintf("pid %d: %s", pid, name))
+	}
+	return strings.Join(out, "; ")
 }
 
 func newBait(t *testing.T) string {
@@ -154,7 +201,7 @@ func TestGhostOpenIsAttributed(t *testing.T) {
 	select {
 	case o := <-ch:
 		if !o.ghost || len(o.pids) != 1 || o.pids[0] != uint32(c.Process.Pid) {
-			t.Fatalf("reported %+v, want a ghost open by %d", o, c.Process.Pid)
+			t.Fatalf("reported %+v (%s), want a ghost open by %d", o, who(o.pids), c.Process.Pid)
 		}
 		if o.ahead && o.got {
 			t.Fatal("reported ahead of letting go, yet it had already read the bait")
@@ -175,7 +222,7 @@ func TestGhostExecuteMappingIsAttributed(t *testing.T) {
 	select {
 	case o := <-ch:
 		if !o.ghost || len(o.pids) != 1 || o.pids[0] != uint32(c.Process.Pid) {
-			t.Fatalf("reported %+v, want a ghost open by %d", o, c.Process.Pid)
+			t.Fatalf("reported %+v (%s), want a ghost open by %d", o, who(o.pids), c.Process.Pid)
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("the ghost open went unnoticed")
