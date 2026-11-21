@@ -212,8 +212,13 @@ func loadOrigin(pid uint32, ct int64) (string, bool) {
 
 // ---- freezing ----
 
+// errFrozenAlready: the process is in the frozen group already. Nothing is
+// frozen twice on Linux (and so nothing needs un-freezing twice): whoever
+// froze it first has it on record.
+var errFrozenAlready = errors.New("it's frozen already")
+
 // Suspend freezes a process: every thread of it, before it runs another
-// instruction. Freezing one that's frozen already changes nothing.
+// instruction.
 func Suspend(pid uint32) error {
 	if systemPID(pid) || pid == uint32(os.Getpid()) {
 		return fmt.Errorf("refusing to freeze pid %d", pid)
@@ -231,7 +236,7 @@ func Suspend(pid uint32) error {
 	}
 	cur := cgroupOf(pid)
 	if cur == "/"+holdGroup {
-		return nil
+		return errFrozenAlready
 	}
 	if err := saveOrigin(pid, ct, cur); err != nil {
 		return err

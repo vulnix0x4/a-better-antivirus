@@ -124,7 +124,7 @@ mkdir -p "$HOME/Documents" "$HOME/Downloads"
 # fake profile inside it, and the browser should never touch that profile.
 CHROME=""
 if command -v google-chrome >/dev/null; then
-  timeout 60 google-chrome --headless=new --disable-gpu --no-first-run --dump-dom about:blank >/dev/null 2>&1 || true
+  timeout 60 google-chrome --headless=new --disable-gpu --no-first-run --user-data-dir="$HOME/.config/google-chrome" --dump-dom about:blank >/dev/null 2>&1 || true
   [ -f "$HOME/.config/google-chrome/Local State" ] && CHROME=yes
 fi
 note "a used Chrome profile to plant inside: ${CHROME:-no}"
@@ -315,7 +315,7 @@ sudo aba kill "$id" >/dev/null || fail "aba kill"
 if [ -n "$CHROME" ]; then
   say "The real browser doesn't trip the fake profile inside it"
   count=$(alerts | jq length)
-  launch chrome /usr/bin/google-chrome --headless=new --disable-gpu --no-first-run --dump-dom about:blank >/dev/null
+  launch chrome /usr/bin/google-chrome --headless=new --disable-gpu --no-first-run --user-data-dir="$HOME/.config/google-chrome" --dump-dom about:blank >/dev/null
   sleep 8
   n=$(alerts | jq '[.[] | select((.process.image // "") | test("chrome"))] | length')
   check "Chrome ran without touching its fake profile" test "$n" = 0
