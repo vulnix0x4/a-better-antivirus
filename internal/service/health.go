@@ -10,7 +10,6 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/netguard"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
-	"github.com/vulnix0x4/a-better-antivirus/internal/winsec"
 )
 
 // healthCheck keeps the tripwire armed: auditing on, baits present with their
@@ -27,16 +26,9 @@ func (s *server) healthCheck(startup bool) {
 		health = append(health, config.HealthItem{Name: name, OK: ok, Detail: detail})
 	}
 
-	// 1. System audit policy.
-	if changed, err := winsec.EnsureFileSystemAudit(); err != nil {
-		add("File auditing", false, err.Error())
-	} else {
-		add("File auditing", true, "on")
-		if changed && !startup {
-			s.eng.SystemAlert(alerts.KindAuditDisabled, config.TierWarn, "File auditing was switched off",
-				"Something turned off Windows file auditing, which blinds ABA. It has been turned back on. Malware with admin rights does this; so do some 'optimizer' tools.", nil)
-		}
-	}
+	// 1. What the operating system needs switched on to notice bait reads at
+	// all (on Windows, the system audit policy).
+	s.detectionHealth(startup, add)
 
 	// 2. Baits.
 	var retire []string
@@ -142,7 +134,7 @@ func (s *server) healthCheck(startup bool) {
 			}
 		}
 		if len(retire) > 0 {
-			s.watch.Sync(nil) // let go of the files about to be removed; reload re-arms the rest
+			s.guard(nil) // let go of the files about to be removed; reload re-arms the rest
 		}
 		for _, id := range retire {
 			baits.Retire(st, cfg.User, id, "real app installed")
@@ -175,13 +167,13 @@ func (s *server) healthCheck(startup bool) {
 	if len(retire) > 0 {
 		s.reload()
 	} else {
-		s.indexBaitFiles(checked) // a repaired bait is a new file
+		s.baitsChanged(checked) // a repaired bait is a new file
 	}
 	add("Baits", ok == total, fmt.Sprintf("%d of %d healthy", ok, total))
 	if cfg.InstantFreeze {
 		// A guard is down for a moment after each open (and during this check),
 		// so "most of them" is healthy; one that stays down is reported by onBlocked.
-		armed, want := s.watch.Armed(), s.watch.Count()
+		armed, want := s.guardCounts()
 		add("Instant freeze", want > 0, fmt.Sprintf("on, guarding %d of %d bait files", armed, want))
 	} else {
 		add("Instant freeze", true, "off")

@@ -5,10 +5,7 @@ import (
 	"encoding/json"
 	"math/rand/v2"
 	"os/exec"
-	"syscall"
 	"time"
-
-	"golang.org/x/sys/windows"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/notify"
@@ -110,10 +107,7 @@ func (s *server) checkForUpdate(ctx context.Context) {
 	// The new binary stops this service, swaps the files and starts itself.
 	// It must outlive us, so it runs detached.
 	cmd := exec.Command(exe, "update", "apply", "--file", exe, "--from", Version)
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		HideWindow:    true,
-		CreationFlags: windows.CREATE_NEW_PROCESS_GROUP | windows.DETACHED_PROCESS,
-	}
+	detach(cmd)
 	if err := cmd.Start(); err != nil {
 		s.log.Printf("update: could not start the installer: %v", err)
 		recordUpdate(rel.Tag, "not installed: "+err.Error())

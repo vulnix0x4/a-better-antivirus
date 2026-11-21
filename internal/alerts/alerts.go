@@ -13,11 +13,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vulnix0x4/a-better-antivirus/internal/authenticode"
 	"github.com/vulnix0x4/a-better-antivirus/internal/classify"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
+	"github.com/vulnix0x4/a-better-antivirus/internal/provenance"
 )
 
 // Kinds of alert.
@@ -41,16 +41,16 @@ type BaitHit struct {
 }
 
 type Process struct {
-	PID         uint32              `json:"pid"`
-	Image       string              `json:"image"`
-	CommandLine string              `json:"commandLine,omitempty"`
-	User        string              `json:"user,omitempty"`
-	SHA256      string              `json:"sha256,omitempty"`
-	Signature   authenticode.Result `json:"signature"`
-	Parents     []procinfo.Parent   `json:"parents,omitempty"`
-	Connections []procinfo.Conn     `json:"connections,omitempty"`
-	TreePIDs    []uint32            `json:"treePids,omitempty"`
-	Exited      bool                `json:"exited,omitempty"`
+	PID         uint32            `json:"pid"`
+	Image       string            `json:"image"`
+	CommandLine string            `json:"commandLine,omitempty"`
+	User        string            `json:"user,omitempty"`
+	SHA256      string            `json:"sha256,omitempty"`
+	Signature   provenance.Result `json:"signature"`
+	Parents     []procinfo.Parent `json:"parents,omitempty"`
+	Connections []procinfo.Conn   `json:"connections,omitempty"`
+	TreePIDs    []uint32          `json:"treePids,omitempty"`
+	Exited      bool              `json:"exited,omitempty"`
 }
 
 type ActionResult struct {

@@ -26,7 +26,6 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
 	"github.com/vulnix0x4/a-better-antivirus/internal/respond"
-	"github.com/vulnix0x4/a-better-antivirus/internal/service"
 	"github.com/vulnix0x4/a-better-antivirus/internal/svcctl"
 	"github.com/vulnix0x4/a-better-antivirus/internal/trust"
 	"github.com/vulnix0x4/a-better-antivirus/internal/ui"
@@ -444,7 +443,7 @@ func doctorCmd() *cobra.Command {
 				for _, d := range doctor.Fix() {
 					fmt.Println(ui.Good.Render(ui.IconOK) + " " + d)
 				}
-				svcctl.Control(service.ControlCheckNow)
+				svcctl.Send(svcctl.CheckNow)
 				fmt.Println()
 			}
 			fmt.Println(ui.Banner("doctor"))

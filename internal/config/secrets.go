@@ -6,16 +6,15 @@ import (
 	"errors"
 	"os"
 	"strings"
-	"unsafe"
-
-	"golang.org/x/sys/windows"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
 )
 
 // Secrets hold credentials for phone alerts and canary tokens. The file is
-// DPAPI-encrypted (machine scope) and ACL'd to SYSTEM + Administrators, so
-// malware running as the user can't read your webhook or SMTP password.
+// encrypted with a key the operating system keeps for this machine (DPAPI on
+// Windows) and only the system and administrators may open it, so malware
+// running as the user can't read your webhook or SMTP password. Both halves
+// are in protect_<os>.go.
 type Secrets struct {
 	Phone  PhoneConfig  `json:"phone"`
 	Canary CanaryConfig `json:"canary"`
@@ -128,48 +127,6 @@ func SaveSecrets(s *Secrets) error {
 	if err := writeFileAtomic(paths.SecretsFile(), []byte(base64.StdEncoding.EncodeToString(enc))); err != nil {
 		return err
 	}
-	// SYSTEM + Administrators only, no inheritance from the (user-readable) data dir.
-	return SetSDDL(paths.SecretsFile(), "D:P(A;;FA;;;SY)(A;;FA;;;BA)")
-}
-
-// SetSDDL applies a protected DACL from SDDL to a file or directory.
-func SetSDDL(path, sddl string) error {
-	sd, err := windows.SecurityDescriptorFromString(sddl)
-	if err != nil {
-		return err
-	}
-	dacl, _, err := sd.DACL()
-	if err != nil {
-		return err
-	}
-	return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT,
-		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, dacl, nil)
-}
-
-const cryptprotectLocalMachine = 0x4
-
-func protect(b []byte) ([]byte, error) {
-	if len(b) == 0 {
-		b = []byte("{}")
-	}
-	in := windows.DataBlob{Size: uint32(len(b)), Data: &b[0]}
-	var out windows.DataBlob
-	if err := windows.CryptProtectData(&in, nil, nil, 0, nil, cryptprotectLocalMachine|windows.CRYPTPROTECT_UI_FORBIDDEN, &out); err != nil {
-		return nil, err
-	}
-	defer windows.LocalFree(windows.Handle(unsafe.Pointer(out.Data)))
-	return append([]byte(nil), unsafe.Slice(out.Data, out.Size)...), nil
-}
-
-func unprotect(b []byte) ([]byte, error) {
-	if len(b) == 0 {
-		return []byte("{}"), nil
-	}
-	in := windows.DataBlob{Size: uint32(len(b)), Data: &b[0]}
-	var out windows.DataBlob
-	if err := windows.CryptUnprotectData(&in, nil, nil, 0, nil, windows.CRYPTPROTECT_UI_FORBIDDEN, &out); err != nil {
-		return nil, err
-	}
-	defer windows.LocalFree(windows.Handle(unsafe.Pointer(out.Data)))
-	return append([]byte(nil), unsafe.Slice(out.Data, out.Size)...), nil
+	// The system and administrators only, whatever the folder it's in allows.
+	return restrictSecrets(paths.SecretsFile())
 }

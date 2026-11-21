@@ -92,13 +92,6 @@ func LoadPublic() (*Public, error) {
 	return p, json.Unmarshal(b, p)
 }
 
-const (
-	// SYSTEM + Administrators: full. Nobody else, not even to read.
-	privateSDDL = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"
-	// The public folder: Users may read.
-	publicSDDL = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)"
-)
-
 // LockDataDir creates the data folder if need be and restricts it (see
 // above). Installs made by older versions, where Users could read all of it,
 // are tightened the first time the new service starts.
@@ -107,18 +100,4 @@ func LockDataDir() error {
 		return err
 	}
 	return lockDir(paths.DataDir(), paths.PublicDir())
-}
-
-// lockDir makes dir (and everything already in it) private, except for its
-// public subfolder.
-func lockDir(dir, public string) error {
-	for _, d := range []string{dir, public} {
-		if err := os.MkdirAll(d, 0o755); err != nil {
-			return err
-		}
-	}
-	if err := SetSDDL(dir, privateSDDL); err != nil {
-		return err
-	}
-	return SetSDDL(public, publicSDDL)
 }

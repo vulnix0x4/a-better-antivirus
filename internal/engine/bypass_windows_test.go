@@ -6,16 +6,15 @@ import (
 	"time"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/alerts"
-	"github.com/vulnix0x4/a-better-antivirus/internal/authenticode"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
-	"github.com/vulnix0x4/a-better-antivirus/internal/evtlog"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
+	"github.com/vulnix0x4/a-better-antivirus/internal/provenance"
 )
 
 // Each test here is a way around ABA that used to work.
 
 func signed(f *fakeOps, image, signer string) {
-	f.sigs[image] = authenticode.Result{Signed: true, Valid: true, Signer: signer}
+	f.sigs[image] = provenance.Result{Signed: true, Valid: true, Signer: signer}
 }
 
 // Calling your stealer svchost.exe (or explorer.exe, or conhost.exe) used to
@@ -371,7 +370,7 @@ func TestEvasionSurvivesIntoTheEventLogPath(t *testing.T) {
 	np := `C:\Windows\System32\notepad.exe`
 	signed(f, np, "Microsoft Windows")
 	e.NoteEvasion(100, "it opened the bait in a way that keeps Windows from pausing it")
-	e.HandleAccess(&evtlog.ObjectAccess{ProcessID: 100, ProcessName: np, ObjectName: desktopBait, AccessMask: 1, Time: time.Now()})
+	e.HandleAccess(ev(100, np, desktopBait, 1))
 	if a := only(f); a == nil || a.Tier != config.TierCritical || len(a.Actions) != 0 || len(f.phone) != 1 {
 		t.Fatalf("%+v", a)
 	}

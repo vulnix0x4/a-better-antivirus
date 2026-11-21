@@ -1,4 +1,8 @@
 // Package doctor diagnoses a ABA installation and fixes what it can.
+//
+// The checks are the same on every operating system, except the one for what
+// the OS needs switched on to notice bait reads, and the list of sync and
+// backup tools to look for: doctor_<os>.go.
 package doctor
 
 import (
@@ -13,7 +17,6 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
 	"github.com/vulnix0x4/a-better-antivirus/internal/svcctl"
-	"github.com/vulnix0x4/a-better-antivirus/internal/winsec"
 )
 
 type Level int
@@ -36,7 +39,7 @@ type Result struct {
 func Run() []Result {
 	var out []Result
 	add := func(l Level, name, detail, fix string) { out = append(out, Result{l, name, detail, fix}) }
-	admin := winsec.IsElevated()
+	admin := procinfo.SelfElevated()
 
 	cfg, err := config.LoadConfig()
 	if err != nil {
@@ -69,26 +72,9 @@ func Run() []Result {
 		add(Problem, "Service", string(s), "aba doctor --fix")
 	}
 
-	// Audit policy.
-	if admin {
-		if f, err := winsec.FileSystemAudit(); err != nil {
-			add(Problem, "File auditing", err.Error(), "")
-		} else if f&winsec.AuditSuccess == 0 {
-			add(Problem, "File auditing", "OFF: reads can't be detected", "aba doctor --fix")
-		} else {
-			add(OK, "File auditing", "on", "")
-		}
-	} else if st != nil {
-		for _, h := range st.Health {
-			if h.Name == "File auditing" {
-				l := OK
-				if !h.OK {
-					l = Problem
-				}
-				add(l, "File auditing", h.Detail+" (as of the service's last check)", "")
-			}
-		}
-	}
+	// What the operating system needs switched on to notice bait reads at all
+	// (on Windows, the audit policy).
+	checkDetection(admin, st, add)
 
 	// Baits.
 	if st != nil {
@@ -103,7 +89,7 @@ func Run() []Result {
 				if _, err := os.Stat(f.Path); err != nil {
 					missing++
 				} else if admin && f.Audit {
-					if ok, _ := winsec.HasBaitAudit(f.Path); !ok {
+					if ok, _ := baits.HasTripwire(f.Path); !ok {
 						noAudit++
 					}
 				}
@@ -155,15 +141,9 @@ func Run() []Result {
 
 	// Sync / backup software that reads files.
 	if snap, err := procinfo.Snapshot(); err == nil {
-		known := map[string]string{
-			"onedrive.exe": "OneDrive", "dropbox.exe": "Dropbox", "googledrivefs.exe": "Google Drive",
-			"icloudckks.exe": "iCloud", "bztransmit.exe": "Backblaze", "bztransmit64.exe": "Backblaze",
-			"crashplanservice.exe": "CrashPlan", "reflectbin.exe": "Macrium Reflect", "veeam.endpoint.service.exe": "Veeam",
-			"syncthing.exe": "Syncthing", "megasync.exe": "MEGA", "everything.exe": "",
-		}
 		seen := map[string]bool{}
 		for _, e := range snap {
-			if name, ok := known[strings.ToLower(e.Exe)]; ok && name != "" && !seen[name] {
+			if name, ok := syncTools[strings.ToLower(e.Exe)]; ok && name != "" && !seen[name] {
 				seen[name] = true
 			}
 		}
@@ -210,9 +190,7 @@ func Until(t time.Time) string {
 // Fix repairs what it can (admin).
 func Fix() []string {
 	var did []string
-	if _, err := winsec.EnsureFileSystemAudit(); err == nil {
-		did = append(did, "file auditing is on")
-	}
+	did = append(did, fixDetection()...)
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		return did

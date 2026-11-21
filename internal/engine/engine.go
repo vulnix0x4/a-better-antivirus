@@ -9,6 +9,11 @@
 //  4. unfreeze if the final verdict doesn't warrant it (e.g. a signed app)
 //  5. collect forensics while the process is frozen
 //  6. block / kill / isolate as configured, then alert
+//
+// The engine is the same on every operating system. It hears about bait
+// accesses from the OS's watchers (see package detect for the two ways they
+// report) and acts through Ops, which the service fills in with that OS's
+// way of freezing, blocking and notifying.
 package engine
 
 import (
@@ -20,21 +25,20 @@ import (
 	"time"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/alerts"
-	"github.com/vulnix0x4/a-better-antivirus/internal/authenticode"
 	"github.com/vulnix0x4/a-better-antivirus/internal/baits"
 	"github.com/vulnix0x4/a-better-antivirus/internal/classify"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
-	"github.com/vulnix0x4/a-better-antivirus/internal/evtlog"
+	"github.com/vulnix0x4/a-better-antivirus/internal/detect"
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
-	"github.com/vulnix0x4/a-better-antivirus/internal/winsec"
+	"github.com/vulnix0x4/a-better-antivirus/internal/provenance"
 )
 
 // Ops are the side effects the engine needs; the service provides real ones.
 type Ops interface {
 	ImagePath(pid uint32) (string, error)
 	CreateTime(pid uint32) int64
-	Verify(path string) authenticode.Result
+	Verify(path string) provenance.Result
 	SuspendTree(pid uint32) ([]uint32, error)
 	Resume(pids []uint32)
 	KillTree(pid uint32) error
@@ -92,7 +96,7 @@ type Engine struct {
 	claimed     map[uint32]time.Time     // PIDs the instant path is handling
 	seen        map[string]time.Time     // program|bait -> last notification, for alerts with no action
 	touched     map[uint32]*sweep        // baits each process opened recently
-	sids        map[uint32]string        // account (SID) a process read baits as, from the audit event
+	sids        map[uint32]string        // account a process read baits as (detect.Access.UserID), as the watcher reported it
 	pending     map[uint32]chan struct{} // instant decisions in progress
 	eventFrozen map[uint32]time.Time     // processes the event-log path froze
 	marks       map[uint32]mark          // processes seen using a trick to dodge detection
@@ -409,7 +413,7 @@ func (e *Engine) Unclaim(pid uint32) {
 // HandleOpen raises the alert (and runs the remaining responses) for a reader
 // that DecideInstant froze mid-open. frozen is what was suspended.
 func (e *Engine) HandleOpen(pid uint32, path string, at time.Time, frozen []uint32) {
-	e.handle(&evtlog.ObjectAccess{ProcessID: pid, ObjectName: path, AccessMask: 1, Time: at}, frozen)
+	e.handle(&detect.Access{PID: pid, Path: path, Op: detect.OpRead, Time: at}, frozen)
 }
 
 func (e *Engine) baitRef(id string) classify.Bait {
@@ -427,76 +431,78 @@ func (e *Engine) baitRef(id string) classify.Bait {
 	return b
 }
 
-// HandleAccess processes one 4663 event.
-func (e *Engine) HandleAccess(oa *evtlog.ObjectAccess) { e.handle(oa, nil) }
+// HandleAccess processes one bait access that a watcher reports after the
+// fact (on Windows, a Security 4663 event): the program isn't held.
+func (e *Engine) HandleAccess(oa *detect.Access) { e.handle(oa, nil) }
 
 // handle processes a bait access. preFrozen is non-nil when the reader was
 // already frozen by the instant path, the moment it opened the bait.
-func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
+func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	instant := preFrozen != nil
 	claimedNow := func() bool {
 		e.mu.Lock()
-		t, ok := e.claimed[oa.ProcessID]
+		t, ok := e.claimed[oa.PID]
 		e.mu.Unlock()
 		return ok && time.Since(t) < window
 	}
 	// tryFreeze: the event-log path may freeze only what the instant path
 	// isn't freezing (a decision in progress is waited for).
 	tryFreeze := func() bool {
-		if e.ownFreeze(oa.ProcessID) {
+		if e.ownFreeze(oa.PID) {
 			return true
 		}
-		e.waitDecision(oa.ProcessID)
-		return e.ownFreeze(oa.ProcessID)
+		e.waitDecision(oa.PID)
+		return e.ownFreeze(oa.PID)
 	}
 	if !instant {
-		e.waitDecision(oa.ProcessID)
+		e.waitDecision(oa.PID)
 		if claimedNow() {
 			return // the instant path already caught and is reporting this process
 		}
 	}
 	received := time.Now()
-	baitID, ok := e.IsBait(oa.ObjectName)
-	if !ok || oa.ProcessID == e.SelfPID {
+	baitID, ok := e.IsBait(oa.Path)
+	if !ok || oa.PID == e.SelfPID {
 		return
 	}
 	access := "read"
-	switch {
-	case winsec.AccessMaskIsDelete(oa.AccessMask) && !winsec.AccessMaskIsRead(oa.AccessMask):
+	switch oa.Op {
+	case detect.OpRead:
+	case detect.OpDelete:
 		access = "delete"
-	case !winsec.AccessMaskIsRead(oa.AccessMask):
+	default:
 		return
 	}
 
-	if oa.UserSID != "" {
+	if oa.UserID != "" {
 		e.mu.Lock()
 		if len(e.sids) > 4096 {
 			e.sids = map[uint32]string{}
 		}
-		e.sids[oa.ProcessID] = oa.UserSID
+		e.sids[oa.PID] = oa.UserID
 		e.mu.Unlock()
 	}
 	var swept []string
 	if access == "read" {
-		swept = e.touch(oa.ProcessID, baitID, time.Now())
-		if len(swept) >= sweepApps && !e.sweepable(oa.ProcessID) {
+		swept = e.touch(oa.PID, baitID, time.Now())
+		if len(swept) >= sweepApps && !e.sweepable(oa.PID) {
 			swept = nil
 		}
 	}
 
 	e.mu.Lock()
 	cfg, cls, name := e.cfg, e.classifier, e.baitNames[baitID]
-	hit := alerts.BaitHit{ID: baitID, Name: name, Path: oa.ObjectName, Access: access, Time: oa.Time}
-	if inc := e.incidents[oa.ProcessID]; !instant && inc != nil && len(swept) >= sweepApps && inc.alert.Tier != config.TierCritical {
+	hit := alerts.BaitHit{ID: baitID, Name: name, Path: oa.Path, Access: access, Time: oa.Time}
+	if inc := e.incidents[oa.PID]; !instant && inc != nil && len(swept) >= sweepApps && inc.alert.Tier != config.TierCritical {
 		// It started out looking harmless and has now read several apps' data:
 		// handle it again as a sweep, with the full response.
-		delete(e.incidents, oa.ProcessID)
+		delete(e.incidents, oa.PID)
 	}
 	// Aggregate repeat hits into the open alert, except for instant catches: a
 	// new freeze always gets its own alert and its own record in state (the
 	// earlier alert may already be resolved, e.g. the user resumed the process).
-	if inc := e.incidents[oa.ProcessID]; !instant && inc != nil && time.Since(inc.last) < window &&
-		(inc.createTime == 0 || inc.createTime == e.Ops.CreateTime(oa.ProcessID)) {
+	if inc := e.incidents[oa.PID]; !instant && inc != nil && time.Since(inc.last) < window &&
+		(inc.createTime == 0 || inc.createTime == e.Ops.CreateTime(oa.PID)) {
 		inc.last = time.Now()
 		a := inc.alert
 		dup := false
@@ -519,26 +525,26 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 	// program can rename its own file and put something else (signed, innocent)
 	// at the old path, so that checking "its" signature checks the wrong file.
 	// While it's alive, Windows says which file is really running: go by that.
-	image, startedAs := oa.ProcessName, ""
-	if live, err := e.Ops.ImagePath(oa.ProcessID); err == nil && live != "" {
+	image, startedAs := oa.Image, ""
+	if live, err := e.Ops.ImagePath(oa.PID); err == nil && live != "" {
 		if strings.Contains(image, `\`) && !paths.Same(paths.Long(live), paths.Long(image)) {
 			startedAs = image
 		}
 		image = live
 	}
 	test := false
-	if tr := e.Ops.PendingTest(); tr != nil && tr.PID == oa.ProcessID {
+	if tr := e.Ops.PendingTest(); tr != nil && tr.PID == oa.PID {
 		test = true
 	}
 	disguise := false
 	if !test {
-		self, d := e.ownCopy(oa.ProcessID, image)
+		self, d := e.ownCopy(oa.PID, image)
 		if self {
 			return // ABA's own tooling, running as administrator (doctor, bait adoption…)
 		}
 		disguise = d
 	}
-	createTime := e.Ops.CreateTime(oa.ProcessID)
+	createTime := e.Ops.CreateTime(oa.PID)
 	ref := e.baitRef(baitID)
 	learning := cfg.Learning(now) && !test
 	actionsFor := func(t config.Tier) []config.Action {
@@ -554,23 +560,23 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 	isSweep := len(swept) >= sweepApps
 
 	// 1-2. Instant verdict, freeze first.
-	pre := cls.Prelim(image, oa.ProcessID, ref)
-	if isSweep && !cls.SweepExempt(image, oa.ProcessID, nil) {
+	pre := cls.Prelim(image, oa.PID, ref)
+	if isSweep && !cls.SweepExempt(image, oa.PID, nil) {
 		pre = e.sweepVerdict(pre, swept)
 	}
 	// One of your rules covers it: done, unless it used a trick to dodge
 	// detection (decided further down). Only a rule an administrator made for
 	// exactly that covers a trick (`aba ignore add --allow-tricks`), and none
 	// covers a copy of ABA.
-	tricky := oa.Alias != "" || e.evasion(oa.ProcessID) != ""
+	tricky := oa.Alias != "" || e.evasion(oa.PID) != ""
 	tricksOK := false
 	if tricky && !disguise && image != "" && cls.HasTricksRule() {
 		s := e.Ops.Verify(image)
-		tricksOK = cls.TricksAllowed(image, oa.ProcessID, baitID, &s)
+		tricksOK = cls.TricksAllowed(image, oa.PID, baitID, &s)
 	}
 	evading := disguise || (tricky && !tricksOK)
 	if pre.Ignored && !instant && (pre.Builtin || !evading) {
-		e.Ops.Logf("ignored %s of %s by %s (%s)", access, oa.ObjectName, image, strings.Join(pre.Reasons, "; "))
+		e.Ops.Logf("ignored %s of %s by %s (%s)", access, oa.Path, image, strings.Join(pre.Reasons, "; "))
 		return
 	}
 	if evading && !pre.Builtin && pre.Tier != config.TierCritical {
@@ -578,7 +584,7 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 	}
 	frozen := preFrozen
 	var latency time.Duration
-	canTouch := e.touchable(oa.ProcessID, image)
+	canTouch := e.touchable(oa.PID, image)
 	if instant {
 		latency = time.Since(oa.Time)
 	} else if canTouch && config.Has(actionsFor(pre.Tier), config.ActionFreeze) {
@@ -587,26 +593,26 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 				return // the instant path froze it and reports it
 			}
 		} else {
-			frozen, _ = e.Ops.SuspendTree(oa.ProcessID)
+			frozen, _ = e.Ops.SuspendTree(oa.PID)
 			latency = time.Since(oa.Time)
 		}
 	}
 
 	// 3-4. Signature and final verdict.
-	sig := authenticode.Result{}
+	sig := provenance.Result{}
 	if image != "" {
 		sig = e.Ops.Verify(image)
 	}
-	v := cls.Final(image, oa.ProcessID, ref, sig)
-	if isSweep && !cls.SweepExempt(image, oa.ProcessID, &sig) {
+	v := cls.Final(image, oa.PID, ref, sig)
+	if isSweep && !cls.SweepExempt(image, oa.PID, &sig) {
 		v = e.sweepVerdict(v, swept)
 	}
 	// A Windows program reading app data is how injected stealers look: check
 	// whether it's running code that isn't from any file on disk. (Trust rules
 	// don't skip this; Defender and Windows Search do.)
 	if !test && !v.Builtin && !v.DecoyOwner && v.Tier != config.TierCritical && access == "read" &&
-		cls.WindowsBinary(image) && e.Ops.UserSession(oa.ProcessID) && !e.Ops.Elevated(oa.ProcessID) {
-		if detail, found := e.Ops.InjectedCode(oa.ProcessID); found {
+		cls.SystemBinary(image) && e.Ops.UserSession(oa.PID) && !e.Ops.Elevated(oa.PID) {
+		if detail, found := e.Ops.InjectedCode(oa.PID); found {
 			v = classify.Verdict{Tier: config.TierCritical,
 				Reasons: append([]string{filepath.Base(image) + " is part of Windows, but " + detail}, v.Reasons...)}
 		}
@@ -614,10 +620,10 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 	// Tricks that only evasion explains make it critical whatever it is, trusted
 	// from an alert or not. (Never Defender or Windows Search.)
 	if !test && !v.Builtin && access == "read" {
-		switch why := e.evasion(oa.ProcessID); {
+		switch why := e.evasion(oa.PID); {
 		case disguise:
 			v = evasive(v, disguiseWhy)
-		case tricksOK || (image != "" && cls.TricksAllowed(image, oa.ProcessID, baitID, &sig)):
+		case tricksOK || (image != "" && cls.TricksAllowed(image, oa.PID, baitID, &sig)):
 			// an administrator allowed this program to read baits that way
 		case oa.Alias != "":
 			v = evasive(v, "it read this through a second name it gave the file ("+oa.Alias+", a hard link): a trick to read a file without appearing to")
@@ -628,7 +634,7 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 		// DLL from that same folder: the stealer is the DLL (sideloading). That
 		// also means it isn't "the real app reading its own data".
 		if !v.Evasion && !v.ByRule && sig.Valid && cls.UserWritable(image) && (v.DecoyOwner || (!v.Ignored && v.Tier != config.TierCritical)) {
-			if dll, found := e.Ops.SideLoaded(oa.ProcessID, image); found {
+			if dll, found := e.Ops.SideLoaded(oa.PID, image); found {
 				v = classify.Verdict{Tier: config.TierCritical, Swept: v.Swept, Reasons: append([]string{
 					filepath.Base(image) + " is signed, but it's running an unsigned DLL from its own folder (" + filepath.Base(dll) + "): that's how stealers ride inside legitimate programs", "the DLL: " + dll}, v.Reasons...)}
 			}
@@ -636,17 +642,17 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 	}
 	if v.Ignored {
 		e.Ops.Resume(frozen)
-		e.Ops.Logf("ignored %s of %s by %s (%s)", access, oa.ObjectName, image, strings.Join(v.Reasons, "; "))
+		e.Ops.Logf("ignored %s of %s by %s (%s)", access, oa.Path, image, strings.Join(v.Reasons, "; "))
 		return
 	}
 	// A sweep split over several programs, each reading too little to look
 	// like one: together they went through several apps' data.
 	var teammates []teamRead
-	if !test && access == "read" && !v.DecoyOwner && !v.Builtin && e.sweepable(oa.ProcessID) && !cls.SweepExempt(image, oa.ProcessID, &sig) {
-		if units, members := e.joinTeam(oa.ProcessID, baitID, image, now); units != nil && len(v.Swept) < sweepApps {
+	if !test && access == "read" && !v.DecoyOwner && !v.Builtin && e.sweepable(oa.PID) && !cls.SweepExempt(image, oa.PID, &sig) {
+		if units, members := e.joinTeam(oa.PID, baitID, image, now); units != nil && len(v.Swept) < sweepApps {
 			v = e.teamVerdict(v, units, len(members))
 			for _, m := range members {
-				if m.pid != oa.ProcessID {
+				if m.pid != oa.PID {
 					teammates = append(teammates, m)
 				}
 			}
@@ -664,7 +670,7 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 		frozen = nil
 	} else if len(frozen) == 0 && canTouch && config.Has(acts, config.ActionFreeze) {
 		if instant || tryFreeze() {
-			frozen, _ = e.Ops.SuspendTree(oa.ProcessID)
+			frozen, _ = e.Ops.SuspendTree(oa.PID)
 			latency = time.Since(oa.Time)
 		} else if claimedNow() {
 			return // the instant path froze it and reports it
@@ -683,7 +689,7 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 				also = append(also, fmt.Sprintf("%s (pid %d)", filepath.Base(img), root))
 			}
 		}
-		for _, anc := range e.Ops.Ancestors(oa.ProcessID) {
+		for _, anc := range e.Ops.Ancestors(oa.PID) {
 			if !e.partOfIt(cls, anc.PID, anc.Image) {
 				break
 			}
@@ -694,7 +700,7 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 		}
 		if !sig.Valid && cls.UserWritable(image) {
 			for _, p := range e.Ops.RunningImage(image) { // other running copies of the same unsigned file
-				if p != oa.ProcessID && !hasPID(frozen, p) && e.partOfIt(cls, p, image) {
+				if p != oa.PID && !hasPID(frozen, p) && e.partOfIt(cls, p, image) {
 					grow(p, image)
 				}
 			}
@@ -713,7 +719,7 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 		ID: alerts.NewID(now), Time: now, Kind: alerts.KindRead, Tier: v.Tier, Verdict: v,
 		Learning: learning && v.Tier != config.TierCritical && len(cfg.Responses[v.Tier]) > 0, Test: test, Status: "open",
 		Baits:   []alerts.BaitHit{hit},
-		Process: &alerts.Process{PID: oa.ProcessID, Image: image, User: oa.User, Signature: sig},
+		Process: &alerts.Process{PID: oa.PID, Image: image, User: oa.User, Signature: sig},
 	}
 	a.Instant = instant && len(frozen) > 0
 	if access == "delete" {
@@ -744,7 +750,7 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 	a.DeliveryMS = received.Sub(oa.Time).Milliseconds()
 
 	// 5. Forensics while frozen.
-	e.Ops.Forensics(oa.ProcessID, a.Process)
+	e.Ops.Forensics(oa.PID, a.Process)
 
 	// 6. Remaining responses.
 	var blocked, isolated bool
@@ -769,7 +775,7 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 				a.AddAction(act, fmt.Errorf("refused"), "protected system process")
 				continue
 			}
-			err := e.Ops.KillTree(oa.ProcessID)
+			err := e.Ops.KillTree(oa.PID)
 			a.AddAction(act, err, "")
 			if err == nil {
 				frozen = nil
@@ -824,7 +830,7 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 	}
 
 	e.mu.Lock()
-	e.incidents[oa.ProcessID] = &incident{alert: a, createTime: createTime, last: time.Now()}
+	e.incidents[oa.PID] = &incident{alert: a, createTime: createTime, last: time.Now()}
 	for pid, inc := range e.incidents {
 		if time.Since(inc.last) > window {
 			delete(e.incidents, pid)
@@ -849,7 +855,7 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 		e.Ops.RetireDecoy(baitID, a.Summary)
 	}
 	if test {
-		e.Ops.KillTree(oa.ProcessID)
+		e.Ops.KillTree(oa.PID)
 		e.Ops.ClearTest()
 		// The test reader is gone: don't leave it on the frozen list.
 		e.Ops.UpdateState(func(st *config.State) error {
@@ -1076,21 +1082,7 @@ func (e *Engine) userSession(pid uint32) bool {
 	e.mu.Lock()
 	sid := e.sids[pid]
 	e.mu.Unlock()
-	return sid != "" && !ServiceAccount(sid)
-}
-
-// ServiceAccount: SYSTEM, LOCAL/NETWORK SERVICE and per-service accounts.
-func ServiceAccount(sid string) bool {
-	switch sid {
-	case "S-1-5-18", "S-1-5-19", "S-1-5-20":
-		return true
-	}
-	for _, p := range []string{"S-1-5-80-", "S-1-5-82-", "S-1-5-90-", "S-1-5-96-"} {
-		if strings.HasPrefix(sid, p) {
-			return true
-		}
-	}
-	return false
+	return sid != "" && !procinfo.ServiceAccount(sid)
 }
 
 // sweepVerdict turns a verdict into a critical one: the reader went through

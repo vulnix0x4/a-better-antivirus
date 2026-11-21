@@ -48,11 +48,6 @@ type jobFreeze struct {
 	LowFilter  uint32
 }
 
-// HoldName identifies a process for holds: its PID and creation time.
-func HoldName(pid uint32, createTime int64) string {
-	return fmt.Sprintf("%d-%x", pid, uint64(createTime))
-}
-
 func setFrozen(job windows.Handle, on bool) error {
 	f := jobFreeze{Flags: 1}
 	if on {
@@ -158,8 +153,8 @@ func DropHolds(madeBefore time.Time, keep func(name string) bool) {
 	}
 }
 
-// UserSID returns the account (SID) a process runs as.
-func UserSID(pid uint32) (string, error) {
+// UserID returns the account a process runs as: its SID.
+func UserID(pid uint32) (string, error) {
 	h, err := open(pid, windows.PROCESS_QUERY_LIMITED_INFORMATION)
 	if err != nil {
 		return "", err
@@ -177,66 +172,6 @@ func UserSID(pid uint32) (string, error) {
 	return u.User.Sid.String(), nil
 }
 
-// SuspendTreeExcept freezes pid and its descendants, leaving out the
-// processes in skip (already frozen: suspensions stack, so freezing one twice
-// would need two unfreezes) and any that ok (if given) turns down. Returns
-// the PIDs it froze.
-func SuspendTreeExcept(pid uint32, skip map[uint32]bool, ok func(pid uint32) bool) []uint32 {
-	var frozen []uint32
-	done := map[uint32]bool{}
-	for pass := 0; pass < 2; pass++ {
-		snap, err := Snapshot()
-		if err != nil {
-			return frozen
-		}
-		for _, p := range Tree(snap, pid) {
-			if done[p] || skip[p] || p == 0 || p == 4 || p == windows.GetCurrentProcessId() {
-				continue
-			}
-			done[p] = true
-			if ok != nil && !ok(p) {
-				continue
-			}
-			if Suspend(p) == nil {
-				frozen = append(frozen, p)
-			}
-		}
-	}
-	return frozen
-}
-
-// Ancestor is one process up the chain from a reader.
-type Ancestor struct {
-	PID        uint32
-	Image      string
-	CreateTime int64
-}
-
-// Ancestors walks up from pid: its parent, grandparent… (at most depth),
-// stopping where the chain can't be trusted (the parent exited and its PID
-// was reused).
-func Ancestors(pid uint32, depth int) []Ancestor {
-	snap, err := Snapshot()
-	if err != nil {
-		return nil
-	}
-	var out []Ancestor
-	cur, ok := snap[pid]
-	for i := 0; ok && i < depth; i++ {
-		pp, found := snap[cur.PPID]
-		if !found || cur.PPID == 0 || cur.PPID == cur.PID {
-			break
-		}
-		if pp.CreateTime != 0 && cur.CreateTime != 0 && pp.CreateTime > cur.CreateTime {
-			break // created after its "child": a reused PID
-		}
-		img, _ := ImagePath(pp.PID)
-		out = append(out, Ancestor{PID: pp.PID, Image: img, CreateTime: pp.CreateTime})
-		cur = pp
-	}
-	return out
-}
-
 // RunningImage lists the processes running the executable at path.
 func RunningImage(path string) []uint32 {
 	snap, err := Snapshot()
@@ -245,7 +180,7 @@ func RunningImage(path string) []uint32 {
 	}
 	var out []uint32
 	for pid := range snap {
-		if pid == 0 || pid == 4 {
+		if systemPID(pid) {
 			continue
 		}
 		if img, err := ImagePath(pid); err == nil && samePath(img, path) {

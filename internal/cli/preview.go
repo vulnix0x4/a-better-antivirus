@@ -7,11 +7,11 @@ import (
 	"time"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/alerts"
-	"github.com/vulnix0x4/a-better-antivirus/internal/authenticode"
 	"github.com/vulnix0x4/a-better-antivirus/internal/baits"
 	"github.com/vulnix0x4/a-better-antivirus/internal/classify"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
+	"github.com/vulnix0x4/a-better-antivirus/internal/provenance"
 	"github.com/vulnix0x4/a-better-antivirus/internal/svcctl"
 	"github.com/vulnix0x4/a-better-antivirus/internal/ui"
 )
@@ -119,7 +119,7 @@ func sampleAlert() *alerts.Alert {
 		},
 		Process: &alerts.Process{PID: 7712, Image: `C:\Users\bob\AppData\Local\Temp\x7f3\svch0st.exe`,
 			CommandLine: `"C:\Users\bob\AppData\Local\Temp\x7f3\svch0st.exe" --silent`, User: `DESKTOP-7Q2\bob`,
-			SHA256: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08", Signature: authenticode.Result{},
+			SHA256: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08", Signature: provenance.Result{},
 			Parents:     []procinfo.Parent{{PID: 6620, Image: `C:\Windows\System32\cmd.exe`}, {PID: 4410, Image: `C:\Windows\explorer.exe`}},
 			Connections: []procinfo.Conn{{Proto: "tcp", Local: "192.168.1.20:51544", Remote: "185.234.72.11:443", State: "ESTABLISHED"}}},
 		Verdict: classify.Verdict{Tier: config.TierCritical, Reasons: []string{`unsigned program running from a user-writable folder (C:\Users\bob\AppData\Local\Temp\x7f3): typical of stealers`, "not signed"}},
@@ -132,13 +132,13 @@ func sampleAlert() *alerts.Alert {
 func infoAlert() *alerts.Alert {
 	return &alerts.Alert{ID: "20261116-101500-11aa", Time: time.Now().Add(-5 * time.Hour), Tier: config.TierWarn, Kind: alerts.KindRead, Status: "resolved", Note: "you trusted this program",
 		Title: "opencode.exe read a bait", Baits: []alerts.BaitHit{{Name: "AWS credentials (~/.aws)"}},
-		Process: &alerts.Process{Image: `C:\Users\bob\AppData\Roaming\npm\node_modules\opencode-ai\bin\opencode.exe`, Signature: authenticode.Result{Valid: true, Signer: "Anomaly Innovations, Inc."}}}
+		Process: &alerts.Process{Image: `C:\Users\bob\AppData\Roaming\npm\node_modules\opencode-ai\bin\opencode.exe`, Signature: provenance.Result{Valid: true, Signer: "Anomaly Innovations, Inc."}}}
 }
 
 func sweepAlert() *alerts.Alert {
 	a := &alerts.Alert{ID: "20261115-221709-c0de", Time: time.Now().Add(-26 * time.Hour), Tier: config.TierCritical, Kind: alerts.KindRead, Status: "resolved", Note: "killed",
 		Title: "Possible stealer: explorer.exe read your bait", Baits: []alerts.BaitHit{{Name: "Discord token store"}, {Name: "Brave browser profile"}, {Name: "Exodus wallet"}},
-		Process: &alerts.Process{Image: `C:\Windows\explorer.exe`, Signature: authenticode.Result{Valid: true, Signer: "Microsoft Windows"}},
+		Process: &alerts.Process{Image: `C:\Windows\explorer.exe`, Signature: provenance.Result{Valid: true, Signer: "Microsoft Windows"}},
 		Verdict: classify.Verdict{Swept: []string{"discord", "brave", "exodus"}}}
 	a.AddAction(config.ActionBlockProgram, nil, "")
 	return a

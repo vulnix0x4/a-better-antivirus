@@ -7,10 +7,10 @@ import (
 	"time"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/alerts"
-	"github.com/vulnix0x4/a-better-antivirus/internal/authenticode"
 	"github.com/vulnix0x4/a-better-antivirus/internal/classify"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
+	"github.com/vulnix0x4/a-better-antivirus/internal/provenance"
 	"github.com/vulnix0x4/a-better-antivirus/internal/svcctl"
 )
 
@@ -25,7 +25,7 @@ func sampleAlert() *alerts.Alert {
 		},
 		Process: &alerts.Process{PID: 7712, Image: `C:\Users\bob\AppData\Local\Temp\x7f3\svch0st.exe`,
 			CommandLine: `"C:\Users\bob\AppData\Local\Temp\x7f3\svch0st.exe" --silent`, User: `PC\bob`,
-			SHA256: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08", Signature: authenticode.Result{},
+			SHA256: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08", Signature: provenance.Result{},
 			Parents:     []procinfo.Parent{{PID: 6620, Image: `C:\Windows\System32\cmd.exe`}, {PID: 4410, Image: `C:\Windows\explorer.exe`}},
 			Connections: []procinfo.Conn{{Proto: "tcp", Local: "192.168.1.20:51544", Remote: "185.234.72.11:443", State: "ESTABLISHED"}}},
 		Verdict: classify.Verdict{Tier: config.TierCritical, Reasons: []string{"unsigned program running from a user-writable folder: typical of stealers", "unsigned"}},

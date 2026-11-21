@@ -3,8 +3,8 @@ package classify
 import (
 	"testing"
 
-	"github.com/vulnix0x4/a-better-antivirus/internal/authenticode"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
+	"github.com/vulnix0x4/a-better-antivirus/internal/provenance"
 )
 
 var env = Env{
@@ -13,10 +13,10 @@ var env = Env{
 }
 
 var (
-	ms       = authenticode.Result{Signed: true, Valid: true, Signer: "Microsoft Corporation"}
-	discord  = authenticode.Result{Signed: true, Valid: true, Signer: "Discord Inc."}
-	unsigned = authenticode.Result{}
-	tampered = authenticode.Result{Signed: true, Valid: false, Error: "bad digest"}
+	ms       = provenance.Result{Signed: true, Valid: true, Signer: "Microsoft Corporation"}
+	discord  = provenance.Result{Signed: true, Valid: true, Signer: "Discord Inc."}
+	unsigned = provenance.Result{}
+	tampered = provenance.Result{Signed: true, Valid: false, Error: "bad digest"}
 )
 
 func TestTiers(t *testing.T) {
@@ -25,7 +25,7 @@ func TestTiers(t *testing.T) {
 		name  string
 		image string
 		pid   uint32
-		sig   authenticode.Result
+		sig   provenance.Result
 		bait  Bait
 		tier  config.Tier
 		ign   bool
@@ -43,7 +43,7 @@ func TestTiers(t *testing.T) {
 		{"Windows service (session 0)", `C:\Windows\System32\svchost.exe`, 200, ms, Bait{}, config.TierInfo, false, false},
 		{"hollowing target AppLaunch", `C:\Windows\Microsoft.NET\Framework\v4.0.30319\AppLaunch.exe`, 100, ms, Bait{}, config.TierCritical, false, false},
 		{"hollowing target vbc", `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\vbc.exe`, 100, ms, Bait{}, config.TierCritical, false, false},
-		{"signed node in appdata", `C:\Users\bob\AppData\Roaming\nvm\v22\node.exe`, 100, authenticode.Result{Signed: true, Valid: true, Signer: "OpenJS Foundation"}, Bait{}, config.TierWarn, false, false},
+		{"signed node in appdata", `C:\Users\bob\AppData\Roaming\nvm\v22\node.exe`, 100, provenance.Result{Signed: true, Valid: true, Signer: "OpenJS Foundation"}, Bait{}, config.TierWarn, false, false},
 		{"unsigned python", `C:\Users\bob\AppData\Local\Temp\_MEI1\python.exe`, 100, unsigned, Bait{}, config.TierCritical, false, false},
 		{"signed app in user folder", `C:\Users\bob\AppData\Local\Programs\Microsoft VS Code\Code.exe`, 100, ms, Bait{}, config.TierWarn, false, false},
 		{"smb/kernel", ``, 4, unsigned, Bait{}, config.TierWarn, false, false},
@@ -127,7 +127,7 @@ func TestTrustRulesArePinned(t *testing.T) {
 			{Path: `C:\Python312\python.exe`, Signer: "Python Software Foundation", CommandLine: `"C:\Python312\python.exe" C:\me\sync.py`, Baits: []string{"aws"}},
 		}}
 	oc := `C:\Users\bob\AppData\Roaming\npm\node_modules\opencode-ai\bin\opencode.exe`
-	anomaly := authenticode.Result{Signed: true, Valid: true, Signer: "Anomaly Innovations, Inc."}
+	anomaly := provenance.Result{Signed: true, Valid: true, Signer: "Anomaly Innovations, Inc."}
 	if v := c.Final(oc, 5, Bait{ID: "aws"}, anomaly); !v.Ignored || !v.ByRule {
 		t.Fatalf("trusted app on its bait: %+v", v)
 	}
@@ -144,7 +144,7 @@ func TestTrustRulesArePinned(t *testing.T) {
 		t.Fatalf("replaced file still trusted: %+v", v)
 	}
 	// Runtimes are pinned to one command line.
-	psf := authenticode.Result{Signed: true, Valid: true, Signer: "Python Software Foundation"}
+	psf := provenance.Result{Signed: true, Valid: true, Signer: "Python Software Foundation"}
 	if v := c.Final(`C:\Python312\python.exe`, 1, Bait{ID: "aws"}, psf); !v.Ignored {
 		t.Fatalf("trusted script: %+v", v)
 	}
@@ -166,7 +166,7 @@ func TestRuntimeRunningADroppedScript(t *testing.T) {
 		13: `"C:\Python312\python.exe" sync.py --out C:\Users\bob\Downloads`,
 	}
 	c := &Classifier{Env: env, CommandLine: func(pid uint32) string { return cmd[pid] }}
-	signed := authenticode.Result{Signed: true, Valid: true, Signer: "Eclipse.org Foundation, Inc."}
+	signed := provenance.Result{Signed: true, Valid: true, Signer: "Eclipse.org Foundation, Inc."}
 	for pid, img := range map[uint32]string{1: java, 2: `C:\Python312\pythonw.exe`, 3: `C:\Program Files\nodejs\node.exe`, 5: java} {
 		if v := c.Final(img, pid, Bait{ID: "discord"}, signed); v.Tier != config.TierCritical {
 			t.Errorf("pid %d (%s): a script from a drop zone must be critical, got %+v", pid, cmd[pid], v)
@@ -206,11 +206,11 @@ func TestSweepExempt(t *testing.T) {
 		{Path: `C:\Program Files\Backblaze\bztransmit64.exe`, Signer: "Backblaze"},
 		{Path: `C:\Program Files\Foo\foo.exe`, Signer: "Foo", Baits: []string{"aws"}},
 	}}
-	bb := authenticode.Result{Signed: true, Valid: true, Signer: "Backblaze, Inc."}
+	bb := provenance.Result{Signed: true, Valid: true, Signer: "Backblaze, Inc."}
 	if !c.SweepExempt(`C:\Program Files\Backblaze\bztransmit64.exe`, 1, &bb) {
 		t.Fatal("all-bait rule should allow sweeps")
 	}
-	foo := authenticode.Result{Signed: true, Valid: true, Signer: "Foo Ltd"}
+	foo := provenance.Result{Signed: true, Valid: true, Signer: "Foo Ltd"}
 	if c.SweepExempt(`C:\Program Files\Foo\foo.exe`, 1, &foo) {
 		t.Fatal("single-bait trust must not allow sweeps")
 	}

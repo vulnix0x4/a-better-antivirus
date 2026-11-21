@@ -9,7 +9,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"github.com/vulnix0x4/a-better-antivirus/internal/authenticode"
+	"github.com/vulnix0x4/a-better-antivirus/internal/provenance"
 )
 
 func TestInjectedCodeCleanWindowsProcess(t *testing.T) {
@@ -123,7 +123,7 @@ func TestSideLoadedFindsTheDLLNextToTheProgram(t *testing.T) {
 	if err := plain.Start(); err == nil {
 		defer func() { plain.Process.Kill(); plain.Wait() }()
 		time.Sleep(400 * time.Millisecond)
-		if dll, found := SideLoaded(uint32(plain.Process.Pid), sys+"PING.EXE", func(p string) bool { return authenticode.Verify(p).Valid }); found {
+		if dll, found := SideLoaded(uint32(plain.Process.Pid), sys+"PING.EXE", func(p string) bool { return provenance.Verify(p).Valid }); found {
 			t.Fatalf("the real ping.exe in System32 was reported as sideloaded: %s", dll)
 		}
 	}
