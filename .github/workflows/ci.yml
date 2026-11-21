@@ -43,3 +43,32 @@ jobs:
       - name: End-to-end
         shell: pwsh
         run: ./scripts/e2e.ps1 -Aba ./dist/aba.exe -Medium ./dist/medium.exe -Ghost ./dist/ghost.exe
+
+  # Linux and macOS: everything that builds there. Until their backends are
+  # written that's the OS-neutral core plus stubs, so this mostly guards the
+  # boundary (see "Platforms" in CONTRIBUTING.md). CGO stays off, like in the
+  # release builds.
+  test-unix:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Unit tests
+        run: go test ./...
+
+      - name: Build
+        run: go build -o dist/aba ./cmd/aba

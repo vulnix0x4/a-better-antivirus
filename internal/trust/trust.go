@@ -21,6 +21,7 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/alerts"
 	"github.com/vulnix0x4/a-better-antivirus/internal/classify"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
+	"github.com/vulnix0x4/a-better-antivirus/internal/platform"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
 )
 
@@ -33,7 +34,7 @@ func Rule(a *alerts.Alert) (rule config.IgnoreRule, why string) {
 	}
 	exe := filepath.Base(p.Image)
 	swept := len(a.Verdict.Swept) > 0
-	windows := (&classify.Classifier{Env: classify.DefaultEnv()}).SystemBinary(p.Image)
+	system := (&classify.Classifier{Env: classify.DefaultEnv()}).SystemBinary(p.Image)
 
 	if a.Verdict.Evasion {
 		return rule, exe + " used a trick meant to dodge detection; that's never trusted from an alert (for a backup or security tool that really works that way: `aba ignore add --allow-tricks`)"
@@ -42,8 +43,8 @@ func Rule(a *alerts.Alert) (rule config.IgnoreRule, why string) {
 	if swept {
 		// It went through several apps' data. Trusting that means trusting it
 		// with every bait (a backup tool): only for an ordinary program.
-		if windows || classify.ScriptHost(exe) {
-			return config.IgnoreRule{}, exe + " went through several apps' data; that's never trusted for a Windows program or script host"
+		if system || classify.ScriptHost(exe) {
+			return config.IgnoreRule{}, exe + " went through several apps' data; that's never trusted for a " + platform.OSName() + " program or script host"
 		}
 	} else {
 		for _, h := range a.Baits {
