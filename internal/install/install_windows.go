@@ -2,6 +2,7 @@ package install
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -89,9 +90,7 @@ func deleteProgramFiles() (string, error) {
 	self, _ := os.Executable()
 	if paths.Under(self, paths.InstallDir()) {
 		// Can't delete ourselves while running: let cmd do it after we exit.
-		cmd := exec.Command("cmd.exe", "/c", "ping -n 3 127.0.0.1 >nul & rmdir /s /q \""+paths.InstallDir()+"\"")
-		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW | windows.DETACHED_PROCESS}
-		return "finishes after this window closes", cmd.Start()
+		return "finishes after this window closes", deleteDirAfterExit(paths.InstallDir())
 	}
 	// Close leftover ABA processes (e.g. an alert popup nobody clicked).
 	if snap, err := procinfo.Snapshot(); err == nil {
@@ -116,6 +115,31 @@ func deleteProgramFiles() (string, error) {
 		return "some files were in use; they'll be deleted at the next restart", nil
 	}
 	return "", nil
+}
+
+// deleteDirAfterExit removes dir once nothing in it is running any more. A
+// program can't delete its own file, so a hidden cmd.exe does it: it tries
+// about once a second for a quarter of an hour (the window may be waiting on
+// "Press Enter to close") and stops as soon as the folder is gone.
+func deleteDirAfterExit(dir string) error {
+	if strings.ContainsAny(dir, `"%&|<>^`) {
+		return fmt.Errorf("not deleting %s: unexpected characters in the path", dir)
+	}
+	sys, err := windows.GetSystemDirectory()
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command(filepath.Join(sys, "cmd.exe"))
+	// cmd.exe has its own quoting rules, so the command line is given as is:
+	// Go's usual escaping (\") would hand rmdir a path it can't find.
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow:    true,
+		CreationFlags: windows.CREATE_NO_WINDOW,
+		CmdLine: `cmd.exe /d /c "for /l %i in (1,1,900) do @(ping -n 2 127.0.0.1 >nul & rmdir /s /q "` + dir +
+			`" 2>nul & if not exist "` + dir + `" exit)"`,
+	}
+	cmd.Dir = sys // not the folder being deleted
+	return cmd.Start()
 }
 
 // scheduleDelete deletes p now, or at the next restart if it's still in use.
