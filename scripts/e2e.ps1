@@ -38,11 +38,11 @@ function Report([string]$m) {
 }
 if ($progress) {
     Write-Host "Live progress: https://ntfy.sh/$progress"
-    # Background reporter: ships new service.log lines every 3 s.
+    # Background reporter: ships new service.log lines every 10 s.
     Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList '-NoProfile', '-Command', @"
 `$seen = 0
 while (`$true) {
-  Start-Sleep 3
+  Start-Sleep 10
   `$f = '$data\service.log'
   if (Test-Path `$f) {
     `$lines = @(Get-Content `$f)
@@ -56,7 +56,9 @@ while (`$true) {
 }
 
 function Step($n) { Write-Host "`n=== $n ===" -ForegroundColor Cyan; Report "=== $n" }
-function Ok($m)   { Write-Host "  ok  $m" -ForegroundColor Green; Report "ok $m" }
+# (Passed checks aren't reported: ntfy.sh limits requests per address, and the
+# phone-alert checks below need that allowance.)
+function Ok($m)   { Write-Host "  ok  $m" -ForegroundColor Green }
 function Fail($m) {
     Write-Host "  FAIL $m" -ForegroundColor Red
     Report "FAIL $m"
@@ -156,8 +158,12 @@ function WfpRules {
 }
 # ntfy returns one JSON object per line; read the raw text (Invoke-RestMethod
 # would auto-parse a single line into an object).
+# Spaced out and forgiving: ntfy.sh limits requests per address, and a refused
+# poll means "ask again later", not a failed test.
 function NtfyMessages {
-    $raw = (Invoke-WebRequest "https://ntfy.sh/$topic/json?poll=1&since=all" -UseBasicParsing).Content
+    Start-Sleep -Seconds 2
+    try { $raw = (Invoke-WebRequest "https://ntfy.sh/$topic/json?poll=1&since=all" -UseBasicParsing -TimeoutSec 15).Content }
+    catch { Write-Host "  (ntfy poll refused, trying again)" -ForegroundColor DarkGray; Start-Sleep -Seconds 6; return }
     if ($raw -is [byte[]]) { $raw = [Text.Encoding]::UTF8.GetString($raw) }
     $raw -split "`n" | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object event -eq 'message'
 }
@@ -211,7 +217,7 @@ Remove-Item $peek -ErrorAction SilentlyContinue
 Check (WaitFor { (Test-Path $peek) -and (Select-String -Path $peek -Pattern 'FAILED 5|denied' -Quiet) } 10) "a program without admin rights can't send the service commands"
 Check (-not ((sc.exe qdescription FileAccessMonitor | Out-String) -match 'decoy|Antivirus')) "the service's description doesn't say what it's for"
 & $Aba status --once | Out-Null
-Check (WaitFor { NtfyMessages | Where-Object title -match 'test alert' } 20) 'phone test alert arrived on ntfy'
+Check (WaitFor { NtfyMessages | Where-Object title -match 'test alert' } 60) 'phone test alert arrived on ntfy'
 
 Step 'Built-in safe test'
 Aba test
@@ -241,7 +247,7 @@ Select-String -Path "$data\service.log" -Pattern 'instant' | ForEach-Object { " 
 Aba alerts show $a1.id
 Aba kill $a1.id
 Check (WaitFor { -not (Get-Process -Id $s1.Id -ErrorAction SilentlyContinue) } 10) 'killed'
-Check (WaitFor { NtfyMessages | Where-Object { $_.message -match $a1.id } } 30) 'critical alert reached the phone (ntfy)'
+Check (WaitFor { NtfyMessages | Where-Object { $_.message -match $a1.id } } 60) 'critical alert reached the phone (ntfy)'
 
 Step 'A signed, legit program reading a bait is let through'
 $legit = Join-Path $env:TEMP 'legit-curl.exe'   # Microsoft-signed (catalog), so "warn": notify only
@@ -337,7 +343,7 @@ Start-Sleep -Seconds 4   # let the service push the phone alert through the isol
 Aba release
 Check (WaitFor { Online } 60) 'back online after release'
 Stop-Process -Id $watchdog.Id -Force -ErrorAction SilentlyContinue
-Check (WaitFor { NtfyMessages | Where-Object { $_.message -match $a3.id } } 30) 'phone alert got out while isolated'
+Check (WaitFor { NtfyMessages | Where-Object { $_.message -match $a3.id } } 90) 'phone alert got out while isolated'
 Stop-Process -Id $s3.Id -Force -ErrorAction SilentlyContinue
 
 Step 'Back to balanced; deleted bait gets repaired'
