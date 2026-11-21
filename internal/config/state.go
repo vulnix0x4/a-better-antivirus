@@ -52,6 +52,7 @@ type BaitState struct {
 	CreatedDirs []string   `json:"createdDirs,omitempty"` // dirs ABA created (removed on uninstall/retire)
 	Status      string     `json:"status"`                // ok | missing | retired | error
 	StatusNote  string     `json:"statusNote,omitempty"`
+	RetiredAt   time.Time  `json:"retiredAt,omitempty"`
 	CreatedAt   time.Time  `json:"createdAt"`
 	LastCheck   time.Time  `json:"lastCheck,omitempty"`
 }

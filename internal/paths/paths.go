@@ -19,7 +19,9 @@ const (
 
 	ServiceName        = "FileAccessMonitor"
 	ServiceDisplayName = "File Access Monitor"
-	ServiceDescription = "Watches decoy files and reacts when something reads them (A Better Antivirus)."
+	// Anything running as you can read a service's description. It used to say
+	// "watches decoy files": no need to tell a stealer what this is in so many words.
+	ServiceDescription = "Monitors file access and reports unusual activity."
 
 	installDirName = "File Access Monitor"
 	dataDirName    = "FileAccessMonitor"
@@ -37,8 +39,10 @@ func InstallDir() string {
 func InstalledCLI() string     { return filepath.Join(InstallDir(), CLIExe) }
 func InstalledService() string { return filepath.Join(InstallDir(), ServiceExe) }
 
-// DataDir holds config, state and alerts. SYSTEM/Administrators can write,
-// Users can read (so the notifier and `aba status` work unelevated).
+// DataDir holds config, state, alerts and logs. Only SYSTEM and
+// Administrators can get in: it lists every bait and every program you
+// trusted, which is exactly what a stealer would like to read. What `aba`
+// shows without admin rights comes from PublicStatusFile.
 func DataDir() string {
 	pd := os.Getenv("ProgramData")
 	if pd == "" {
@@ -53,6 +57,10 @@ func SecretsFile() string { return filepath.Join(DataDir(), "secrets.json") } //
 func AlertsDir() string   { return filepath.Join(DataDir(), "alerts") }
 func LogFile() string     { return filepath.Join(DataDir(), "service.log") }
 func TestFile() string    { return filepath.Join(DataDir(), "pending-test.json") }
+
+// PublicDir is the one corner of the data folder anyone may read.
+func PublicDir() string        { return filepath.Join(DataDir(), "public") }
+func PublicStatusFile() string { return filepath.Join(PublicDir(), "status.json") }
 
 func programFiles() string {
 	if p, err := windows.KnownFolderPath(windows.FOLDERID_ProgramFiles, 0); err == nil && p != "" {
@@ -106,3 +114,31 @@ func Long(p string) string {
 
 // Key is the canonical form used to look paths up in maps.
 func Key(p string) string { return Clean(Long(p)) }
+
+// FileID identifies the file at p whatever name it's reached by (two hard
+// links to one file have the same ID). It asks only for the file's
+// attributes: nothing is read, no audit event, no oplock broken.
+func FileID(p string) (string, bool) {
+	u, err := windows.UTF16PtrFromString(p)
+	if err != nil {
+		return "", false
+	}
+	h, err := windows.CreateFile(u, windows.FILE_READ_ATTRIBUTES, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
+	if err != nil {
+		return "", false
+	}
+	defer windows.CloseHandle(h)
+	var fi windows.ByHandleFileInformation
+	if windows.GetFileInformationByHandle(h, &fi) != nil {
+		return "", false
+	}
+	const hexd = "0123456789abcdef"
+	b := make([]byte, 0, 24)
+	for _, v := range []uint32{fi.VolumeSerialNumber, fi.FileIndexHigh, fi.FileIndexLow} {
+		for sh := 28; sh >= 0; sh -= 4 {
+			b = append(b, hexd[(v>>uint(sh))&0xf])
+		}
+	}
+	return string(b), true
+}

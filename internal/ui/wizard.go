@@ -101,7 +101,9 @@ func newWizard(in WizardInput) *wizard {
 		}
 		pre := a.Spec.Default
 		if ex != nil {
-			pre = existing[a.Spec.ID]
+			// What you had, plus recommended baits that didn't exist yet when
+			// you last went through setup.
+			pre = existing[a.Spec.ID] || (a.Spec.Default && a.Spec.Since > ex.Version)
 		}
 		if pre {
 			o.Baits = append(o.Baits, a.Spec.ID)

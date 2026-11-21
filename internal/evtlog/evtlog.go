@@ -240,6 +240,9 @@ type ObjectAccess struct {
 	User        string
 	UserSID     string
 	AccessMask  uint32
+	// Alias is set when ObjectName was reached under another name (a hard link
+	// to a bait): the name the program actually used. ObjectName is the bait.
+	Alias string
 }
 
 // AsObjectAccess decodes a 4663 event.

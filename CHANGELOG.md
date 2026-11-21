@@ -1,5 +1,110 @@
 # Changelog
 
+## v0.6.0
+
+Closing the ways around it. Every item here was a working bypass, found by going through ABA the way a
+stealer's author would. The fixes come with tests that replay the bypasses.
+
+**Finding the baits without touching them**
+
+- **ABA's own files no longer give the baits away.** `C:\ProgramData\FileAccessMonitor` was readable by
+  every program: `state.json` lists every bait, `config.json` every program you trusted and for which bait,
+  the alerts and the log name baits too. One file read, and a stealer could walk around every tripwire. The
+  folder is now for SYSTEM and administrators only (existing installs are tightened when the new service
+  first starts). `aba` without admin rights still shows whether you're protected, from a small summary the
+  service publishes (health and counts; no paths, names or alerts). `aba alerts`, `aba bait list`,
+  `aba doctor` and the like now ask for admin. Alert popups get their alert handed over directly by the
+  service instead of reading a file.
+- **A fake "app installed" file no longer retires a decoy.** Decoys are retired when the real app turns up,
+  and most of those apps install into your own profile, where no admin rights are needed: an empty
+  `Discord\Update.exe` made ABA delete its Discord decoy within five minutes. Eight empty files and a short
+  wait removed most of the tripwires. Now only a file signed by the app's publisher counts (or one in Program
+  Files); anything else is reported as an attempt to switch a bait off, and the decoy stays. A real
+  retirement is a warning you hear about, not a quiet note, and a second one within a day is refused.
+- **"The real app read its own decoy" needs the real install.** The genuine, signed `Discord.exe` copied to
+  another folder (or run with a DLL of the attacker's next to it) counted as Discord and retired the decoy.
+- **Baits pass for ordinary files.** A folder listing shows a file's properties without opening it. Planted
+  baits had all three timestamps identical to the tick, sat in folders created a minute ago, belonged to
+  "Administrators", and were the only files in Documents marked "don't index". All four are fixed (owner and
+  indexing on existing installs too).
+- **Fake browser databases look used.** `Login Data`, `Cookies`, `Web Data`, `key4.db` were empty databases
+  of exactly 4096 bytes on every install. They're now real SQLite files with the browser's tables and a few
+  rows, of a size that differs per install (existing installs are upgraded in place).
+- **Every install names its baits differently.** ABA is open source, so "skip `wallet recovery phrase.txt`"
+  was a one-line bypass. New installs pick each file's name from a pool of what grabbers look for (and their
+  own Firefox profile and LevelDB file names). Existing installs keep their names until you run
+  `aba bait rename`, which picks a new set and replants the baits under it.
+- **Baits inside the browsers you do use.** Decoys are fake data for apps you *don't* have, so a stealer
+  that first checks the app is really installed never opens one. ABA now also plants a fake extra profile
+  (`Profile 23` or so, next to `Default`) inside your real Chrome, Edge and Brave: stealers take every
+  profile folder they find, and there "is it installed?" says yes. The browser only opens profiles it has
+  listed, so it never touches the folder; if it ever takes it as a profile of its own, the bait is retired.
+  The real browser reading a profile it doesn't know is a warning (something inside it is going through its
+  data). On by default for new installs; existing ones get it the next time you run `aba install` or
+  `aba configure`, or right away with `aba bait add chrome-profile` (`edge-profile`, `brave-profile`).
+- `aba bait add` takes a catalog ID as well as a path, to switch on one bait without going through setup.
+
+**Reading a bait without being seen**
+
+- **Opening a bait "without waiting" no longer blinds instant freeze.** A program can ask Windows not to
+  pause its open (`FILE_COMPLETE_IF_OPLOCKED`); then no thread is ever stuck and ABA found no one. Windows
+  will say which programs hold a file open, though, and that open can't read until ABA lets go: the opener is
+  now identified from that and frozen before it reads. Opening a bait that way is treated as what it is.
+- **Reading through an execute-only mapping is logged.** A file opened for "execute" only can be mapped into
+  memory and read there without read access ever being requested, which the audit rule didn't cover. It does
+  now (existing baits get the new rule at the next start).
+- **Reading through a hard link is recognised.** A hard link gives a bait a second name; the event then
+  shows a path ABA had never heard of. Baits are now recognised by the file's identity, also when the link
+  was deleted again right after.
+- Any of these tricks makes the reader **critical whatever it is**: signed, part of Windows, or trusted by
+  you. *It's mine* on such an alert never trusts it permanently. For the rare backup or security tool that
+  really reads files that way, an administrator can allow it by name: `aba ignore add "<path>" --signer
+  <publisher> --allow-tricks`.
+
+**Escaping the response**
+
+- **A frozen stealer stays frozen.** Any program running as you can resume a suspended process with one
+  call, so a stealer with a second process un-froze itself. Frozen processes are now also held in a frozen
+  job object that only the service can reach; `aba resume` and `aba release` have the service let go of it.
+- **The whole stealer is frozen, not just the process that touched the bait:** the unsigned loader or script
+  host that started it, and other running copies of the same file. A sweep split over several programs
+  freezes all of them.
+- **A stealer called `svchost.exe` can be frozen.** "Windows processes ABA never touches" went by name, so
+  naming your malware `svchost.exe`, `explorer.exe` or `conhost.exe` made it untouchable from any folder. It
+  now takes the real file in the folder Windows keeps it in.
+- **Sweeps split over several processes are sweeps.** Reading three apps' data counted per process: one
+  process (or one Windows tool) per app never reached three. Reads are now also counted across programs.
+- **A program is judged by the file that's running.** A running program can rename its own file and put a
+  signed one at the old path; ABA then verified the wrong file. Signature results are also no longer reused
+  after the file at that path changed.
+- **A copy of ABA is not a disguise.** A reader with ABA's own fingerprint was ignored completely: start a
+  copy of `aba.exe`, inject into it, read everything. Now only ABA running as administrator is.
+- **Sideloading is critical at the first bait.** A signed program in a user folder running an unsigned DLL
+  from that same folder used to be a warning, like any signed program.
+- **Running as you from a scheduled task isn't "a Windows service".** Such a task runs in session 0, which
+  ABA treated as services: no sweep detection, no injection check, and Windows programs counted as harmless.
+- Unsigned programs inside the Windows folder are critical (parts of it are writable without admin rights),
+  and Windows tools that copy or upload a file for you (`extrac32`, `replace`, `print`, `certreq`, `scp`,
+  `ftp`, `clip`…) count as script hosts, as do `more.com` and `choice.exe`, which loaders run inside.
+
+**Also**
+
+- **Fix: `aba test` could be used to run a program as administrator.** It wrote the fake stealer into your
+  Temp folder under a guessable name and started it elevated, so anything running as you could swap the
+  file in between. The file now has a random name, is locked and checked until it runs, and runs without
+  admin rights (as a real stealer would). If the fake stealer itself fails to run, `aba test` now says that
+  instead of reporting that ABA missed it.
+- **Only administrators can send the service commands.** Windows lets every signed-in user send a service
+  custom commands, and one of ABA's starts a full health check: any program could keep the service busy
+  checking itself instead of watching. Existing installs are tightened when the new service first starts.
+- The service's description no longer says it watches decoy files, and the status summary anyone can read no
+  longer says how ABA is set to respond ("alerts only" or "still learning" told a stealer nothing would stop
+  it). `aba` without admin rights shows health and counts; the response settings need admin.
+- ABA says so when something keeps a bait open (which stops instant freeze from guarding it), and can no
+  longer be locked out of a bait by changing the file's permissions.
+- If the service is killed while something is frozen, what it froze is ended rather than left frozen with
+  no way to thaw it.
+
 ## v0.5.4
 
 - **A sweeping program is frozen before it gets the third app's data.** Instant freeze identifies who opened a

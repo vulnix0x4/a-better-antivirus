@@ -28,6 +28,7 @@ const (
 	KindAuditRemoved  = "audit-removed"  // a bait's audit rule was stripped
 	KindAuditDisabled = "audit-disabled" // file auditing was switched off system-wide
 	KindDecoyRetired  = "decoy-retired"  // the real app got installed; decoy removed
+	KindTamper        = "tamper"         // something tried to switch part of ABA off
 	KindTest          = "test"
 )
 
@@ -193,6 +194,22 @@ func List(limit int) ([]*Alert, error) {
 		}
 	}
 	return out, nil
+}
+
+// Counts returns how many alerts there are, and how many of the latest 100
+// are still open.
+func Counts() (total, open int) {
+	all, _ := ids()
+	total = len(all)
+	for i, id := range all {
+		if i >= 100 {
+			break
+		}
+		if a, err := Load(id); err == nil && a.Status == "open" {
+			open++
+		}
+	}
+	return total, open
 }
 
 // Update loads, modifies and saves an alert.

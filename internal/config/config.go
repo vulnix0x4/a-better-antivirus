@@ -120,6 +120,12 @@ type UserInfo struct {
 	LocalAppData   string `json:"localAppData"`
 	RoamingAppData string `json:"roamingAppData"`
 	DecoyBrowser   string `json:"decoyBrowser,omitempty"` // fake browser hosting MetaMask etc.
+	// Variant makes this install's bait file names its own (see package baits).
+	// Random, fixed at install time. Empty on installs from before it existed.
+	Variant string `json:"variant,omitempty"`
+	// Embedded is where each bait that lives inside a real app's data was put
+	// (bait ID -> folder name, e.g. "Profile 23" inside Chrome's User Data).
+	Embedded map[string]string `json:"embedded,omitempty"`
 }
 
 // BaitConfig selects a bait from the catalog, or defines a custom file bait.
@@ -142,7 +148,12 @@ type IgnoreRule struct {
 	// app from an alert covers only what it was seen reading, so code injected
 	// into it that goes after other baits still gets caught.
 	Baits []string `json:"baits,omitempty"`
-	Note  string   `json:"note,omitempty"`
+	// Tricks: the rule also covers reads that look like evasion (an open that
+	// refuses to be paused, a read through a hard link), for the rare backup or
+	// security tool that really works that way. Only an administrator's
+	// `aba ignore add --allow-tricks` sets it; trusting an alert never does.
+	Tricks bool   `json:"tricks,omitempty"`
+	Note   string `json:"note,omitempty"`
 }
 
 // CoversBait reports whether the rule applies to bait id.
@@ -184,7 +195,9 @@ type Config struct {
 
 // CurrentConfigVersion 2 added AutoUpdate. Configs written by v1 have no
 // opinion on updates, so they load with AutoUpdate=false and setup asks.
-const CurrentConfigVersion = 2
+// Version 3 added baits inside real browsers (see baits.Spec.Since): setup
+// offers those to installs that were configured before they existed.
+const CurrentConfigVersion = 3
 
 func Default() *Config {
 	p, _ := PresetByID("balanced")

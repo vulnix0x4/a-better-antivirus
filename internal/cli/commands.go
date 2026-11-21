@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -17,12 +17,14 @@ import (
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/alerts"
 	"github.com/vulnix0x4/a-better-antivirus/internal/baits"
+	"github.com/vulnix0x4/a-better-antivirus/internal/classify"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/doctor"
 	"github.com/vulnix0x4/a-better-antivirus/internal/engine"
 	"github.com/vulnix0x4/a-better-antivirus/internal/install"
 	"github.com/vulnix0x4/a-better-antivirus/internal/notify"
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
+	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
 	"github.com/vulnix0x4/a-better-antivirus/internal/respond"
 	"github.com/vulnix0x4/a-better-antivirus/internal/service"
 	"github.com/vulnix0x4/a-better-antivirus/internal/svcctl"
@@ -40,6 +42,9 @@ func alertsCmd() *cobra.Command {
 		Use:   "alerts",
 		Short: "What touched your baits",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireAdmin(); err != nil {
+				return err
+			}
 			limit := 25
 			if all {
 				limit = 0
@@ -63,6 +68,9 @@ func alertsCmd() *cobra.Command {
 		Short: "Everything about one alert",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireAdmin(); err != nil {
+				return err
+			}
 			a, err := alerts.Load(args[0])
 			if err != nil {
 				return err
@@ -76,6 +84,9 @@ func alertsCmd() *cobra.Command {
 		Short: "Raw alert JSON (for scripts)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireAdmin(); err != nil {
+				return err
+			}
 			a, err := alerts.Load(args[0])
 			if err != nil {
 				return err
@@ -251,6 +262,9 @@ func addIgnore(rules ...config.IgnoreRule) error {
 				continue
 			}
 			merged = true
+			if r.Tricks {
+				cfg.Ignore[i].Tricks = true
+			}
 			switch {
 			case len(x.Baits) == 0:
 			case len(r.Baits) == 0:
@@ -322,22 +336,10 @@ func runTest() error {
 	}
 
 	self, _ := os.Executable()
-	reader := filepath.Join(os.TempDir(), fmt.Sprintf("aba-test-%d.exe", time.Now().UnixNano()%100000))
 	b, err := os.ReadFile(self)
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(reader, b, 0o755); err != nil {
-		return err
-	}
-	defer func() {
-		for i := 0; i < 20; i++ {
-			if os.Remove(reader) == nil {
-				return
-			}
-			time.Sleep(250 * time.Millisecond)
-		}
-	}()
 
 	baitName := filepath.Base(target)
 	for _, bs := range st.Baits {
@@ -355,14 +357,22 @@ func runTest() error {
 	fmt.Println()
 	fmt.Println(" " + ui.Good.Render(ui.IconArr) + ui.Dim.Render(" Running the fake stealer…"))
 
-	cmd := exec.Command(reader, "test-reader", target)
-	if err := cmd.Start(); err != nil {
+	reader, err := startTestReader(b, target)
+	if err != nil {
 		return err
 	}
-	pid := uint32(cmd.Process.Pid)
+	defer func() {
+		reader.Close()
+		for i := 0; i < 20; i++ { // the file can linger for a moment after the process ends
+			if _, err := os.Stat(reader.Path); err != nil || os.Remove(reader.Path) == nil {
+				return
+			}
+			time.Sleep(250 * time.Millisecond)
+		}
+	}()
+	pid := reader.PID
 	tr, _ := json.Marshal(engine.TestRequest{PID: pid, Nonce: strconv.Itoa(int(pid)), Since: time.Now()})
 	if err := os.WriteFile(paths.TestFile(), tr, 0o644); err != nil {
-		cmd.Process.Kill()
 		return err
 	}
 	start := time.Now()
@@ -376,11 +386,16 @@ func runTest() error {
 			}
 		}
 	}
-	cmd.Process.Kill()
-	cmd.Wait()
+	died := !procinfo.Alive(pid, 0)
+	reader.Close()
 	if found == nil {
 		os.Remove(paths.TestFile())
 		fmt.Println()
+		if died {
+			// Not a miss by ABA: there was nothing to catch.
+			fmt.Println(" " + ui.Bad.Bold(true).Render(ui.IconBad) + " " + ui.Plain.Render("The fake stealer ("+reader.As+") stopped before it read anything, so there was nothing to catch."))
+			return exitf("test could not run")
+		}
 		fmt.Println(" " + ui.Bad.Bold(true).Render(ui.IconBad) + " " + ui.Plain.Render("ABA didn't react within 20 seconds."))
 		fmt.Println("   " + ui.Hint("Find out why with", "aba doctor") + ui.Dim.Render(", and the log at "+paths.LogFile()))
 		return exitf("test failed")
@@ -421,10 +436,11 @@ func doctorCmd() *cobra.Command {
 		Use:   "doctor",
 		Short: "Check that everything is armed (--fix repairs)",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Checking the baits means knowing where they are: admin only.
+			if err := requireAdmin(); err != nil {
+				return err
+			}
 			if fix {
-				if err := requireAdmin(); err != nil {
-					return err
-				}
 				for _, d := range doctor.Fix() {
 					fmt.Println(ui.Good.Render(ui.IconOK) + " " + d)
 				}
@@ -475,14 +491,14 @@ func learnCmd() *cobra.Command {
 		Use:   "learn",
 		Short: "Trust several of your apps at once",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireAdmin(); err != nil {
+				return err
+			}
 			cfg, err := mustConfig()
 			if err != nil {
 				return err
 			}
 			if stop || extend > 0 {
-				if err := requireAdmin(); err != nil {
-					return err
-				}
 				if stop {
 					cfg.LearningUntil = time.Time{}
 					fmt.Println(ui.Good.Render(ui.IconOK) + " Learning mode ended. ABA now responds as configured (" + cfg.PresetName() + ").")
@@ -610,6 +626,9 @@ func ignoreCmd() *cobra.Command {
 	c.AddCommand(&cobra.Command{
 		Use: "list", Short: "Show ignore rules",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireAdmin(); err != nil {
+				return err
+			}
 			cfg, err := mustConfig()
 			if err != nil {
 				return err
@@ -626,6 +645,7 @@ func ignoreCmd() *cobra.Command {
 		},
 	})
 	var signer, note string
+	var tricks bool
 	add := &cobra.Command{
 		Use: "add <path-pattern>", Short: "Ignore a program (globs: * within a folder, ** across folders)",
 		Example: `  aba ignore add "C:\Program Files\Backblaze\bztransmit64.exe" --signer Backblaze`,
@@ -634,11 +654,15 @@ func ignoreCmd() *cobra.Command {
 			if err := requireAdmin(); err != nil {
 				return err
 			}
-			return addIgnore(config.IgnoreRule{Path: args[0], Signer: signer, Note: note})
+			if why := tricksRuleProblem(args[0], signer, tricks); why != "" {
+				return exitf("%s", why)
+			}
+			return addIgnore(config.IgnoreRule{Path: args[0], Signer: signer, Note: note, Tricks: tricks})
 		},
 	}
 	add.Flags().StringVar(&signer, "signer", "", "also require this code-signing publisher (recommended)")
 	add.Flags().StringVar(&note, "note", "", "a note for yourself")
+	add.Flags().BoolVar(&tricks, "allow-tricks", false, "also when it reads baits in ways that look like evasion (some backup and security tools do)")
 	c.AddCommand(add)
 	c.AddCommand(&cobra.Command{
 		Use: "remove <number>", Short: "Remove an ignore rule (number from `ignore list`)", Args: cobra.ExactArgs(1),
@@ -666,6 +690,20 @@ func ignoreCmd() *cobra.Command {
 	return c
 }
 
+// tricksRuleProblem says why a rule may not allow evasion-like reads ("" if
+// it may). Such a rule is the one thing that lets a program read baits unseen,
+// so it has to name a program nothing else can pass for: one with a publisher,
+// or one in a folder only administrators can write to.
+func tricksRuleProblem(pattern, signer string, tricks bool) string {
+	if !tricks || signer != "" {
+		return ""
+	}
+	if (&classify.Classifier{Env: classify.DefaultEnv()}).UserWritable(pattern) {
+		return "--allow-tricks needs --signer for a program outside Program Files and Windows: anything could be put at that path later"
+	}
+	return ""
+}
+
 // ---- bait ----
 
 func baitCmd() *cobra.Command {
@@ -673,6 +711,9 @@ func baitCmd() *cobra.Command {
 	c.AddCommand(&cobra.Command{
 		Use: "list", Short: "Planted baits and their health",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireAdmin(); err != nil {
+				return err
+			}
 			st, err := config.LoadState()
 			if err != nil {
 				return err
@@ -705,6 +746,11 @@ func baitCmd() *cobra.Command {
 	c.AddCommand(&cobra.Command{
 		Use: "catalog", Short: "Every bait ABA knows and whether it fits this PC",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if svcState, _ := svcctl.Status(); svcState != svcctl.NotInstalled {
+				if err := requireAdmin(); err != nil { // which ones are planted is admin-only
+					return err
+				}
+			}
 			cfg, err := config.LoadConfig()
 			u := config.UserInfo{}
 			if err == nil {
@@ -742,6 +788,9 @@ func baitCmd() *cobra.Command {
 	c.AddCommand(&cobra.Command{
 		Use: "show <id>", Short: "Print a bait's contents without opening (tripping) it", Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireAdmin(); err != nil {
+				return err
+			}
 			st, err := config.LoadState()
 			if err != nil {
 				return err
@@ -762,7 +811,10 @@ func baitCmd() *cobra.Command {
 		},
 	})
 	c.AddCommand(&cobra.Command{
-		Use: "add <path>", Short: "Turn any file into a bait (created with fake passwords if it doesn't exist)", Args: cobra.ExactArgs(1),
+		Use: "add <path | catalog id>", Short: "Turn any file into a bait, or switch on one from the catalog",
+		Long: "With a path: that file becomes a bait (created with fake passwords if it doesn't exist).\n" +
+			"With an ID from `aba bait catalog` (e.g. chrome-profile): that bait is planted.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireAdmin(); err != nil {
 				return err
@@ -770,6 +822,17 @@ func baitCmd() *cobra.Command {
 			cfg, err := mustConfig()
 			if err != nil {
 				return err
+			}
+			if spec, ok := baits.ByID(args[0]); ok {
+				if err := install.AddCatalogBait(cfg, spec.ID); err != nil {
+					return err
+				}
+				d, err := install.SyncBaits(cfg)
+				if err != nil {
+					return err
+				}
+				fmt.Println(ui.Good.Render(ui.IconOK) + " planted: " + spec.Name + ". " + ui.Dim.Render(d))
+				return install.Reload()
 			}
 			p, _ := filepath.Abs(args[0])
 			id := install.CustomID(p)
@@ -787,6 +850,28 @@ func baitCmd() *cobra.Command {
 				return err
 			}
 			fmt.Println(ui.Good.Render(ui.IconOK) + " " + p + " is now a bait (" + id + "). " + ui.Dim.Render(d))
+			return install.Reload()
+		},
+	})
+	c.AddCommand(&cobra.Command{
+		Use: "rename", Short: "Give the baits new file names, this PC's own",
+		Long: "ABA is open source, so the names it gives baits are no secret: every install picks its own from what file\n" +
+			"grabbers look for. This picks again: baits whose name changes are removed and planted under the new one.\n" +
+			"Baits you added yourself, and fake profiles inside your browsers, stay where they are.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireAdmin(); err != nil {
+				return err
+			}
+			cfg, err := mustConfig()
+			if err != nil {
+				return err
+			}
+			d, err := install.RenameBaits(cfg)
+			if err != nil {
+				return err
+			}
+			fmt.Println(ui.Good.Render(ui.IconOK) + " " + d + ". " + ui.Hint("See them:", "aba bait list"))
 			return install.Reload()
 		},
 	})
@@ -862,24 +947,10 @@ func phoneCmd() *cobra.Command {
 // ---- notify (runs in the user's session, started by the service) ----
 
 func notifyCmd() *cobra.Command {
-	var demo, learningEnded bool
+	var demo bool
 	c := &cobra.Command{
 		Use: "notify <alert-id>", Hidden: true, Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if learningEnded {
-				n := 0
-				if cfg, err := config.LoadConfig(); err == nil {
-					n = len(cfg.Ignore)
-				}
-				body := "From now on suspicious programs get the full response, not just critical ones."
-				if n > 0 {
-					body += fmt.Sprintf(" %d program(s) you trusted stay allowed.", n)
-				}
-				body += " Caught something of yours? Click \"It's mine\" on the alert."
-				notify.Toast("ABA: learning mode is over", body)
-				time.Sleep(3 * time.Second)
-				return nil
-			}
 			if demo {
 				// Preview the alert UI with fake data; the buttons do nothing.
 				a := demoAlert()
@@ -887,13 +958,33 @@ func notifyCmd() *cobra.Command {
 				notify.ShowPopup(a, "")
 				return nil
 			}
-			if len(args) != 1 {
-				return exitf("usage: aba notify <alert-id>")
+			// Started by the service, the alert arrives on standard input (ABA's
+			// alert files are for administrators only; this runs as you). Given an
+			// ID instead, it's read from the files: that takes admin rights.
+			var env notify.Envelope
+			if len(args) == 1 {
+				a, err := alerts.Load(args[0])
+				if err != nil {
+					return err
+				}
+				env.Alert = a
+			} else {
+				b, err := io.ReadAll(io.LimitReader(os.Stdin, 4<<20))
+				if err != nil || json.Unmarshal(b, &env) != nil || (env.Alert == nil && !env.LearningEnded) {
+					return exitf("usage: aba notify <alert-id>")
+				}
 			}
-			a, err := alerts.Load(args[0])
-			if err != nil {
-				return err
+			if env.LearningEnded {
+				body := "From now on suspicious programs get the full response, not just critical ones."
+				if env.Trusted > 0 {
+					body += fmt.Sprintf(" %d program(s) you trusted stay allowed.", env.Trusted)
+				}
+				body += " Caught something of yours? Click \"It's mine\" on the alert."
+				notify.Toast("ABA: learning mode is over", body)
+				time.Sleep(3 * time.Second)
+				return nil
 			}
+			a := env.Alert
 			notify.Toast("ABA: "+a.Title, a.Summary)
 			// Info is just noted. Everything else (learning alerts included) gets
 			// the popup, so marking an app as yours is one click.
@@ -911,8 +1002,6 @@ func notifyCmd() *cobra.Command {
 		},
 	}
 	c.Flags().BoolVar(&demo, "demo", false, "show a sample alert (nothing is installed or changed)")
-	c.Flags().BoolVar(&learningEnded, "learning-ended", false, "")
-	c.Flags().MarkHidden("learning-ended")
 	return c
 }
 
@@ -940,6 +1029,9 @@ func instantCmd() *cobra.Command {
 			"before it reads anything. The normal detection keeps running as a backup.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireAdmin(); err != nil {
+				return err
+			}
 			cfg, err := mustConfig()
 			if err != nil {
 				return err
@@ -951,9 +1043,6 @@ func instantCmd() *cobra.Command {
 				}
 				fmt.Println("Instant freeze is " + state + ".  " + ui.Hint("Change:", "aba instant on|off"))
 				return nil
-			}
-			if err := requireAdmin(); err != nil {
-				return err
 			}
 			switch strings.ToLower(args[0]) {
 			case "on":

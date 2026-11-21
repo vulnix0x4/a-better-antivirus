@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"math/rand/v2"
 	"os/exec"
 	"syscall"
@@ -10,6 +11,7 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
+	"github.com/vulnix0x4/a-better-antivirus/internal/notify"
 	"github.com/vulnix0x4/a-better-antivirus/internal/session"
 	"github.com/vulnix0x4/a-better-antivirus/internal/update"
 )
@@ -44,8 +46,11 @@ func (s *server) learningCheck() {
 	}
 	if time.Since(cfg.LearningUntil) > 7*24*time.Hour {
 		// Ended long ago (service was off): just record it, no stale toast.
-	} else if n, err := session.LaunchInActiveSessions(s.cliExe, "notify", "--learning-ended"); err != nil || n == 0 {
-		return // nobody signed in yet: try again at the next check
+	} else {
+		note, _ := json.Marshal(notify.Envelope{LearningEnded: true, Trusted: len(cfg.Ignore)})
+		if n, err := session.LaunchWithInput(s.cliExe, note, "notify"); err != nil || n == 0 {
+			return // nobody signed in yet: try again at the next check
+		}
 	}
 	until := cfg.LearningUntil
 	config.UpdateState(func(st *config.State) error { st.LearningNotice = until; return nil })

@@ -4,6 +4,7 @@ package install
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha1"
 	"encoding/hex"
 	"errors"
@@ -133,11 +134,8 @@ func Steps(o Options) []Step {
 			return paths.InstallDir(), nil
 		}},
 		{Name: "Locking down the data folder", Run: func() (string, error) {
-			if err := os.MkdirAll(paths.AlertsDir(), 0o755); err != nil {
-				return "", err
-			}
-			// SYSTEM + Administrators: full. Users: read (status, notifier). Nobody else.
-			return "only admins can change it", config.SetSDDL(paths.DataDir(), "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)")
+			// SYSTEM + Administrators only: it lists every bait (see config.LockDataDir).
+			return "only admins can read or change it", config.LockDataDir()
 		}},
 		{Name: "Saving your settings", Run: func() (string, error) {
 			old, err := config.LoadConfig()
@@ -148,7 +146,16 @@ func Steps(o Options) []Step {
 			if old != nil {
 				*cfg = *old
 			}
+			// This install's own bait names: chosen once, when the first baits are
+			// planted. An install that already has baits keeps the names it has.
+			variant, embedded := cfg.User.Variant, cfg.User.Embedded
+			if variant == "" && len(ourBaits()) == 0 {
+				b := make([]byte, 8)
+				rand.Read(b)
+				variant = hex.EncodeToString(b)
+			}
 			cfg.User = u
+			cfg.User.Variant, cfg.User.Embedded = variant, embedded
 			if cfg.InstalledAt.IsZero() {
 				cfg.InstalledAt = time.Now()
 			}
@@ -175,9 +182,11 @@ func Steps(o Options) []Step {
 				selected[id] = true
 			}
 			cfg.User.DecoyBrowser = baits.ChooseHost(selected)
-			for _, a := range baits.Plan(cfg.User, ourBaits()) {
+			planted := ourBaits()
+			for _, a := range baits.Plan(cfg.User, planted) {
 				if selected[a.Spec.ID] && a.Available {
 					cfg.Baits = append(cfg.Baits, config.BaitConfig{ID: a.Spec.ID})
+					placeEmbedded(cfg, a.Spec, planted)
 				}
 			}
 			for _, p := range o.CustomBaits {
@@ -302,6 +311,90 @@ func ourBaits() map[string]bool {
 		}
 	}
 	return m
+}
+
+// placeEmbedded settles which folder a bait inside a real app gets (one the
+// app isn't using), unless it's planted already.
+func placeEmbedded(cfg *config.Config, spec baits.Spec, planted map[string]bool) {
+	if spec.Inside == nil || (planted[spec.ID] && cfg.User.Embedded[spec.ID] != "") {
+		return
+	}
+	if cfg.User.Embedded == nil {
+		cfg.User.Embedded = map[string]string{}
+	}
+	cfg.User.Embedded[spec.ID] = baits.FreeProfile(spec, cfg.User)
+}
+
+// AddCatalogBait switches on one bait from the catalog (`aba bait add
+// chrome-profile`) without going through setup again.
+func AddCatalogBait(cfg *config.Config, id string) error {
+	spec, ok := baits.ByID(id)
+	if !ok {
+		return fmt.Errorf("no bait %q in the catalog (see `aba bait catalog`)", id)
+	}
+	selected := map[string]bool{id: true}
+	for _, b := range cfg.Baits {
+		if b.ID == id {
+			return fmt.Errorf("%s is already planted", id)
+		}
+		selected[b.ID] = true
+	}
+	planted := ourBaits()
+	if cfg.User.DecoyBrowser == "" {
+		cfg.User.DecoyBrowser = baits.ChooseHost(selected)
+	}
+	for _, a := range baits.Plan(cfg.User, planted) {
+		if a.Spec.ID != id {
+			continue
+		}
+		if !a.Available {
+			return fmt.Errorf("%s doesn't fit this PC: %s", spec.Name, a.Reason)
+		}
+	}
+	placeEmbedded(cfg, spec, planted)
+	cfg.Baits = append(cfg.Baits, config.BaitConfig{ID: id})
+	// (cfg.Version stays as it is: it says which baits setup has offered you,
+	// and adding one by hand doesn't mean you've seen the others.)
+	return config.SaveConfig(cfg)
+}
+
+// RenameBaits gives this install a new set of bait names (see baits: every
+// install has its own), removes the baits whose names changed and plants
+// them again under the new ones. Baits you added yourself keep their path.
+func RenameBaits(cfg *config.Config) (string, error) {
+	b := make([]byte, 8)
+	rand.Read(b)
+	cfg.User.Variant = hex.EncodeToString(b)
+	if err := config.SaveConfig(cfg); err != nil {
+		return "", err
+	}
+	custom := map[string]bool{}
+	for _, bc := range cfg.Baits {
+		custom[bc.ID] = bc.Path != ""
+	}
+	moved := 0
+	err := config.UpdateState(func(st *config.State) error {
+		// Baits that live inside another one first (see plantBaits).
+		for _, dependentsFirst := range []bool{true, false} {
+			for id, bs := range st.Baits {
+				spec, ok := baits.ByID(id)
+				if !ok || custom[id] || bs.Status == "retired" || (len(spec.RequiresAny) > 0) != dependentsFirst || !baits.Moved(bs, spec, cfg.User) {
+					continue
+				}
+				baits.Remove(bs)
+				delete(st.Baits, id)
+				moved++
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	if _, err := SyncBaits(cfg); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%d baits renamed", moved), nil
 }
 
 // SyncBaits makes the planted baits match cfg.Baits (create new, remove deselected).
@@ -607,7 +700,7 @@ func UninstallSteps(purge bool) []Step {
 			if purge {
 				return "everything deleted", os.RemoveAll(paths.DataDir())
 			}
-			for _, f := range []string{paths.ConfigFile(), paths.StateFile(), paths.SecretsFile(), paths.TestFile()} {
+			for _, f := range []string{paths.ConfigFile(), paths.StateFile(), paths.SecretsFile(), paths.TestFile(), paths.PublicStatusFile()} {
 				os.Remove(f)
 			}
 			msg := "kept alert history in " + paths.DataDir()

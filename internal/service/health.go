@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/alerts"
@@ -56,22 +57,54 @@ func (s *server) healthCheck(startup bool) {
 				g.Canary[t.Kind] = t.Data
 			}
 		}
+		retiring := baits.RecentlyRetired(st, retireLimit)
 		for id, bs := range st.Baits {
 			if bs.Status == "retired" {
 				continue
 			}
 			total++
 			spec, known := baits.SpecByID(cfg, id)
+			// A fake profile inside a real browser that the browser has now taken
+			// as one of its own (it reached that profile number): out of its way.
+			if known && baits.Adopted(spec, cfg.User) && s.mayRetire(retiring, id, bs.Name) {
+				retiring++
+				retire = append(retire, id)
+				name := bs.Name
+				raised = append(raised, func() {
+					s.eng.SystemAlert(alerts.KindDecoyRetired, config.TierWarn, "Retired bait: "+name,
+						"The browser now uses that profile folder itself, so ABA removed its fake data from it. If you didn't just create a browser profile, something else registered it, to switch this bait off.", nil)
+				})
+				continue
+			}
 			if known && spec.Kind != baits.KindFile {
-				if m := baits.InstalledMarker(spec, cfg.User); m != "" {
-					retire = append(retire, id)
+				if m, genuine := baits.Installed(spec, cfg.User); m != "" {
 					name := bs.Name
-					raised = append(raised, func() {
-						s.eng.SystemAlert(alerts.KindDecoyRetired, config.TierInfo, "Retired decoy: "+name,
-							"The real app is now installed ("+m+"), so ABA removed its fake data to stay out of its way.", nil)
-					})
-					continue
+					switch {
+					case !genuine:
+						// Something that looks like the app's program but isn't: the
+						// cheap way to get ABA to remove a decoy by itself. Keep it.
+						if s.once("fake|"+strings.ToLower(m), 24*time.Hour) {
+							raised = append(raised, func() {
+								s.eng.SystemAlert(alerts.KindTamper, config.TierCritical, "Something tried to get a decoy retired: "+name,
+									m+" appeared, but it isn't the genuine app (it isn't signed by its publisher). A file like that is what you'd plant to make ABA remove its fake "+name+" data by itself, so ABA kept the decoy. If it's a build of the app you installed yourself, remove the decoy with `aba configure`.", nil)
+							})
+						}
+					case !s.mayRetire(retiring, id, name):
+						// A second one within a day: refused, and said so.
+					default:
+						retiring++
+						retire = append(retire, id)
+						raised = append(raised, func() {
+							// A warning, so it reaches you (popup and phone): a bait is gone.
+							s.eng.SystemAlert(alerts.KindDecoyRetired, config.TierWarn, "Retired decoy: "+name,
+								"The real app is now installed ("+m+"), so ABA removed its fake data to stay out of its way. If you didn't install it, something else did, to switch this bait off.", nil)
+						})
+						continue
+					}
 				}
+			}
+			if startup && known {
+				baits.Blend(bs, spec, cfg.User, g) // installs from older versions: see baits.Blend
 			}
 			probs := baits.Check(bs)
 			bs.LastCheck = time.Now()
@@ -108,6 +141,9 @@ func (s *server) healthCheck(startup bool) {
 				})
 			}
 		}
+		if len(retire) > 0 {
+			s.watch.Sync(nil) // let go of the files about to be removed; reload re-arms the rest
+		}
 		for _, id := range retire {
 			baits.Retire(st, cfg.User, id, "real app installed")
 		}
@@ -138,10 +174,15 @@ func (s *server) healthCheck(startup bool) {
 	}
 	if len(retire) > 0 {
 		s.reload()
+	} else {
+		s.indexBaitFiles(checked) // a repaired bait is a new file
 	}
 	add("Baits", ok == total, fmt.Sprintf("%d of %d healthy", ok, total))
 	if cfg.InstantFreeze {
-		add("Instant freeze", s.watch.Count() > 0, fmt.Sprintf("on, holding %d bait files", s.watch.Count()))
+		// A guard is down for a moment after each open (and during this check),
+		// so "most of them" is healthy; one that stays down is reported by onBlocked.
+		armed, want := s.watch.Armed(), s.watch.Count()
+		add("Instant freeze", want > 0, fmt.Sprintf("on, guarding %d of %d bait files", armed, want))
 	} else {
 		add("Instant freeze", true, "off")
 	}
@@ -170,4 +211,6 @@ func (s *server) healthCheck(startup bool) {
 		st.Heartbeat = time.Now()
 		return nil
 	})
+	s.reconcileHolds()
+	s.publish()
 }

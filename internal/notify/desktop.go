@@ -15,6 +15,14 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/trust"
 )
 
+// Envelope is what the service hands the popup process on its standard input
+// (the alert files are for administrators only; the popup runs as you).
+type Envelope struct {
+	Alert         *alerts.Alert `json:"alert,omitempty"`
+	LearningEnded bool          `json:"learningEnded,omitempty"`
+	Trusted       int           `json:"trusted,omitempty"` // programs on the trust list
+}
+
 // Toast shows a Windows notification (best effort, non-blocking).
 func Toast(title, body string) {
 	esc := func(s string) string {

@@ -13,12 +13,14 @@
 #>
 param(
     [string]$Aba = (Join-Path $PSScriptRoot '..\dist\aba.exe'),
-    [string]$Medium = (Join-Path $PSScriptRoot '..\dist\medium.exe')
+    [string]$Medium = (Join-Path $PSScriptRoot '..\dist\medium.exe'),
+    [string]$Ghost = (Join-Path $PSScriptRoot '..\dist\ghost.exe')
 )
 
 $ErrorActionPreference = 'Stop'
 $Aba  = (Resolve-Path $Aba).Path
 $Medium = (Resolve-Path $Medium).Path
+$Ghost = (Resolve-Path $Ghost).Path
 $data = Join-Path $env:ProgramData 'FileAccessMonitor'
 $installDir = Join-Path $env:ProgramFiles 'File Access Monitor'
 $fsGuid = '{0CCE921D-69AE-11D9-BED3-505054503030}'
@@ -181,6 +183,34 @@ Check ($cfg.version -ge 2) 'config is version 2'
 Aba update --check
 Aba doctor
 Aba phone test
+
+Step 'A program without admin rights can''t read where the baits are'
+# state.json lists every bait, config.json every program you trusted: reading
+# them was the cheapest way around ABA. -lua: no administrator membership.
+$peek = Join-Path $env:TEMP 'aba-peek.txt'
+foreach ($f in 'state.json', 'config.json', 'service.log') {
+    Remove-Item $peek -ErrorAction SilentlyContinue
+    & $Medium -lua -raw "$env:SystemRoot\System32\cmd.exe" "cmd /c type '$data\$f' > '$peek' 2>&1" | Out-Null
+    Check (WaitFor { Test-Path $peek } 10) "tried to read $f without admin rights"
+    Start-Sleep -Milliseconds 500
+    Check (-not (Select-String -Path $peek -Pattern 'passwords|baits|watching' -Quiet)) "$f can't be read without admin rights"
+}
+# (The service publishes it at the end of its first health check.)
+Check (WaitFor {
+    Remove-Item $peek -ErrorAction SilentlyContinue
+    & $Medium -lua -raw "$env:SystemRoot\System32\cmd.exe" "cmd /c type '$data\public\status.json' > '$peek' 2>&1" | Out-Null
+    Start-Sleep -Milliseconds 800
+    (Test-Path $peek) -and (Select-String -Path $peek -Pattern 'heartbeat' -Quiet)
+} 70) 'the public status (no bait names or paths) can'
+Check (-not (Select-String -Path $peek -Pattern ([regex]::Escape($env:USERPROFILE)) -Quiet)) 'and it names no path in your profile'
+Check (-not (Select-String -Path $peek -Pattern 'preset|responses|balanced|learning' -Quiet)) 'nor how ABA is set to respond'
+# Windows lets every signed-in user send a service custom commands; one of
+# ABA's starts a full health check. Only administrators may send them now.
+Remove-Item $peek -ErrorAction SilentlyContinue
+& $Medium -lua -raw "$env:SystemRoot\System32\cmd.exe" "cmd /c sc.exe control FileAccessMonitor 128 > '$peek' 2>&1" | Out-Null
+Check (WaitFor { (Test-Path $peek) -and (Select-String -Path $peek -Pattern 'FAILED 5|denied' -Quiet) } 10) "a program without admin rights can't send the service commands"
+Check (-not ((sc.exe qdescription FileAccessMonitor | Out-String) -match 'decoy|Antivirus')) "the service's description doesn't say what it's for"
+& $Aba status --once | Out-Null
 Check (WaitFor { NtfyMessages | Where-Object title -match 'test alert' } 20) 'phone test alert arrived on ntfy'
 
 Step 'Built-in safe test'
@@ -317,7 +347,64 @@ Check (WaitFor { Alerts | Where-Object { $_.kind -eq 'delete' -and $_.baits.path
 Aba doctor --fix
 Check (WaitFor { Test-Path $desktopBait } 30) 'bait recreated'
 
-Step 'Decoy retires when the real app shows up'
+Step 'Evasion: tricks for reading a bait unseen are caught, and count against the reader'
+# An unsigned program in Program Files reading one bait is only "suspicious"
+# (not frozen on balanced). The same program using a trick to dodge detection
+# is critical: frozen, and marked as evading.
+$toolDir = Join-Path $env:ProgramFiles 'AbaE2E'
+New-Item -ItemType Directory -Force $toolDir | Out-Null
+$tool = Join-Path $toolDir 'tool.exe'
+Copy-Item $Ghost $tool -Force
+function Evader([string]$mode, [string]$bait) {
+    $procId = & $Medium $tool $mode $bait
+    if ($LASTEXITCODE -or -not $procId) { Fail "evasion helper ($mode) didn't start" }
+    return [int]$procId
+}
+$e0 = Evader 'plain' $discordBait
+$a0 = AlertFor $e0
+Check ($a0 -and $a0.tier -eq 'warn' -and -not (Did $a0 'freeze')) "read normally, it's only a warning: $($a0.summary)"
+Stop-Process -Id $e0 -Force -ErrorAction SilentlyContinue
+foreach ($mode in 'ghost', 'map') {
+    $e = Evader $mode $discordBait
+    $a = WaitFor { Alerts | Where-Object { $_.process.pid -eq $e -and $_.tier -eq 'critical' } | Select-Object -Last 1 } 20
+    Check ($a) "${mode}: critical: $($a.summary)"
+    Check ($a.verdict.evasion -eq $true) "${mode}: recognised as evasion"
+    Check ((Did $a 'freeze') -and (WaitFor { IsSuspended $e } 5)) "${mode}: frozen"
+    # What a stealer's second process would do: un-suspend it. One call
+    # undoes a plain suspension; what ABA froze is also held by the service.
+    & $Medium $Ghost resume $e | Out-Null
+    Start-Sleep -Seconds 2
+    Check (IsSuspended $e) "${mode}: another program can't un-freeze it"
+    Aba kill $a.id
+}
+foreach ($mode in 'link', 'linkgone') {
+    $e = Evader $mode $discordBait
+    $a = WaitFor { Alerts | Where-Object { $_.process.pid -eq $e } | Select-Object -Last 1 } 20
+    if (-not $a -and $mode -eq 'linkgone') {
+        # With the link deleted again there's no file left to identify: this one
+        # relies on instant freeze having singled the reader out, which it
+        # declines to do when several programs wake at the same instant.
+        Ok "${mode}: not attributed on this run (instant freeze couldn't single the reader out)"
+        Stop-Process -Id $e -Force -ErrorAction SilentlyContinue
+        continue
+    }
+    Check ($a) "${mode}: a read through a hard link is noticed: $($a.summary)"
+    if ($a.tier -eq 'critical') {
+        Check ($a.verdict.evasion -eq $true) "${mode}: recognised as evasion"
+        Aba kill $a.id
+    } else {
+        Ok "${mode}: Windows logged the bait's own name, so it was handled as an ordinary read ($($a.tier))"
+        Stop-Process -Id $e -Force -ErrorAction SilentlyContinue
+    }
+}
+Get-ChildItem $env:TEMP -Filter 'cache-*.dat' -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+Remove-Item $toolDir -Recurse -Force -ErrorAction SilentlyContinue
+Aba release
+
+Step 'A fake "app installed" marker doesn''t get a decoy retired'
+# Most of these apps install into your own profile, so anything running as you
+# can create "Vivaldi\Application\vivaldi.exe". An unsigned file there used to
+# make ABA remove its decoy by itself; now it's reported and the decoy stays.
 $st = State
 $decoy = @('vivaldi', 'yandex', 'opera', 'exodus') | Where-Object { $st.baits.$_ -and $st.baits.$_.status -eq 'ok' } | Select-Object -First 1
 if ($decoy) {
@@ -331,11 +418,12 @@ if ($decoy) {
     New-Item -ItemType Directory -Force (Split-Path $m) | Out-Null
     Set-Content $m 'pretend app' -Encoding ascii
     Aba doctor --fix
-    Check (WaitFor { (State).baits.$decoy.status -eq 'retired' } 30) "$decoy decoy retired"
+    Check (WaitFor { Alerts | Where-Object { $_.kind -eq 'tamper' -and $_.summary -match [regex]::Escape((Split-Path $m -Leaf)) } } 30) 'the fake app is reported as an attempt to switch a bait off'
+    Check ((State).baits.$decoy.status -eq 'ok') "$decoy decoy kept"
     $first = ((State).baits.$decoy.files | Select-Object -First 1).path
-    Check (-not (Test-Path $first)) 'its fake files are gone'
+    Check (Test-Path $first) 'its fake files are still there'
     Remove-Item (Split-Path $m) -Recurse -Force
-} else { Ok 'no decoy available to retire on this runner (skipped)' }
+} else { Ok 'no decoy available on this runner (skipped)' }
 
 Step 'Custom bait'
 $custom = Join-Path $env:USERPROFILE 'Documents\bank logins.txt'
@@ -343,7 +431,7 @@ Aba bait add $custom
 Check (Test-Path $custom) 'custom bait created'
 $cid = ((State).baits.PSObject.Properties | Where-Object { $_.Value.files[0].path -eq $custom }).Name
 Check ($cid) "registered as $cid"
-if ($decoy) { Check ((State).baits.$decoy.status -eq 'retired') "retired $decoy decoy stays retired after changing baits" }
+if ($decoy) { Check ((State).baits.$decoy.status -eq 'ok') "$decoy decoy still there after changing baits" }
 $s4 = Stealer 'stealer4' $custom
 Check (AlertFor $s4.Id) 'reading the custom bait alerts'
 Aba release

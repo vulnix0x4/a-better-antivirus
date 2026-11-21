@@ -35,6 +35,9 @@ func Rule(a *alerts.Alert) (rule config.IgnoreRule, why string) {
 	swept := len(a.Verdict.Swept) > 0
 	windows := (&classify.Classifier{Env: classify.DefaultEnv()}).WindowsBinary(p.Image)
 
+	if a.Verdict.Evasion {
+		return rule, exe + " used a trick meant to dodge detection; that's never trusted from an alert (for a backup or security tool that really works that way: `aba ignore add --allow-tricks`)"
+	}
 	rule.Note = "trusted " + time.Now().Format("2006-01-02") + " from alert " + a.ID
 	if swept {
 		// It went through several apps' data. Trusting that means trusting it
@@ -107,6 +110,9 @@ func Describe(r config.IgnoreRule, names map[string]string) string {
 			bs = append(bs, b)
 		}
 		parts = append(parts, "only for: "+strings.Join(bs, ", "))
+	}
+	if r.Tricks {
+		parts = append(parts, "also when it reads in ways that look like evasion")
 	}
 	return strings.Join(parts, "; ")
 }

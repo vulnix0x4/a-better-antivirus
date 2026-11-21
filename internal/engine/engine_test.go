@@ -11,6 +11,7 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/authenticode"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/evtlog"
+	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
 )
 
 type fakeOps struct {
@@ -34,11 +35,16 @@ type fakeOps struct {
 	elevated  map[uint32]bool
 	gone      map[uint32]bool // exited: no session, no create time
 	slowSig   time.Duration   // Verify takes this long (signature checks can be slow)
+	held      []uint32
+	parents   map[uint32][]procinfo.Ancestor
+	running   map[string][]uint32 // image -> pids running it
+	sideDLL   map[uint32]string
 }
 
 func newFake() *fakeOps {
 	return &fakeOps{images: map[uint32]string{}, sigs: map[string]authenticode.Result{}, saved: map[string]*alerts.Alert{}, state: config.NewState(),
-		hashes: map[string]string{}, cmdlines: map[uint32]string{}, injected: map[uint32]string{}, elevated: map[uint32]bool{}, gone: map[uint32]bool{}}
+		hashes: map[string]string{}, cmdlines: map[uint32]string{}, injected: map[uint32]string{}, elevated: map[uint32]bool{}, gone: map[uint32]bool{},
+		parents: map[uint32][]procinfo.Ancestor{}, running: map[string][]uint32{}, sideDLL: map[uint32]string{}}
 }
 
 func (f *fakeOps) ImagePath(pid uint32) (string, error) {
@@ -61,25 +67,41 @@ func (f *fakeOps) SuspendTree(pid uint32) ([]uint32, error) {
 	f.suspended = append(f.suspended, pid)
 	return []uint32{pid, pid + 1}, nil
 }
-func (f *fakeOps) Resume(p []uint32)                              { f.resumed = append(f.resumed, p...) }
-func (f *fakeOps) KillTree(pid uint32) error                      { f.killed = append(f.killed, pid); return nil }
-func (f *fakeOps) Forensics(uint32, *alerts.Process)              {}
-func (f *fakeOps) BlockProgram(p string) error                    { f.blocked = append(f.blocked, p); return nil }
-func (f *fakeOps) Isolate() error                                 { f.isolated++; return nil }
-func (f *fakeOps) DisableAdapters() ([]string, error)             { return []string{"Wi-Fi"}, nil }
-func (f *fakeOps) SaveAlert(a *alerts.Alert) error                { f.saved[a.ID] = a; return nil }
-func (f *fakeOps) NotifyDesktop(a *alerts.Alert)                  { f.desktop = append(f.desktop, a.ID) }
-func (f *fakeOps) NotifyPhone(a *alerts.Alert)                    { f.phone = append(f.phone, a.ID) }
-func (f *fakeOps) RetireDecoy(id, why string)                     { f.retired = append(f.retired, id) }
-func (f *fakeOps) PendingTest() *TestRequest                      { return f.test }
-func (f *fakeOps) ClearTest()                                     { f.test = nil }
-func (f *fakeOps) UserSession(pid uint32) bool                    { return !f.gone[pid] }
-func (f *fakeOps) Elevated(pid uint32) bool                       { return pid == 777 || f.elevated[pid] }
-func (f *fakeOps) Hash(img string) string                         { return f.hashes[img] }
-func (f *fakeOps) CommandLine(pid uint32) string                  { return f.cmdlines[pid] }
-func (f *fakeOps) InjectedCode(pid uint32) (string, bool)         { d, ok := f.injected[pid]; return d, ok }
-func (f *fakeOps) IsSelf(img string) bool                         { return strings.HasSuffix(strings.ToLower(img), `\aba.exe`) }
-func (f *fakeOps) Logf(string, ...any)                            {}
+func (f *fakeOps) Resume(p []uint32)                        { f.resumed = append(f.resumed, p...) }
+func (f *fakeOps) KillTree(pid uint32) error                { f.killed = append(f.killed, pid); return nil }
+func (f *fakeOps) Forensics(uint32, *alerts.Process)        {}
+func (f *fakeOps) BlockProgram(p string) error              { f.blocked = append(f.blocked, p); return nil }
+func (f *fakeOps) Isolate() error                           { f.isolated++; return nil }
+func (f *fakeOps) DisableAdapters() ([]string, error)       { return []string{"Wi-Fi"}, nil }
+func (f *fakeOps) SaveAlert(a *alerts.Alert) error          { f.saved[a.ID] = a; return nil }
+func (f *fakeOps) NotifyDesktop(a *alerts.Alert)            { f.desktop = append(f.desktop, a.ID) }
+func (f *fakeOps) NotifyPhone(a *alerts.Alert)              { f.phone = append(f.phone, a.ID) }
+func (f *fakeOps) RetireDecoy(id, why string)               { f.retired = append(f.retired, id) }
+func (f *fakeOps) PendingTest() *TestRequest                { return f.test }
+func (f *fakeOps) ClearTest()                               { f.test = nil }
+func (f *fakeOps) UserSession(pid uint32) bool              { return !f.gone[pid] }
+func (f *fakeOps) Elevated(pid uint32) bool                 { return pid == 777 || f.elevated[pid] }
+func (f *fakeOps) Hash(img string) string                   { return f.hashes[img] }
+func (f *fakeOps) CommandLine(pid uint32) string            { return f.cmdlines[pid] }
+func (f *fakeOps) InjectedCode(pid uint32) (string, bool)   { d, ok := f.injected[pid]; return d, ok }
+func (f *fakeOps) IsSelf(img string) bool                   { return strings.HasSuffix(strings.ToLower(img), `\aba.exe`) }
+func (f *fakeOps) Logf(string, ...any)                      {}
+func (f *fakeOps) Hold(pids []uint32)                       { f.held = append(f.held, pids...) }
+func (f *fakeOps) Ancestors(pid uint32) []procinfo.Ancestor { return f.parents[pid] }
+func (f *fakeOps) RunningImage(path string) []uint32        { return f.running[path] }
+func (f *fakeOps) SideLoaded(pid uint32, _ string) (string, bool) {
+	d, ok := f.sideDLL[pid]
+	return d, ok
+}
+func (f *fakeOps) SuspendMore(root uint32, already []uint32) []uint32 {
+	for _, p := range already {
+		if p == root {
+			return nil
+		}
+	}
+	f.suspended = append(f.suspended, root)
+	return []uint32{root}
+}
 func (f *fakeOps) UpdateState(fn func(*config.State) error) error { return fn(f.state) }
 
 const desktopBait = `C:\Users\bob\Desktop\passwords.txt`
@@ -96,6 +118,8 @@ func setup(preset string) (*Engine, *fakeOps) {
 	e := New(f, 999)
 	cfg := config.Default()
 	cfg.ApplyPreset(preset)
+	cfg.User = config.UserInfo{Profile: `C:\Users\bob`, Desktop: `C:\Users\bob\Desktop`, Documents: `C:\Users\bob\Documents`,
+		LocalAppData: `C:\Users\bob\AppData\Local`, RoamingAppData: `C:\Users\bob\AppData\Roaming`}
 	st := config.NewState()
 	st.Baits["desktop-passwords"] = &config.BaitState{ID: "desktop-passwords", Name: "passwords.txt on the Desktop",
 		Files: []config.BaitFile{{Path: desktopBait, Audit: true}}}
@@ -354,6 +378,7 @@ func TestEventLogPathDoesNotDoubleFreezeInstantCatch(t *testing.T) {
 func TestInstantSkipsSelfAndElevated(t *testing.T) {
 	e, f := setup("balanced")
 	f.images[100] = `D:\a\build\dist\aba.exe` // ABA's own CLI run from a build folder (CI hang)
+	f.elevated[100] = true                    // ABA's tooling that touches baits runs as administrator
 	f.images[777] = `C:\Users\bob\Downloads\admin-tool.exe`
 	if e.DecideInstant(100, desktopBait) {
 		t.Error("ABA must never instant-freeze itself (e.g. `aba doctor`)")

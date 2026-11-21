@@ -23,7 +23,16 @@ type Bait struct {
 	ID          string
 	OwnerExes   []string // genuine app executables for a decoy (lowercase)
 	OwnerSigner string   // substring of the genuine app's signer
-	SharedSDK   bool     // read by a vendor SDK's default credential lookup (see baits.Spec)
+	// OwnerDirs are the folders the genuine app installs into. Its name and
+	// signature aren't enough to be "the real app": anyone can copy the
+	// genuine, signed executable somewhere else and run their own DLL in it.
+	// (Program Files always counts. Empty: any location.)
+	OwnerDirs []string
+	// Unadopted: the bait is a fake profile inside the real app's own data
+	// that the app hasn't taken up. The app has no reason to open it, so its
+	// read isn't "the owner reading its own data".
+	Unadopted bool
+	SharedSDK bool // read by a vendor SDK's default credential lookup (see baits.Spec)
 }
 
 type Verdict struct {
@@ -34,6 +43,41 @@ type Verdict struct {
 	Builtin    bool        `json:"builtin,omitempty"`    // Defender / Windows Search: never escalated
 	ByRule     bool        `json:"byRule,omitempty"`     // ignored because of one of your rules
 	Swept      []string    `json:"swept,omitempty"`      // bait IDs it went through (a sweep: several apps' data)
+	Evasion    bool        `json:"evasion,omitempty"`    // it used a trick meant to dodge detection
+}
+
+// systemCritical are the Windows processes ABA never suspends or kills:
+// doing so would hang or crash Windows or the desktop.
+var systemCritical = set(
+	"csrss.exe", "lsass.exe", "wininit.exe", "winlogon.exe", "services.exe", "smss.exe", "svchost.exe",
+	"explorer.exe", "dwm.exe", "msmpeng.exe", "fontdrvhost.exe", "lsaiso.exe", "sihost.exe", "ctfmon.exe", "audiodg.exe",
+)
+
+// kernelNames are processes without an executable on disk.
+var kernelNames = set("system", "registry", "memory compression", "secure system")
+
+// ProtectedProcess reports whether image is one of the Windows processes ABA
+// must never freeze. The name alone doesn't count: a stealer calling itself
+// svchost.exe in your Temp folder would otherwise be untouchable. It has to be
+// the real file, in the folder Windows keeps it in (which only administrators
+// can write to).
+func (c *Classifier) ProtectedProcess(image string) bool {
+	if !strings.Contains(image, `\`) {
+		return kernelNames[strings.ToLower(image)]
+	}
+	name := strings.ToLower(filepath.Base(image))
+	if !systemCritical[name] {
+		return false
+	}
+	dir := filepath.Dir(image)
+	switch name {
+	case "explorer.exe":
+		return paths.Same(dir, c.Env.WinDir)
+	case "msmpeng.exe":
+		return paths.Under(image, filepath.Join(c.Env.ProgramData, `Microsoft\Windows Defender`)) ||
+			paths.Under(image, filepath.Join(c.Env.ProgramFiles, "Windows Defender"))
+	}
+	return paths.Same(dir, filepath.Join(c.Env.WinDir, "System32"))
 }
 
 var lolbins = set(
@@ -42,6 +86,12 @@ var lolbins = set(
 	"regsvcs.exe", "certutil.exe", "bitsadmin.exe", "curl.exe", "tar.exe", "forfiles.exe",
 	"cmstp.exe", "wmic.exe", "xcopy.exe", "robocopy.exe", "findstr.exe", "msxsl.exe", "hh.exe",
 	"pcalua.exe", "scriptrunner.exe", "msdt.exe", "esentutl.exe", "expand.exe", "makecab.exe",
+	// Windows tools that copy, print out or upload whatever file they're given:
+	// a stealer that never opens a file itself has one of these do it.
+	"extrac32.exe", "replace.exe", "print.exe", "diantz.exe", "certreq.exe", "clip.exe", "sort.exe",
+	"ftp.exe", "scp.exe", "sftp.exe", "ssh.exe", "wsl.exe", "bash.exe",
+	// Small console tools that loaders hollow out and run inside.
+	"more.com", "choice.exe", "mavinject.exe",
 	// .NET Framework tools that stealers (RedLine, AgentTesla, Lumma…) hollow
 	// out and run inside, so their reads look like a Microsoft-signed program.
 	"applaunch.exe", "vbc.exe", "csc.exe", "jsc.exe", "aspnet_compiler.exe", "addinprocess.exe",
@@ -64,6 +114,7 @@ var runtimes = set(
 	"python.exe", "pythonw.exe", "py.exe", "pyw.exe", "node.exe", "java.exe", "javaw.exe",
 	"ruby.exe", "rubyw.exe", "perl.exe", "php.exe", "bun.exe", "deno.exe", "autoit3.exe",
 	"autohotkey.exe", "autohotkey64.exe", "autohotkeyu64.exe", "dotnet.exe", "lua.exe", "tclsh.exe", "wish.exe",
+	"autoit3_x64.exe", "luajit.exe", "electron.exe", "nw.exe",
 )
 
 // dropZones are where downloaded and double-clicked files land. AppData is left
@@ -234,6 +285,32 @@ func (c *Classifier) SweepExempt(image string, pid uint32, sig *authenticode.Res
 	return false
 }
 
+// HasTricksRule reports whether any of your rules allows evasion-like reads.
+func (c *Classifier) HasTricksRule() bool {
+	for _, r := range c.Ignore {
+		if r.Tricks {
+			return true
+		}
+	}
+	return false
+}
+
+// TricksAllowed reports whether one of your rules lets this program read
+// baitID in a way that otherwise counts as evasion (config.IgnoreRule.Tricks).
+// sig may be nil (not checked yet): rules that name a signer then don't match.
+func (c *Classifier) TricksAllowed(image string, pid uint32, baitID string, sig *authenticode.Result) bool {
+	signer := ""
+	if sig != nil {
+		signer = sig.Signer
+	}
+	for _, r := range c.Ignore {
+		if r.Tricks && c.ruleMatches(r, image, pid, baitID, signer, sig != nil) {
+			return true
+		}
+	}
+	return false
+}
+
 // WindowsBinary reports whether image lives in the Windows folder.
 func (c *Classifier) WindowsBinary(image string) bool {
 	return c.Env.locate(image, 1) == locSystem
@@ -279,9 +356,15 @@ func (c *Classifier) decide(image string, pid uint32, bait Bait, sig *authentico
 	}
 
 	if sig != nil && valid && bait.OwnerSigner != "" && contains(bait.OwnerExes, name) &&
-		strings.Contains(strings.ToLower(signer), strings.ToLower(bait.OwnerSigner)) {
-		return Verdict{Tier: config.TierInfo, DecoyOwner: true,
-			Reasons: []string{"the genuine " + signer + " app read its own (decoy) data: it looks like you installed it, so this decoy will be retired"}}
+		strings.Contains(strings.ToLower(signer), strings.ToLower(bait.OwnerSigner)) && c.installedAt(image, bait.OwnerDirs) {
+		if bait.Unadopted {
+			return Verdict{Tier: config.TierWarn, Reasons: []string{
+				name + " opened a fake profile that isn't one of its own: the browser only opens the profiles it knows, so this is something else going through its data (an add-on tool, or code running inside it)", sig.String()}}
+		}
+		// A warning, not a note: you should hear about a bait going away. Running
+		// the genuine app is also the one way left to make ABA remove a decoy.
+		return Verdict{Tier: config.TierWarn, DecoyOwner: true,
+			Reasons: []string{"the genuine " + signer + " app read its own (decoy) data: it looks like you installed it, so this decoy is being retired. If you didn't install it, something is trying to switch that bait off"}}
 	}
 
 	// Credential files every SDK reads on startup (~/.aws): a validly signed
@@ -318,13 +401,23 @@ func (c *Classifier) decide(image string, pid uint32, bait Bait, sig *authentico
 
 	switch loc {
 	case locSystem:
-		if valid && (windowsReaders[name] || (c.UserSession != nil && !c.UserSession(pid))) {
+		// Being in the Windows folder proves nothing by itself: a few of its
+		// subfolders (Tasks, tracing, spool\drivers\color…) can be written to
+		// without admin rights. What Windows ships is signed by Microsoft.
+		microsoft := valid && strings.Contains(signer, "Microsoft")
+		if microsoft && (windowsReaders[name] || (c.UserSession != nil && !c.UserSession(pid))) {
 			return Verdict{Tier: config.TierInfo, Reasons: []string{"Windows component", sigNote}}
 		}
-		if valid {
+		if microsoft {
 			return Verdict{Tier: config.TierWarn, Reasons: []string{name + " (part of Windows) has no reason to read app data: fine if you were copying or opening these files yourself, but malware also hides inside Windows programs", sigNote}}
 		}
-		return Verdict{Tier: config.TierWarn, Reasons: []string{"unsigned program inside the Windows folder", sigNote}}
+		if valid {
+			return Verdict{Tier: config.TierWarn, Reasons: []string{"program inside the Windows folder that isn't from Microsoft", sigNote}}
+		}
+		if sig == nil {
+			return Verdict{Tier: config.TierWarn, Reasons: []string{"program inside the Windows folder", sigNote}}
+		}
+		return Verdict{Tier: config.TierCritical, Reasons: []string{"unsigned program inside the Windows folder (" + shortDir(image) + "): everything Windows ships is signed, and parts of that folder can be written to without admin rights", sigNote}}
 	case locProgramFiles:
 		if valid {
 			return Verdict{Tier: config.TierInfo, Reasons: []string{"installed program (Program Files)", sigNote}}
@@ -364,6 +457,26 @@ func (c *Classifier) ruleMatches(r config.IgnoreRule, image string, pid uint32, 
 		}
 	}
 	return true
+}
+
+// installedAt reports whether image sits where the genuine app installs:
+// under one of dirs, or anywhere in Program Files.
+func (c *Classifier) installedAt(image string, dirs []string) bool {
+	if len(dirs) == 0 || c.Env.locate(image, 1) == locProgramFiles {
+		return true
+	}
+	for _, d := range dirs {
+		if paths.Under(image, d) {
+			return true
+		}
+	}
+	return false
+}
+
+// UserWritable reports whether image lives outside the folders only
+// administrators can write to (Windows, Program Files).
+func (c *Classifier) UserWritable(image string) bool {
+	return c.Env.locate(image, 1) == locUserWritable
 }
 
 // SameCommandLine compares command lines, ignoring case and outer spaces.

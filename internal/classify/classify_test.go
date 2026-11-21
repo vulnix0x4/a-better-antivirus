@@ -51,7 +51,14 @@ func TestTiers(t *testing.T) {
 		{"fake defender in temp", `C:\Users\bob\AppData\Local\Temp\MsMpEng.exe`, 100, unsigned, Bait{}, config.TierCritical, false, false},
 		{"windows temp", `C:\Windows\Temp\a.exe`, 100, unsigned, Bait{}, config.TierCritical, false, false},
 		{"real discord owns decoy", `C:\Users\bob\AppData\Local\Discord\app-1.0.9172\Discord.exe`, 100, discord,
-			Bait{ID: "discord", OwnerExes: []string{"discord.exe"}, OwnerSigner: "Discord"}, config.TierInfo, false, true},
+			Bait{ID: "discord", OwnerExes: []string{"discord.exe"}, OwnerSigner: "Discord", OwnerDirs: []string{`C:\Users\bob\AppData\Local\Discord`}}, config.TierWarn, false, true},
+		{"genuine discord copied elsewhere doesn't own the decoy", `C:\Users\bob\Downloads\d\Discord.exe`, 100, discord,
+			Bait{ID: "discord", OwnerExes: []string{"discord.exe"}, OwnerSigner: "Discord", OwnerDirs: []string{`C:\Users\bob\AppData\Local\Discord`}}, config.TierWarn, false, false},
+		{"unsigned in a writable corner of the Windows folder", `C:\Windows\Tasks\upd.exe`, 100, unsigned, Bait{}, config.TierCritical, false, false},
+		{"signed by someone else, inside the Windows folder", `C:\Windows\tracing\tool.exe`, 100, discord, Bait{}, config.TierWarn, false, false},
+		{"file-copying Windows tool", `C:\Windows\System32\extrac32.exe`, 100, ms, Bait{}, config.TierCritical, false, false},
+		{"upload-capable Windows tool", `C:\Windows\System32\certreq.exe`, 100, ms, Bait{}, config.TierCritical, false, false},
+		{"hollowing target more.com", `C:\Windows\System32\more.com`, 100, ms, Bait{}, config.TierCritical, false, false},
 		{"fake discord (unsigned) on decoy", `C:\Users\bob\AppData\Local\Discord\Discord.exe`, 100, unsigned,
 			Bait{ID: "discord", OwnerExes: []string{"discord.exe"}, OwnerSigner: "Discord"}, config.TierCritical, false, false},
 	}
@@ -212,5 +219,35 @@ func TestSweepExempt(t *testing.T) {
 	}
 	if c.SweepExempt(`C:\Windows\explorer.exe`, 1, &ms) {
 		t.Fatal("explorer must not be sweep-exempt")
+	}
+}
+
+// Protected processes are recognised by the real file, never by the name.
+func TestProtectedProcessGoesByTheRealFile(t *testing.T) {
+	c := &Classifier{Env: env}
+	for _, img := range []string{`C:\Windows\System32\svchost.exe`, `C:\Windows\explorer.exe`, `c:\windows\system32\LSASS.EXE`,
+		`C:\ProgramData\Microsoft\Windows Defender\Platform\4.18.24090.11-0\MsMpEng.exe`, "System", "Registry", "Memory Compression"} {
+		if !c.ProtectedProcess(img) {
+			t.Errorf("%s should be protected", img)
+		}
+	}
+	for _, img := range []string{`C:\Users\bob\AppData\Local\Temp\svchost.exe`, `C:\Users\bob\Downloads\explorer.exe`,
+		`C:\Windows\Tasks\svchost.exe`, `C:\Windows\Temp\csrss.exe`, `C:\Windows\System32\explorer.exe`, `C:\Users\bob\MsMpEng.exe`,
+		`C:\Windows\System32\notepad.exe`, `C:\Windows\System32\conhost.exe`, ""} {
+		if c.ProtectedProcess(img) {
+			t.Errorf("%s must not be protected", img)
+		}
+	}
+}
+
+// A Windows program is only looked at once its signature is known: before
+// that it isn't frozen on spec (it usually is what it says).
+func TestWindowsFolderBeforeTheSignatureIsKnown(t *testing.T) {
+	c := &Classifier{Env: env}
+	if v := c.Prelim(`C:\Windows\System32\notepad.exe`, 1, Bait{}); v.Tier != config.TierWarn {
+		t.Fatalf("prelim: %+v", v)
+	}
+	if v := c.Final(`C:\Windows\System32\notepad.exe`, 1, Bait{}, unsigned); v.Tier != config.TierCritical {
+		t.Fatalf("an unsigned file where notepad should be: %+v", v)
 	}
 }

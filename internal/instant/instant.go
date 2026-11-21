@@ -16,6 +16,13 @@
 // (An earlier version froze candidates *before* releasing, so the reader got 0
 // bytes, but CI showed that can freeze an innocent bystander. Precision wins.)
 //
+// A program can ask Windows not to pause it (FILE_COMPLETE_IF_OPLOCKED): its
+// open returns at once, so no thread is ever stuck and step 3 finds nobody.
+// That open does leave a handle behind, though, and Windows will say which
+// programs hold a file open. So when nobody wakes, whoever newly holds the
+// bait is the opener ("ghost open"). It can't read through that handle until
+// ABA lets go, and asking not to be paused is itself a sign of evasion.
+//
 // The regular audit-log detection keeps running as a backup in case the
 // opener couldn't be pinpointed.
 package instant
@@ -59,6 +66,9 @@ type Guard struct {
 	ov  *windows.Overlapped
 	in  *oplockIn
 	out *oplockOut
+	// Programs that already held the file open when the guard was armed
+	// (attribute-only handles don't break an oplock): never the opener.
+	before map[uint32]bool
 }
 
 // ErrNotGranted means another handle is open right now; try again later.
@@ -71,9 +81,12 @@ func Arm(path string) (*Guard, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Backup semantics: with the backup privilege (the service has it) the open
+	// succeeds whatever the file's permissions say, so a program running as you
+	// can't lock ABA out of a bait by rewriting them.
 	h, err := windows.CreateFile(p, windows.GENERIC_READ,
 		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
-		nil, windows.OPEN_EXISTING, windows.FILE_FLAG_OVERLAPPED, 0)
+		nil, windows.OPEN_EXISTING, windows.FILE_FLAG_OVERLAPPED|windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +109,59 @@ func Arm(path string) (*Guard, error) {
 		}
 		return nil, ErrNotGranted
 	}
+	g.before = map[uint32]bool{}
+	for _, pid := range g.Users() {
+		g.before[pid] = true
+	}
 	return g, nil
+}
+
+var procNtQueryInformationFile = ntdll.NewProc("NtQueryInformationFile")
+
+const fileProcessIdsUsingFileInformation = 47
+
+// Users lists the programs (PIDs) that have the file open right now, other
+// than through this guard. It's what Explorer's "file is open in…" uses. A
+// program paused inside its open isn't listed yet; one whose open already
+// returned is.
+func (g *Guard) Users() []uint32 {
+	if g.h == 0 {
+		return nil
+	}
+	buf := make([]byte, 8+8*64)
+	for try := 0; try < 3; try++ {
+		var iosb windows.IO_STATUS_BLOCK
+		r, _, _ := procNtQueryInformationFile.Call(uintptr(g.h), uintptr(unsafe.Pointer(&iosb)),
+			uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)), fileProcessIdsUsingFileInformation)
+		const statusInfoLengthMismatch, statusBufferOverflow = 0xC0000004, 0x80000005
+		if uint32(r) == statusInfoLengthMismatch || uint32(r) == statusBufferOverflow {
+			buf = make([]byte, len(buf)*8)
+			continue
+		}
+		if r != 0 {
+			return nil
+		}
+		n := int(le32(buf, 0))
+		var out []uint32
+		for i := 0; i < n && 8+8*(i+1) <= len(buf); i++ {
+			out = append(out, uint32(le64(buf, 8+8*i)))
+		}
+		return out
+	}
+	return nil
+}
+
+// NewUsers are the programs holding the file open now that weren't when the
+// guard was armed, leaving out self (ABA).
+func (g *Guard) NewUsers(self uint32) []uint32 {
+	var out []uint32
+	for _, pid := range g.Users() {
+		if pid != self && pid > 4 && !g.before[pid] {
+			out = append(out, pid)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
 }
 
 // Event is signalled when another program opens the file.
@@ -272,8 +337,16 @@ type Watcher struct {
 	// OnOpen gets the program(s) that opened the bait, identified by waking up
 	// exactly when ABA let go. It runs a few ms after the open.
 	OnOpen func(path string, at time.Time, pids []uint32)
+	// OnGhost gets the program(s) that opened the bait without letting Windows
+	// pause them (see the package comment): found by who holds the file, not by
+	// who woke. When ahead is true it runs before ABA lets go, so they haven't
+	// read through that handle yet.
+	OnGhost func(path string, at time.Time, pids []uint32, ahead bool)
 	// OnOther runs for opens that don't read contents (delete, security checks).
 	OnOther func(path string, access uint32)
+	// OnBlocked runs when a bait can't be guarded because some program keeps it
+	// open (pids), which switches instant freeze off for that file.
+	OnBlocked func(path string, pids []uint32)
 	// Suspect (optional) picks, among programs paused inside an open, one
 	// already known to be sweeping: it's reported before the open is let go.
 	Suspect func(path string, pids []uint32) uint32
@@ -283,6 +356,7 @@ type Watcher struct {
 
 	mu     sync.Mutex
 	active map[string]windows.Handle // path -> stop event
+	armed  map[string]bool           // paths whose oplock is held right now
 	wg     sync.WaitGroup
 }
 
@@ -332,12 +406,60 @@ func (w *Watcher) Stop() {
 	w.wg.Wait()
 }
 
-// Count of paths currently guarded.
+// Count of paths that should be guarded.
 func (w *Watcher) Count() int {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return len(w.active)
 }
+
+// Armed is how many of them are actually held right now. (A guard is briefly
+// down after each open; one that stays down means something keeps the file
+// open, see OnBlocked.)
+func (w *Watcher) Armed() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	n := 0
+	for p := range w.active {
+		if w.armed[p] {
+			n++
+		}
+	}
+	return n
+}
+
+func (w *Watcher) setArmed(path string, on bool) {
+	w.mu.Lock()
+	if w.armed == nil {
+		w.armed = map[string]bool{}
+	}
+	if on {
+		w.armed[path] = true
+	} else {
+		delete(w.armed, path)
+	}
+	w.mu.Unlock()
+}
+
+// Holders lists the programs that have path open, without disturbing them
+// (the open asks only for attributes, which breaks no oplock and reads nothing).
+func Holders(path string) []uint32 {
+	p, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return nil
+	}
+	h, err := windows.CreateFile(p, windows.FILE_READ_ATTRIBUTES,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
+	if err != nil {
+		return nil
+	}
+	defer windows.CloseHandle(h)
+	return (&Guard{h: h}).Users()
+}
+
+// blockedAfter is how many seconds a bait must stay un-guardable before OnBlocked.
+var blockedAfter = 10
 
 func (w *Watcher) logf(f string, a ...any) {
 	if w.Logf != nil {
@@ -356,15 +478,33 @@ func (w *Watcher) guard(path string, stop windows.Handle) {
 		r, _ := windows.WaitForSingleObject(stop, uint32(d.Milliseconds()))
 		return r == windows.WAIT_OBJECT_0
 	}
+	fails := 0
 	for {
 		g, err := Arm(path)
 		if err != nil {
-			if stopped(time.Second) { // busy or missing: retry quietly
+			// Busy or missing: retry quietly. But a bait that stays busy is one
+			// some program is holding open, which keeps the guard off it.
+			if fails++; fails == blockedAfter && errors.Is(err, ErrNotGranted) && w.OnBlocked != nil {
+				var pids []uint32
+				for _, p := range Holders(path) {
+					if p != w.Self {
+						pids = append(pids, p)
+					}
+				}
+				if len(pids) > 0 {
+					w.logf("instant: %s can't be guarded: held open by %v", path, pids)
+					w.OnBlocked(path, pids)
+				}
+			}
+			if stopped(time.Second) {
 				return
 			}
 			continue
 		}
+		fails = 0
+		w.setArmed(path, true)
 		r, _ := windows.WaitForMultipleObjects([]windows.Handle{g.Event(), stop}, false, windows.INFINITE)
+		w.setArmed(path, false)
 		if r != windows.WAIT_OBJECT_0 {
 			g.Release()
 			return
@@ -385,14 +525,33 @@ func (w *Watcher) guard(path string, stop windows.Handle) {
 			}
 			continue
 		}
+		// Whoever holds the bait open at this instant, and didn't before: only a
+		// program that asked not to be paused has a handle already. (Asking
+		// Windows takes tens of ms, so it runs alongside the wait below.)
+		hc := make(chan []uint32, 1)
+		go func() { hc <- g.NewUsers(w.Self) }()
 		// ABA's own threads are included on purpose: when ABA itself reads a
 		// bait (health check, repair), its stuck thread is the opener. Leaving it
 		// out made any program that happened to wake at that instant look like
 		// the opener, and get frozen for a read it never made.
 		stuck := FindStuck(tick0, 0, settle)
+		holders := <-hc
+		own := selfIn(stuck, w.Self)
+		// A ghost open is certain when nobody is paused at all, or when the one
+		// program holding the bait is itself stuck (in its read: the open already
+		// returned). Reported before letting go, so it hasn't read yet.
+		if !own && len(holders) > 0 && (len(stuck) == 0 || (len(holders) == 1 && hasPID(stuckPIDs(stuck), holders[0]))) {
+			w.logf("instant: %s opened by %v without being paused (ghost open)", path, holders)
+			w.ghost(path, at, holders, true)
+			g.Release()
+			if stopped(150 * time.Millisecond) {
+				return
+			}
+			continue
+		}
 		// A program already known to be sweeping (it read other apps' data) is
 		// decided while the open is still paused, so it never gets this file.
-		if w.Suspect != nil && !selfIn(stuck, w.Self) {
+		if w.Suspect != nil && !own {
 			if p := w.Suspect(path, stuckPIDs(stuck)); p != 0 {
 				w.logf("instant: %s opened while pid %d (already sweeping) was paused in it", path, p)
 				w.report(path, at, []uint32{p})
@@ -405,15 +564,23 @@ func (w *Watcher) guard(path string, stop windows.Handle) {
 		}
 		g.Release()
 		pids := Woke(stuck, 0, 3*time.Millisecond)
-		if selfIn(stuck, w.Self) {
+		switch {
+		case own:
 			pids = nil // our own read
-		} else if len(pids) > 1 {
+		case len(pids) > 1:
 			// More than one program woke at that instant: don't guess. The
 			// event-log path still catches whichever one actually reads.
 			w.logf("instant: %s opened, but %v all woke at once; leaving it to the event log", path, pids)
 			pids = nil
-		} else if len(pids) == 1 {
+		case len(pids) == 1 && !hasPID(holders, pids[0]):
 			w.logf("instant: %s opened by pid %d", path, pids[0])
+		case len(holders) > 0:
+			// Either the program that woke already held the bait (its open had
+			// returned; it was waiting in a read), or threads were stuck but none
+			// woke when ABA let go, so none was the opener: it's whoever holds the file.
+			w.logf("instant: %s opened by %v without being paused (ghost open)", path, holders)
+			w.ghost(path, at, holders, false)
+			pids = nil
 		}
 		w.report(path, at, pids)
 		// Give the opener time to finish before re-arming (a trusted reader may
@@ -434,6 +601,27 @@ func (w *Watcher) report(path string, at time.Time, pids []uint32) {
 		}
 	}()
 	w.OnOpen(path, at, pids)
+}
+
+func (w *Watcher) ghost(path string, at time.Time, pids []uint32, ahead bool) {
+	if w.OnGhost == nil {
+		return
+	}
+	defer func() {
+		if p := recover(); p != nil {
+			w.logf("instant freeze handler panicked: %v", p)
+		}
+	}()
+	w.OnGhost(path, at, pids, ahead)
+}
+
+func hasPID(pids []uint32, pid uint32) bool {
+	for _, p := range pids {
+		if p == pid {
+			return true
+		}
+	}
+	return false
 }
 
 func stuckPIDs(stuck []Thread) []uint32 {

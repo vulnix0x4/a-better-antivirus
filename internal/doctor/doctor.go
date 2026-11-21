@@ -184,7 +184,7 @@ func Run() []Result {
 
 	// Notifications.
 	if cfg.Learning(time.Now()) {
-		add(Note, "Learning mode", Until(cfg.LearningUntil)+": alerts only, nothing is blocked", "aba learn")
+		add(Note, "Learning mode", Until(cfg.LearningUntil)+": only critical readers are stopped, the rest just raise an alert", "aba learn")
 	}
 	if admin {
 		if sec, err := config.LoadSecrets(); err == nil {

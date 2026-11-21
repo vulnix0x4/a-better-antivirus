@@ -278,8 +278,8 @@ func genSSHKey(*Gen) []byte {
 	return []byte(b.String())
 }
 
-func genProfilesIni(*Gen) []byte {
-	return []byte("[Profile0]\r\nName=default-release\r\nIsRelative=1\r\nPath=Profiles/q8m3kx2v.default-release\r\nDefault=1\r\n\r\n[General]\r\nStartWithLastProfile=1\r\nVersion=2\r\n")
+func genProfilesIni(profile string) []byte {
+	return []byte("[Profile0]\r\nName=default-release\r\nIsRelative=1\r\nPath=Profiles/" + profile + "\r\nDefault=1\r\n\r\n[General]\r\nStartWithLastProfile=1\r\nVersion=2\r\n")
 }
 
 func genFirefoxLogins(g *Gen) []byte {
@@ -288,27 +288,6 @@ func genFirefoxLogins(g *Gen) []byte {
 	}
 	return []byte(fmt.Sprintf(`{"nextId":3,"logins":[{"id":1,"hostname":"https://accounts.google.com","encryptedUsername":"%s","encryptedPassword":"%s","encType":1,"timesUsed":14},{"id":2,"hostname":"https://www.paypal.com","encryptedUsername":"%s","encryptedPassword":"%s","encType":1,"timesUsed":3}],"version":3}`,
 		enc(), enc(), enc(), enc()))
-}
-
-// genEmptySQLite returns a valid, empty SQLite 3 database (one page).
-func genEmptySQLite(*Gen) []byte {
-	const pageSize = 4096
-	b := make([]byte, pageSize)
-	copy(b, "SQLite format 3\x00")
-	be := binary.BigEndian
-	be.PutUint16(b[16:], pageSize)
-	b[18], b[19] = 1, 1 // file format write/read version (legacy)
-	b[21], b[22], b[23] = 64, 32, 32
-	be.PutUint32(b[24:], 1)       // file change counter
-	be.PutUint32(b[28:], 1)       // database size in pages
-	be.PutUint32(b[44:], 4)       // schema format
-	be.PutUint32(b[56:], 1)       // text encoding UTF-8
-	be.PutUint32(b[92:], 1)       // version-valid-for
-	be.PutUint32(b[96:], 3046001) // SQLITE_VERSION_NUMBER
-	// sqlite_schema b-tree: empty table leaf page
-	b[100] = 0x0D
-	be.PutUint16(b[105:], pageSize)
-	return b
 }
 
 // Persona serialises the fake identity so repairs recreate consistent content.

@@ -57,8 +57,9 @@ Despite the name, **keep Windows Defender on.** Antivirus tries to stop malware 
 
 Infostealers (Lumma, RedLine, Vidar, StealC…) are the most common malware on personal PCs. They sweep your browsers, wallets, Discord/Telegram sessions and documents, zip it all up and upload it, usually within seconds. Most of them **collect first and upload at the end**, and collecting means opening files in known places. ABA puts tripwires in exactly those places.
 
-- **Fake files** where file grabbers look: `passwords.txt` on the Desktop, in Documents and in your home folder, a wallet recovery phrase, 2FA backup codes, a KeePass database.
-- **Fake app data for apps you don't use**: Opera, Vivaldi and Yandex browser profiles (with saved passwords and cookies), MetaMask, Exodus, Electrum and Atomic wallets, Telegram sessions, Discord tokens, FileZilla servers, AWS keys. Nothing legitimate ever reads these, because the app isn't installed, so the signal is extremely clean. ABA checks what you actually have installed and never fakes data for those apps. If you install one later, ABA notices and quietly retires that decoy.
+- **Fake files** where file grabbers look: a password list on the Desktop, in Documents and in your home folder, a wallet recovery phrase, 2FA backup codes, a KeePass database. Every install names them differently (from what grabbers search for), so they can't be skipped by name.
+- **Fake app data for apps you don't use**: Opera, Vivaldi and Yandex browser profiles (real databases with saved logins and cookies in them), MetaMask, Exodus, Electrum and Atomic wallets, Telegram sessions, Discord tokens, FileZilla servers, AWS keys. Nothing legitimate ever reads these, because the app isn't installed, so the signal is extremely clean. ABA checks what you actually have installed and never fakes data for those apps. If you install one later, ABA notices, retires that decoy and tells you. (It has to be the real thing, signed by its publisher: a file that merely looks like the app is reported instead.)
+- **A fake profile inside the browsers you do use**: a `Profile 23` (or so) folder next to your real profiles in Chrome, Edge and Brave, with saved logins and cookies. Stealers take every profile folder; the browser itself only opens the ones it knows, so it never touches this one. This is the bait a stealer can't dodge by checking whether the app is really installed.
 - **Canary tokens** (optional): the fake AWS keys and a link in `passwords.txt` are real [canarytokens.org](https://canarytokens.org) tokens. If a stealer gets your data and someone *uses* them later, you get an email, even if your PC was never online to tell you.
 
 It catches stealers by **what they do**, not by recognising the file, so it works on brand-new ones no antivirus has a signature for yet.
@@ -93,16 +94,18 @@ It catches stealers by **what they do**, not by recognising the file, so it work
            6. alert ────────────────────────────┘ desktop popup + toast + phone
 ```
 
-- **Instant freeze** (on by default, `aba instant on|off`): ABA holds an exclusive *opportunistic lock* on every bait. When a program opens one, Windows pauses it inside the open and tells ABA immediately. ABA notes which threads just got stuck, lets go, and the one that wakes at that exact instant is the opener: identified precisely, never guessed. If it's suspicious it's frozen right away, typically ~0.1 s after the open (72–151 ms in CI), instead of waiting for the event log. To stay safe it only ever acts on ordinary non-admin programs in your session, never on system processes or on ABA itself, and if more than one program wakes at once it doesn't guess.
-- **Detection backup** uses Windows' own file auditing (an audit rule on each bait, read through the Security event log). No kernel driver, no background scanning, no CPU use while idle. Malware running as you can neither see nor remove the audit rules.
+- **Instant freeze** (on by default, `aba instant on|off`): ABA holds an exclusive *opportunistic lock* on every bait. When a program opens one, Windows pauses it inside the open and tells ABA immediately. ABA notes which threads just got stuck, lets go, and the one that wakes at that exact instant is the opener: identified precisely, never guessed. If it's suspicious it's frozen right away, typically ~0.1 s after the open (72–151 ms in CI), instead of waiting for the event log. A program that asks Windows *not* to pause it is found by the handle it's left holding, before it can read through it. To stay safe it only ever acts on ordinary non-admin programs running as you, never on system processes or on ABA itself, and if more than one program wakes at once it doesn't guess.
+- **Detection backup** uses Windows' own file auditing (an audit rule on each bait, read through the Security event log). No kernel driver, no background scanning, no CPU use while idle. Malware running as you can neither see nor remove the audit rules, and can't read ABA's own files to find out where the baits are.
 - **Severity** is automatic. Malware without admin rights can't write to `Program Files` or `Windows`, and stealers are almost always unsigned binaries in user-writable folders or abuse script hosts like PowerShell or mshta. So:
 
   | Reader | Severity |
   |---|---|
-  | Anything that goes through **several apps' data** within 2 minutes (a sweep) | **critical** |
+  | Anything that goes through **several apps' data** within 2 minutes (a sweep), alone or split over several programs | **critical** |
+  | Anything using a **trick to read unseen**: opening a bait so Windows doesn't pause it, an execute-only mapping, a hard link, a copy of ABA as a disguise | **critical** |
   | A Windows program running **injected code** (code that isn't from any file on disk) | **critical** |
-  | Unsigned program in Temp, AppData, Downloads, Desktop… | **critical** |
-  | PowerShell, cmd, mshta, rundll32, wscript, and .NET tools stealers hide in (RegAsm, AppLaunch, vbc, MSBuild…) | **critical** |
+  | Unsigned program in Temp, AppData, Downloads, Desktop… or inside the Windows folder | **critical** |
+  | Signed program in a user folder running an **unsigned DLL from its own folder** (sideloading) | **critical** |
+  | PowerShell, cmd, mshta, rundll32, wscript, Windows tools that copy or upload a file for you (certutil, extrac32, certreq, scp…), and tools stealers hide in (RegAsm, AppLaunch, vbc, MSBuild, more.com…) | **critical** |
   | Java, Python, Node… running a script or `.jar` from your Desktop, Downloads or Temp (a "game" you double-clicked) | **critical** |
   | Signed app in a user folder, scripting runtimes (Python, Node, Java), other Windows programs in your session, network share reads | **warn** |
   | Signed, installed software (Program Files), Windows services, the preview pane | **info** |
@@ -119,6 +122,8 @@ It catches stealers by **what they do**, not by recognising the file, so it work
   | Strict | freeze + block + isolate the PC | freeze |
 
   Isolation uses the Windows Filtering Platform (the same engine enterprise "isolate device" uses). It survives reboots so malware can't wait it out, and it still lets ABA's own phone alert through. `aba release` undoes everything.
+
+- **Frozen means frozen.** A stealer is rarely one process, and anything running as you can un-suspend a suspended process. So ABA freezes the whole thing: the reader and what it started, the unsigned loader or script host that started *it*, other running copies of the same file. And it holds them in a frozen job object that only the ABA service can reach, so no accomplice can thaw them (`aba resume` and `aba release` ask the service to). Windows' own processes are never frozen, going by the real file: a stealer that calls itself `svchost.exe` is.
 
 ## Everyday use
 
@@ -144,12 +149,14 @@ Setup:
 ```
 aba configure    change baits, response, learning mode, phone alerts, updates, canary tokens
 aba update       check for a new version and install it (--check to only look)
-aba bait list | show <id> | add <path> | remove <id> | catalog
+aba bait list | show <id> | add <path or catalog id> | remove <id> | rename | catalog
 aba ignore list | add <pattern> [--signer X] | remove <n>
 aba instant [on|off]
 aba phone test
 aba uninstall [--purge]
 ```
+
+Most commands ask for administrator rights (a Windows prompt): what touched which bait, and where the baits are, is exactly what a stealer would like to read, so ABA's files are closed to everything not running as admin. Plain `aba` works without: it shows whether you're protected and whether anything is waiting for you.
 
 **Don't open your bait files**: that's a read. Use `aba bait show <id>` instead; it prints the content without touching the file. If you do open one, Windows adds it to *Recent files*, and apps like Copilot then read it (that's how we found out). ABA removes those shortcuts automatically.
 
@@ -161,7 +168,8 @@ Every alert asks whether that program should be reading that bait. One click on 
 - a signed program is pinned to its folder **and** its code-signing publisher;
 - an unsigned program is pinned to **that exact file** (its SHA-256), not its path, since anything can be dropped at the same path later;
 - a script host or runtime (`python.exe`, `powershell.exe`, `java.exe`…) is pinned to **the exact command line**: trusting your script never trusts every script;
-- a Windows program that went through several apps' data is never trusted permanently, only unfrozen that once.
+- a Windows program that went through several apps' data is never trusted permanently, only unfrozen that once;
+- nothing that used a trick to read unseen (see the table above) is trusted permanently from an alert, and a trick overrides trust you gave earlier. If a backup or security tool of yours really reads files that way, allow it as administrator with `aba ignore add "<path>" --signer <publisher> --allow-tricks`.
 
 When something is **frozen**, the popup asks "Kill it?" and reminds you that games, mods, cheats and cracks never need to read this, rather than asking "is it yours?" (you *did* start that cracked game yourself), and only signed programs can be trusted in one click; anything else is unfrozen that once (`aba trust <id>` in a terminal still trusts it, pinned to the file). A program that keeps touching a bait without you answering only pops up once every 12 hours, except script hosts and anything critical; the rest goes to `aba alerts`.
 
@@ -184,11 +192,13 @@ So a swapped release file, a compromised mirror or a proxy can't get code onto y
 
 ## Honest limitations
 
-- **It's a tripwire, not a shield.** It catches stealers that go looking for files. A stealer that only grabs your real browser data and never touches a bait won't trip it.
+- **It's a tripwire, not a shield.** It catches stealers that go looking for files. A stealer that only grabs your real browser data and never touches a bait won't trip it. ABA is open source, so a stealer can be written to know it: what it can't do cheaply any more is tell which files are baits (their names differ per install, ABA's own records are closed to it, the fake apps hold up to a look, and checking that a browser is really installed doesn't help against a fake profile inside it). One that reads each browser's own list of profiles and takes only those, and nothing else on the PC, still stays under the wire.
 - **Speed.** With instant freeze a stealer is frozen about 0.1 s after it opens a bait (it gets the fake bait contents, not your real data). Without it, ABA waits for the event log: a few ms to about 1 s. A stealer that uploads each item the moment it reads it may get something out first; freezing stops whatever it hasn't sent yet.
+- **A reader that's already gone can't lead to its parent.** ABA freezes the program that started a critical reader, by looking at it while it's alive (instant freeze does). A reader that exits before its event arrives, on a PC where instant freeze couldn't single it out, is reported and cut off, but whatever started it isn't known. Its file's internet stays cut either way.
 - **Instant freeze is deliberately cautious.** It skips programs running as administrator and anything it can't pinpoint with certainty; those are still caught by the event-log path, just a little later.
 - **Admin malware.** Malware running as administrator can stop the service, clear the audit policy or remove filters. ABA alerts if auditing is switched off, but it can't defend against an attacker who already owns the machine.
-- **Injection is judged by its results, not watched as it happens.** Seeing one process write code into another needs a kernel driver or Microsoft's protected-antivirus signing, which ABA doesn't have. It catches injected stealers by what they read (sweeps) and, inside Windows programs, by the injected code they leave in memory. A stealer injected into an app you trusted that reads *only* the one bait you trusted that app with would get through; nothing real works that way, but it's possible. The memory check skips programs that legitimately generate code (.NET, Java, browsers), and newer tricks that disguise injected code as a file on disk (module stomping, process ghosting) aren't detected by it; the sweep rule still applies to them.
+- **If the service is killed mid-incident, what it froze is ended.** A hold that nobody is left to release would otherwise stay frozen for good. That only happens if the service crashes or is killed; stopping, updating or reinstalling it releases holds properly (frozen programs stay suspended).
+- **Injection is judged by its results, not watched as it happens.** Seeing one process write code into another needs a kernel driver or Microsoft's protected-antivirus signing, which ABA doesn't have. It catches injected stealers by what they read (sweeps) and, inside Windows programs, by the injected code they leave in memory. A stealer injected into an app you trusted that reads *only* the one bait you trusted that app with would get through; nothing real works that way, but it's possible. The memory check skips programs that legitimately generate code (.NET, Java, browsers), and newer tricks that disguise injected code as a file on disk (module stomping, process ghosting) aren't detected by it; the sweep rule still applies to them. Windows' own desktop processes (`explorer.exe` and a few others) are never frozen even with code injected into them: their internet is cut instead.
 - **Desktop popups need you to be signed in.** Detections are always logged and phone alerts always go out, and responses happen either way.
 - **Some legit software reads files** (backup, sync, search tools). One click on *It's mine* handles that. A backup tool that copies your whole AppData looks like a sweep; allow it to read everything with `aba ignore add "<path>" --signer <publisher>` (or *It's mine* on the sweep alert, for signed programs).
 - **`~/.aws/credentials` is read by every AWS SDK** (OpenCode, Claude Code, VS Code, Terraform…), so a *signed* program reading it is only logged. Unsigned programs, script hosts and runtimes still trip it, and the other baits are unaffected.
@@ -200,7 +210,7 @@ So a swapped release file, a compromised mirror or a proxy can't get code onto y
 |---|---|---|
 | Program | `C:\Program Files\File Access Monitor` | ✓ |
 | Service | `FileAccessMonitor` (LocalSystem, auto-start) | ✓ |
-| Data, alerts, logs | `C:\ProgramData\FileAccessMonitor` | alerts kept unless `--purge` |
+| Data, alerts, logs | `C:\ProgramData\FileAccessMonitor` (admins only; a status summary in `public\`) | alerts kept unless `--purge` |
 | Audit policy | "Audit File System: Success" | ✓ restored to what it was |
 | Baits | your folders + fake app folders | ✓ (files you made yourself are kept) |
 | Firewall filters | WFP provider "A Better Antivirus" (only while responding) | ✓ |

@@ -72,9 +72,9 @@ func TestGeneratorsProduceTemptingContent(t *testing.T) {
 	if s := string(genAWSCredentials(g)); !strings.Contains(s, "AKIATESTCANARY000001") {
 		t.Errorf("aws creds should use canary keys: %q", s)
 	}
-	db := genEmptySQLite(g)
-	if len(db) != 4096 || !bytes.HasPrefix(db, []byte("SQLite format 3\x00")) || db[100] != 0x0D {
-		t.Errorf("sqlite header wrong")
+	db := genLoginData(g)
+	if len(db) <= 4096 || !bytes.HasPrefix(db, []byte("SQLite format 3\x00")) || db[100] != 0x0D || !bytes.Contains(db, []byte(g.Email)) && !bytes.Contains(db, []byte(g.User)) {
+		t.Errorf("fake Login Data should be a database holding the persona's logins")
 	}
 	if k := genKdbx(g); !bytes.HasPrefix(k, []byte{0x03, 0xD9, 0xA2, 0x9A, 0x67, 0xFB, 0x4B, 0xB5}) {
 		t.Errorf("kdbx magic wrong: % x", k[:8])

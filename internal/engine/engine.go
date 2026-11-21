@@ -56,6 +56,17 @@ type Ops interface {
 	// InjectedCode looks inside a process for running code that isn't from any
 	// file on disk (a stealer injected into a legitimate program).
 	InjectedCode(pid uint32) (string, bool)
+	// SideLoaded looks for an unsigned DLL loaded from the program's own folder
+	// (a stealer riding inside a signed program) and returns its path.
+	SideLoaded(pid uint32, image string) (string, bool)
+	// Hold locks frozen processes so no other program can un-freeze them.
+	Hold(pids []uint32)
+	// Ancestors are the processes that started pid: parent first.
+	Ancestors(pid uint32) []procinfo.Ancestor
+	// SuspendMore freezes root and what it started, leaving out already.
+	SuspendMore(root uint32, already []uint32) []uint32
+	// RunningImage lists the processes running the executable at path.
+	RunningImage(path string) []uint32
 	ClearTest()
 	Logf(format string, args ...any)
 }
@@ -84,6 +95,24 @@ type Engine struct {
 	sids        map[uint32]string        // account (SID) a process read baits as, from the audit event
 	pending     map[uint32]chan struct{} // instant decisions in progress
 	eventFrozen map[uint32]time.Time     // processes the event-log path froze
+	marks       map[uint32]mark          // processes seen using a trick to dodge detection
+	team        []teamRead               // recent bait reads by anyone, for sweeps split over several processes
+}
+
+// mark notes that a process did something only evasion explains.
+type mark struct {
+	why        string
+	createTime int64
+	at         time.Time
+}
+
+// teamRead is one program reading one app's bait.
+type teamRead struct {
+	pid        uint32
+	createTime int64
+	unit       string
+	image      string
+	at         time.Time
 }
 
 // sweep is what one process has opened lately. Stealers grab everything they
@@ -111,7 +140,7 @@ const window = 2 * time.Minute
 func New(ops Ops, selfPID uint32) *Engine {
 	return &Engine{Ops: ops, SelfPID: selfPID, incidents: map[uint32]*incident{}, claimed: map[uint32]time.Time{},
 		seen: map[string]time.Time{}, touched: map[uint32]*sweep{}, sids: map[uint32]string{},
-		pending: map[uint32]chan struct{}{}, eventFrozen: map[uint32]time.Time{}}
+		pending: map[uint32]chan struct{}{}, eventFrozen: map[uint32]time.Time{}, marks: map[uint32]mark{}}
 }
 
 // Configure (re)loads config and the bait index.
@@ -136,20 +165,69 @@ func (e *Engine) IsBait(path string) (string, bool) {
 	return id, ok
 }
 
-// processes we never suspend or kill (would hang or crash Windows / the desktop).
-var neverTouch = map[string]bool{
-	"system": true, "csrss.exe": true, "lsass.exe": true, "wininit.exe": true, "winlogon.exe": true,
-	"services.exe": true, "smss.exe": true, "svchost.exe": true, "explorer.exe": true, "dwm.exe": true,
-	"msmpeng.exe": true, "fontdrvhost.exe": true, "lsaiso.exe": true, "registry": true,
-	"memory compression": true, "secure system": true, "sihost.exe": true, "ctfmon.exe": true,
-	"audiodg.exe": true, "conhost.exe": true, "runtimebroker.exe": true, "searchhost.exe": true,
-}
-
+// touchable: ABA never suspends or kills itself or the Windows processes that
+// would take the desktop down with them (see classify.ProtectedProcess, which
+// goes by the real file, not by the name).
 func (e *Engine) touchable(pid uint32, image string) bool {
 	if pid == 0 || pid == 4 || pid == e.SelfPID {
 		return false
 	}
-	return !neverTouch[strings.ToLower(filepath.Base(image))]
+	e.mu.Lock()
+	cls := e.classifier
+	e.mu.Unlock()
+	return cls == nil || !cls.ProtectedProcess(image)
+}
+
+// NoteEvasion records that pid did something only an attempt to dodge
+// detection explains (e.g. opened a bait in a way that avoids being paused).
+// Whatever it is or is signed by, its bait reads are critical from then on.
+func (e *Engine) NoteEvasion(pid uint32, why string) {
+	ct := e.Ops.CreateTime(pid)
+	e.mu.Lock()
+	for p, m := range e.marks {
+		if time.Since(m.at) > markFor {
+			delete(e.marks, p)
+		}
+	}
+	e.marks[pid] = mark{why: why, createTime: ct, at: time.Now()}
+	e.mu.Unlock()
+}
+
+// markFor is how long an evasion mark sticks to a process.
+const markFor = 30 * time.Minute
+
+func (e *Engine) evasion(pid uint32) string {
+	e.mu.Lock()
+	m, ok := e.marks[pid]
+	e.mu.Unlock()
+	if !ok || time.Since(m.at) > markFor {
+		return ""
+	}
+	if ct := e.Ops.CreateTime(pid); ct != 0 && m.createTime != 0 && ct != m.createTime {
+		return "" // the PID was reused by another process
+	}
+	return m.why
+}
+
+// ownCopy: the reader is a copy of ABA's own program. Running as
+// administrator that's ABA's own tooling. Not elevated, it's something else
+// using ABA's program as a disguise (started it and injected code into it):
+// nothing in ABA reads a bait without admin rights.
+func (e *Engine) ownCopy(pid uint32, image string) (self, disguise bool) {
+	if !e.Ops.IsSelf(image) {
+		return false, false
+	}
+	if e.Ops.CreateTime(pid) != 0 && e.Ops.Elevated(pid) {
+		return true, false
+	}
+	return false, true
+}
+
+const disguiseWhy = "it's a copy of ABA's own program reading a bait without admin rights: ABA never does that, so something is using it as a disguise"
+
+// evasive turns v into a critical verdict because of why.
+func evasive(v classify.Verdict, why string) classify.Verdict {
+	return classify.Verdict{Tier: config.TierCritical, Evasion: true, Swept: v.Swept, Reasons: append([]string{why}, v.Reasons...)}
 }
 
 // DecideInstant runs while a bait opener is paused inside Windows (see package
@@ -203,18 +281,28 @@ func (e *Engine) DecideInstantWhy(pid uint32, path string) (bool, string) {
 		done(false)
 		return false, image + " runs as administrator"
 	}
-	if e.Ops.IsSelf(image) {
-		done(false)
-		return false, image + " is ABA itself"
-	}
 	sig := e.Ops.Verify(image)
-	v := cls.Final(image, pid, baitRef(baitID), sig)
-	if swept := e.touch(pid, baitID, time.Now()); len(swept) >= sweepApps && !cls.SweepExempt(image, pid, &sig) {
+	v := cls.Final(image, pid, e.baitRef(baitID), sig)
+	exempt := cls.SweepExempt(image, pid, &sig)
+	if swept := e.touch(pid, baitID, time.Now()); len(swept) >= sweepApps && !exempt {
 		v = e.sweepVerdict(v, swept)
+	}
+	if !v.Builtin && !v.DecoyOwner {
+		// (Elevated copies of ABA were let through above.)
+		if _, disguise := e.ownCopy(pid, image); disguise {
+			v = evasive(v, disguiseWhy)
+		} else if why := e.evasion(pid); why != "" && !cls.TricksAllowed(image, pid, baitID, &sig) {
+			v = evasive(v, why)
+		}
 	}
 	if v.Ignored || v.DecoyOwner {
 		done(false)
 		return false, image + " is ignored or the real app"
+	}
+	if !exempt && v.Tier != config.TierCritical {
+		if units, _ := e.joinTeam(pid, baitID, image, time.Now()); units != nil {
+			v = e.teamVerdict(v, units, 0)
+		}
 	}
 	if !config.Has(cfg.ActionsFor(v.Tier, time.Now()), config.ActionFreeze) {
 		done(false)
@@ -324,10 +412,17 @@ func (e *Engine) HandleOpen(pid uint32, path string, at time.Time, frozen []uint
 	e.handle(&evtlog.ObjectAccess{ProcessID: pid, ObjectName: path, AccessMask: 1, Time: at}, frozen)
 }
 
-func baitRef(id string) classify.Bait {
+func (e *Engine) baitRef(id string) classify.Bait {
 	b := classify.Bait{ID: id}
 	if s, ok := baits.ByID(id); ok {
 		b.OwnerExes, b.OwnerSigner, b.SharedSDK = s.OwnerExes, s.Signer, s.SharedSDK
+		e.mu.Lock()
+		cfg := e.cfg
+		e.mu.Unlock()
+		if cfg != nil {
+			b.OwnerDirs = baits.OwnerDirs(s, cfg.User)
+			b.Unadopted = s.Inside != nil && !baits.Adopted(s, cfg.User)
+		}
 	}
 	return b
 }
@@ -420,21 +515,31 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 	e.mu.Unlock()
 
 	now := time.Now()
-	image := oa.ProcessName
-	if image == "" || !strings.Contains(image, `\`) {
-		if p, err := e.Ops.ImagePath(oa.ProcessID); err == nil {
-			image = p
+	// The event names the file the program was started from. A running
+	// program can rename its own file and put something else (signed, innocent)
+	// at the old path, so that checking "its" signature checks the wrong file.
+	// While it's alive, Windows says which file is really running: go by that.
+	image, startedAs := oa.ProcessName, ""
+	if live, err := e.Ops.ImagePath(oa.ProcessID); err == nil && live != "" {
+		if strings.Contains(image, `\`) && !paths.Same(paths.Long(live), paths.Long(image)) {
+			startedAs = image
 		}
+		image = live
 	}
 	test := false
 	if tr := e.Ops.PendingTest(); tr != nil && tr.PID == oa.ProcessID {
 		test = true
 	}
-	if !test && e.Ops.IsSelf(image) {
-		return // ABA's own binary (doctor, bait adoption…), recognised by its hash
+	disguise := false
+	if !test {
+		self, d := e.ownCopy(oa.ProcessID, image)
+		if self {
+			return // ABA's own tooling, running as administrator (doctor, bait adoption…)
+		}
+		disguise = d
 	}
 	createTime := e.Ops.CreateTime(oa.ProcessID)
-	ref := baitRef(baitID)
+	ref := e.baitRef(baitID)
 	learning := cfg.Learning(now) && !test
 	actionsFor := func(t config.Tier) []config.Action {
 		if test {
@@ -453,9 +558,23 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 	if isSweep && !cls.SweepExempt(image, oa.ProcessID, nil) {
 		pre = e.sweepVerdict(pre, swept)
 	}
-	if pre.Ignored && !instant {
+	// One of your rules covers it: done, unless it used a trick to dodge
+	// detection (decided further down). Only a rule an administrator made for
+	// exactly that covers a trick (`aba ignore add --allow-tricks`), and none
+	// covers a copy of ABA.
+	tricky := oa.Alias != "" || e.evasion(oa.ProcessID) != ""
+	tricksOK := false
+	if tricky && !disguise && image != "" && cls.HasTricksRule() {
+		s := e.Ops.Verify(image)
+		tricksOK = cls.TricksAllowed(image, oa.ProcessID, baitID, &s)
+	}
+	evading := disguise || (tricky && !tricksOK)
+	if pre.Ignored && !instant && (pre.Builtin || !evading) {
 		e.Ops.Logf("ignored %s of %s by %s (%s)", access, oa.ObjectName, image, strings.Join(pre.Reasons, "; "))
 		return
+	}
+	if evading && !pre.Builtin && pre.Tier != config.TierCritical {
+		pre = classify.Verdict{Tier: config.TierCritical, Reasons: pre.Reasons} // freeze first, like any critical reader
 	}
 	frozen := preFrozen
 	var latency time.Duration
@@ -492,10 +611,49 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 				Reasons: append([]string{filepath.Base(image) + " is part of Windows, but " + detail}, v.Reasons...)}
 		}
 	}
+	// Tricks that only evasion explains make it critical whatever it is, trusted
+	// from an alert or not. (Never Defender or Windows Search.)
+	if !test && !v.Builtin && access == "read" {
+		switch why := e.evasion(oa.ProcessID); {
+		case disguise:
+			v = evasive(v, disguiseWhy)
+		case tricksOK || (image != "" && cls.TricksAllowed(image, oa.ProcessID, baitID, &sig)):
+			// an administrator allowed this program to read baits that way
+		case oa.Alias != "":
+			v = evasive(v, "it read this through a second name it gave the file ("+oa.Alias+", a hard link): a trick to read a file without appearing to")
+		case why != "":
+			v = evasive(v, why)
+		}
+		// A signed program in a folder anyone can write to, running an unsigned
+		// DLL from that same folder: the stealer is the DLL (sideloading). That
+		// also means it isn't "the real app reading its own data".
+		if !v.Evasion && !v.ByRule && sig.Valid && cls.UserWritable(image) && (v.DecoyOwner || (!v.Ignored && v.Tier != config.TierCritical)) {
+			if dll, found := e.Ops.SideLoaded(oa.ProcessID, image); found {
+				v = classify.Verdict{Tier: config.TierCritical, Swept: v.Swept, Reasons: append([]string{
+					filepath.Base(image) + " is signed, but it's running an unsigned DLL from its own folder (" + filepath.Base(dll) + "): that's how stealers ride inside legitimate programs", "the DLL: " + dll}, v.Reasons...)}
+			}
+		}
+	}
 	if v.Ignored {
 		e.Ops.Resume(frozen)
 		e.Ops.Logf("ignored %s of %s by %s (%s)", access, oa.ObjectName, image, strings.Join(v.Reasons, "; "))
 		return
+	}
+	// A sweep split over several programs, each reading too little to look
+	// like one: together they went through several apps' data.
+	var teammates []teamRead
+	if !test && access == "read" && !v.DecoyOwner && !v.Builtin && e.sweepable(oa.ProcessID) && !cls.SweepExempt(image, oa.ProcessID, &sig) {
+		if units, members := e.joinTeam(oa.ProcessID, baitID, image, now); units != nil && len(v.Swept) < sweepApps {
+			v = e.teamVerdict(v, units, len(members))
+			for _, m := range members {
+				if m.pid != oa.ProcessID {
+					teammates = append(teammates, m)
+				}
+			}
+		}
+	}
+	if startedAs != "" {
+		v.Reasons = append(v.Reasons, "its file was renamed after it started (it was started as "+startedAs+")")
 	}
 	acts := actionsFor(v.Tier)
 	if v.DecoyOwner {
@@ -511,6 +669,44 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 		} else if claimedNow() {
 			return // the instant path froze it and reports it
 		}
+	}
+
+	// Freeze the rest of it. A stealer is rarely one process: a loader starts
+	// it, it runs copies of itself, it has helpers. Freezing only the process
+	// that touched the bait leaves the others free to upload, or to un-freeze it.
+	var also []string
+	blockToo := map[string]bool{}
+	if len(frozen) > 0 && v.Tier == config.TierCritical && !test {
+		grow := func(root uint32, img string) {
+			if more := e.Ops.SuspendMore(root, frozen); len(more) > 0 {
+				frozen = append(frozen, more...)
+				also = append(also, fmt.Sprintf("%s (pid %d)", filepath.Base(img), root))
+			}
+		}
+		for _, anc := range e.Ops.Ancestors(oa.ProcessID) {
+			if !e.partOfIt(cls, anc.PID, anc.Image) {
+				break
+			}
+			grow(anc.PID, anc.Image)
+			if cls.UserWritable(anc.Image) && !e.Ops.Verify(anc.Image).Valid {
+				blockToo[anc.Image] = true
+			}
+		}
+		if !sig.Valid && cls.UserWritable(image) {
+			for _, p := range e.Ops.RunningImage(image) { // other running copies of the same unsigned file
+				if p != oa.ProcessID && !hasPID(frozen, p) && e.partOfIt(cls, p, image) {
+					grow(p, image)
+				}
+			}
+		}
+		for _, m := range teammates { // the others in a split-up sweep
+			if hasPID(frozen, m.pid) || e.Ops.CreateTime(m.pid) != m.createTime || !e.touchable(m.pid, m.image) || e.isFrozen(m.pid, m.createTime) {
+				continue
+			}
+			grow(m.pid, m.image)
+			blockToo[m.image] = true
+		}
+		delete(blockToo, image)
 	}
 
 	a := &alerts.Alert{
@@ -532,6 +728,9 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 			if instant {
 				detail += " the moment it opened the bait"
 			}
+			if len(also) > 0 {
+				detail += "; with it: " + strings.Join(also, ", ")
+			}
 			a.AddAction(config.ActionFreeze, nil, detail)
 		} else if !canTouch {
 			a.AddAction(config.ActionFreeze, fmt.Errorf("refused"), "protected system process")
@@ -549,7 +748,7 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 
 	// 6. Remaining responses.
 	var blocked, isolated bool
-	var adapters []string
+	var adapters, alsoBlocked []string
 	for _, act := range acts {
 		switch act {
 		case config.ActionBlockProgram:
@@ -560,6 +759,11 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 			err := e.Ops.BlockProgram(image)
 			a.AddAction(act, err, image)
 			blocked = err == nil
+			for img := range blockToo {
+				if e.Ops.BlockProgram(img) == nil {
+					alsoBlocked = append(alsoBlocked, img)
+				}
+			}
 		case config.ActionKill:
 			if !canTouch {
 				a.AddAction(act, fmt.Errorf("refused"), "protected system process")
@@ -595,6 +799,11 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 		if blocked && !st.IsBlocked(image) {
 			st.Blocked = append(st.Blocked, config.BlockedProgram{Path: image, AlertID: a.ID, Since: now})
 		}
+		for _, img := range alsoBlocked {
+			if !st.IsBlocked(img) {
+				st.Blocked = append(st.Blocked, config.BlockedProgram{Path: img, AlertID: a.ID, Since: now})
+			}
+		}
 		if isolated && st.Isolation == nil {
 			st.Isolation = &config.Isolation{Since: now, AlertID: a.ID, Method: "wfp"}
 		}
@@ -608,6 +817,10 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 	})
 	if err := e.Ops.SaveAlert(a); err != nil {
 		e.Ops.Logf("save alert: %v", err)
+	}
+	// Lock them frozen (after they're on record, so the hold is never orphaned).
+	if len(frozen) > 0 && !test {
+		e.Ops.Hold(frozen)
 	}
 
 	e.mu.Lock()
@@ -651,6 +864,92 @@ func (e *Engine) handle(oa *evtlog.ObjectAccess, preFrozen []uint32) {
 		})
 	}
 	e.Ops.Logf("alert %s: %s [%s] actions=%d latency=%dms (delivery %dms)", a.ID, a.Title, a.Tier, len(a.Actions), a.LatencyMS, a.DeliveryMS)
+}
+
+func hasPID(pids []uint32, pid uint32) bool {
+	for _, p := range pids {
+		if p == pid {
+			return true
+		}
+	}
+	return false
+}
+
+// partOfIt reports whether a process related to a critical reader (the
+// program that started it, another copy of it) should be frozen with it: it
+// would be critical itself if it had read the bait. A terminal you typed the
+// command into is; Explorer, a signed launcher or anything elevated isn't.
+func (e *Engine) partOfIt(cls *classify.Classifier, pid uint32, image string) bool {
+	if image == "" || !e.touchable(pid, image) || !e.Ops.UserSession(pid) || e.Ops.Elevated(pid) || e.Ops.IsSelf(image) {
+		return false
+	}
+	v := cls.Final(image, pid, classify.Bait{}, e.Ops.Verify(image))
+	return !v.Ignored && v.Tier == config.TierCritical
+}
+
+// isFrozen reports whether pid is already on record as frozen (freezing it
+// again would stack a second suspension).
+func (e *Engine) isFrozen(pid uint32, createTime int64) bool {
+	found := false
+	e.Ops.UpdateState(func(st *config.State) error {
+		for _, f := range st.Frozen {
+			found = found || (f.PID == pid && f.CreateTime == createTime)
+		}
+		return nil
+	})
+	return found
+}
+
+// joinTeam records that pid read baitID and, when the programs that read
+// baits lately went through sweepApps different apps' data between them (and
+// there's more than one of them), returns those apps and programs. One program
+// doing that alone is an ordinary sweep (see touch).
+func (e *Engine) joinTeam(pid uint32, baitID, image string, now time.Time) (units []string, members []teamRead) {
+	ct := e.Ops.CreateTime(pid)
+	unit := sweepUnit(baitID)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	keep := e.team[:0]
+	known := false
+	for _, r := range e.team {
+		if now.Sub(r.at) < window {
+			keep = append(keep, r)
+			known = known || (r.pid == pid && r.unit == unit && (r.createTime == ct || ct == 0 || r.createTime == 0))
+		}
+	}
+	e.team = keep
+	if !known {
+		e.team = append(e.team, teamRead{pid: pid, createTime: ct, unit: unit, image: image, at: now})
+	}
+	seenUnit, seenPID := map[string]bool{}, map[uint32]bool{}
+	for _, r := range e.team {
+		if !seenUnit[r.unit] {
+			seenUnit[r.unit] = true
+			units = append(units, r.unit)
+		}
+		if !seenPID[r.pid] {
+			seenPID[r.pid] = true
+			members = append(members, r)
+		}
+	}
+	if len(units) < sweepApps || len(members) < 2 {
+		return nil, nil
+	}
+	sort.Strings(units)
+	return units, members
+}
+
+// teamVerdict is the critical verdict for a reader that's part of a sweep
+// split over several programs.
+func (e *Engine) teamVerdict(v classify.Verdict, units []string, programs int) classify.Verdict {
+	names := e.unitNames(units)
+	who := "Several programs"
+	if programs > 1 {
+		who = fmt.Sprintf("%d programs", programs)
+	}
+	why := fmt.Sprintf("%s together read the data of %d different apps within %d minutes (%s), this one among them: a stealer splitting its work up so that no single program looks like one",
+		who, len(units), int(window.Minutes()), strings.Join(names, ", "))
+	return classify.Verdict{Tier: config.TierCritical, Swept: units, Evasion: v.Evasion, Reasons: append([]string{why}, v.Reasons...)}
 }
 
 // filesUnit stands for all the plain-file baits together (passwords.txt on
@@ -777,11 +1076,11 @@ func (e *Engine) userSession(pid uint32) bool {
 	e.mu.Lock()
 	sid := e.sids[pid]
 	e.mu.Unlock()
-	return sid != "" && !serviceAccount(sid)
+	return sid != "" && !ServiceAccount(sid)
 }
 
-// serviceAccount: SYSTEM, LOCAL/NETWORK SERVICE and per-service accounts.
-func serviceAccount(sid string) bool {
+// ServiceAccount: SYSTEM, LOCAL/NETWORK SERVICE and per-service accounts.
+func ServiceAccount(sid string) bool {
 	switch sid {
 	case "S-1-5-18", "S-1-5-19", "S-1-5-20":
 		return true
@@ -796,10 +1095,11 @@ func serviceAccount(sid string) bool {
 
 // sweepVerdict turns a verdict into a critical one: the reader went through
 // several apps' data.
-func (e *Engine) sweepVerdict(v classify.Verdict, swept []string) classify.Verdict {
+func (e *Engine) unitNames(units []string) []string {
 	e.mu.Lock()
+	defer e.mu.Unlock()
 	var names []string
-	for _, id := range swept {
+	for _, id := range units {
 		n := e.baitNames[id]
 		switch {
 		case id == filesUnit:
@@ -809,7 +1109,11 @@ func (e *Engine) sweepVerdict(v classify.Verdict, swept []string) classify.Verdi
 		}
 		names = append(names, n)
 	}
-	e.mu.Unlock()
+	return names
+}
+
+func (e *Engine) sweepVerdict(v classify.Verdict, swept []string) classify.Verdict {
+	names := e.unitNames(swept)
 	why := fmt.Sprintf("it read the data of %d different apps within %d minutes (%s): stealers sweep everything, real apps only touch their own",
 		len(swept), int(window.Minutes()), strings.Join(names, ", "))
 	return classify.Verdict{Tier: config.TierCritical, Swept: swept, Reasons: append([]string{why}, v.Reasons...)}

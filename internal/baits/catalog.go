@@ -4,12 +4,18 @@
 package baits
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
+	"github.com/vulnix0x4/a-better-antivirus/internal/authenticode"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
+	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
 )
 
 // Kind of bait.
@@ -42,6 +48,16 @@ type Spec struct {
 	// RequiresAny: this bait lives inside one of these (e.g. MetaMask inside a fake browser).
 	RequiresAny []string
 	Files       func(u config.UserInfo) []FileSpec
+	// Inside and Host make this a bait inside a real app (see embeddedProfile):
+	// Inside is the app's data folder it's planted in, Host the app's
+	// executable in the places it installs to. It's only available when the
+	// app is there, the opposite of a decoy.
+	Inside func(u config.UserInfo) string
+	Host   func(u config.UserInfo) []string
+	// Since is the config version that introduced this bait, when it's newer
+	// than the catalog's first version: setup then offers it to installs
+	// configured before it existed.
+	Since int
 }
 
 // FileSpec is one file of a bait.
@@ -63,6 +79,58 @@ func env(k, def string) string {
 }
 
 func j(parts ...string) string { return filepath.Join(parts...) }
+
+// ---- per-install variation ----
+//
+// ABA is open source, so a stealer can know this catalog by heart. If every
+// install used the same file names, skipping "wallet recovery phrase.txt" by
+// name would be a one-line bypass. So each install picks its own names from
+// pools of what file grabbers look for (pass, seed, wallet, backup, 2fa…):
+// to skip the baits a stealer would have to skip everything it came for.
+//
+// The choice is derived from u.Variant, a random value fixed at install time.
+// Installs from before this existed have no Variant and keep their old names.
+
+func variantN(u config.UserInfo, what string, n int) int {
+	h := sha256.Sum256([]byte(u.Variant + "|" + what))
+	return int(binary.LittleEndian.Uint32(h[:4]) % uint32(n))
+}
+
+// vary picks one of pool for this install (the first one without a Variant).
+func vary(u config.UserInfo, what string, pool ...string) string {
+	if u.Variant == "" {
+		return pool[0]
+	}
+	return pool[variantN(u, what, len(pool))]
+}
+
+// varyChars is a per-install string of n characters from alphabet (def
+// without a Variant).
+func varyChars(u config.UserInfo, what, def string, n int, alphabet string) string {
+	if u.Variant == "" {
+		return def
+	}
+	h := sha256.Sum256([]byte(u.Variant + "|" + what))
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = alphabet[int(h[i%len(h)]+byte(i))%len(alphabet)]
+	}
+	return string(b)
+}
+
+func passwordsName(u config.UserInfo, where string) string {
+	return vary(u, "passwords-"+where, "passwords.txt", "my passwords.txt", "Passwords.txt", "password list.txt",
+		"logins and passwords.txt", "pass.txt", "accounts and passwords.txt", "passwords backup.txt")
+}
+
+// ldbName is a LevelDB file name the way real ones look: a six-digit sequence
+// number that depends on how long the app has been used.
+func ldbName(u config.UserInfo, what, def, ext string) string {
+	if u.Variant == "" {
+		return def
+	}
+	return "0000" + varyChars(u, what, "", 2, "0123456789") + ext
+}
 
 const metamaskID = "nkbihfbeogaeaoehlefnkodbefgpgknn"
 
@@ -97,10 +165,108 @@ func chromiumFiles(userData string, passwords string) []FileSpec {
 	}
 	return []FileSpec{
 		{Path: j(userData, "Local State"), Audit: true, Gen: genLocalState},
-		{Path: j(userData, "Default", passwords), Audit: true, Gen: genEmptySQLite},
-		{Path: j(userData, "Default", "Network", "Cookies"), Audit: true, Gen: genEmptySQLite},
-		{Path: j(userData, "Default", "Web Data"), Audit: true, Gen: genEmptySQLite},
+		{Path: j(userData, "Default", passwords), Audit: true, Gen: genLoginData},
+		{Path: j(userData, "Default", "Network", "Cookies"), Audit: true, Gen: genCookies},
+		{Path: j(userData, "Default", "Web Data"), Audit: true, Gen: genWebData},
 		{Path: j(userData, "Default", "Preferences"), Gen: genPreferences},
+	}
+}
+
+// ---- baits inside real browsers ----
+//
+// A decoy is fake data for an app you don't have. A stealer that knows ABA
+// can turn that around: check that the app is really installed before
+// touching its data, and no decoy is ever opened. So for the browsers you do
+// have, ABA plants a fake extra *profile* inside the real one's data: a
+// "Profile 23" folder next to "Default". Stealers take every profile folder
+// they find (that's how they get people's work and second accounts), and here
+// "is the browser installed?" says yes.
+//
+// The browser itself only opens the profiles listed in its "Local State"
+// file, so it never touches this one. If it ever does (you created profiles
+// until it reached that number, and it adopted the folder), ABA retires the
+// bait like a decoy whose app got installed.
+
+type localState struct {
+	Profile struct {
+		InfoCache map[string]json.RawMessage `json:"info_cache"`
+		Created   int                        `json:"profiles_created"`
+	} `json:"profile"`
+}
+
+func readLocalState(userData string) (ls localState, ok bool) {
+	b, err := os.ReadFile(j(userData, "Local State"))
+	if err != nil {
+		return ls, false
+	}
+	return ls, json.Unmarshal(b, &ls) == nil
+}
+
+// ProfileFolder is the folder name of an embedded profile bait.
+func ProfileFolder(u config.UserInfo, id string) string {
+	if f := u.Embedded[id]; f != "" {
+		return f
+	}
+	return fmt.Sprintf("Profile %d", 21+variantN(u, id, 18))
+}
+
+// FreeProfile picks a profile folder name the browser isn't using and won't
+// get to soon: well past the number of profiles it has ever created.
+func FreeProfile(s Spec, u config.UserInfo) string {
+	ud := s.Inside(u)
+	ls, _ := readLocalState(ud)
+	base := ls.Profile.Created + 8
+	if base < 12 {
+		base = 12
+	}
+	for try := 0; try < 60; try++ {
+		name := fmt.Sprintf("Profile %d", base+rint(20))
+		if _, err := os.Stat(j(ud, name)); err == nil {
+			continue
+		}
+		if _, used := ls.Profile.InfoCache[name]; !used {
+			return name
+		}
+	}
+	return fmt.Sprintf("Profile %d", base+20+rint(900))
+}
+
+// Adopted reports whether the real browser has taken an embedded bait's
+// folder as one of its own profiles (it's listed in Local State).
+func Adopted(s Spec, u config.UserInfo) bool {
+	if s.Inside == nil {
+		return false
+	}
+	ls, ok := readLocalState(s.Inside(u))
+	if !ok {
+		return false
+	}
+	_, used := ls.Profile.InfoCache[ProfileFolder(u, s.ID)]
+	return used
+}
+
+func embeddedProfile(id, browser, exe, signer string, userData func(u config.UserInfo) string, appDirs func(u config.UserInfo) []string) Spec {
+	return Spec{
+		ID: id, Name: "extra profile inside your " + browser, Category: "Browsers", Kind: KindDecoy, Default: true, Since: 3,
+		Description: "A fake profile next to your real ones. Stealers take every profile; " + browser + " never opens this one.",
+		OwnerExes:   []string{exe}, Signer: signer,
+		Inside: userData,
+		Host: func(u config.UserInfo) []string {
+			var out []string
+			for _, d := range appDirs(u) {
+				out = append(out, j(d, exe))
+			}
+			return out
+		},
+		Files: func(u config.UserInfo) []FileSpec {
+			d := j(userData(u), ProfileFolder(u, id))
+			return []FileSpec{
+				{Path: j(d, "Login Data"), Audit: true, Gen: genLoginData},
+				{Path: j(d, "Network", "Cookies"), Audit: true, Gen: genCookies},
+				{Path: j(d, "Web Data"), Audit: true, Gen: genWebData},
+				{Path: j(d, "Preferences"), Gen: genPreferences},
+			}
+		},
 	}
 }
 
@@ -108,45 +274,49 @@ func chromiumFiles(userData string, passwords string) []FileSpec {
 var Catalog = []Spec{
 	// ---- Files ----
 	{
-		ID: "home-passwords", Name: "passwords.txt in your home folder", Category: "Files", Kind: KindFile, Default: true,
+		ID: "home-passwords", Name: "password list in your home folder", Category: "Files", Kind: KindFile, Default: true,
 		Description: "Scripts and dev-tool based stealers sweep the home folder.",
 		Files: func(u config.UserInfo) []FileSpec {
-			return []FileSpec{{Path: j(u.Profile, "passwords.txt"), Audit: true, Text: true, Gen: genPasswordsTxt}}
+			return []FileSpec{{Path: j(u.Profile, passwordsName(u, "home")), Audit: true, Text: true, Gen: genPasswordsTxt}}
 		},
 	},
 	{
-		ID: "documents-passwords", Name: "passwords.txt in Documents", Category: "Files", Kind: KindFile, Default: true,
+		ID: "documents-passwords", Name: "password list in Documents", Category: "Files", Kind: KindFile, Default: true,
 		Description: "File grabbers sweep Documents for *.txt with names like password/wallet/seed.",
 		Files: func(u config.UserInfo) []FileSpec {
-			return []FileSpec{{Path: j(u.Documents, "passwords.txt"), Audit: true, Text: true, Gen: genPasswordsTxt}}
+			return []FileSpec{{Path: j(u.Documents, passwordsName(u, "documents")), Audit: true, Text: true, Gen: genPasswordsTxt}}
 		},
 	},
 	{
-		ID: "desktop-passwords", Name: "passwords.txt on the Desktop", Category: "Files", Kind: KindFile, Default: true,
+		ID: "desktop-passwords", Name: "password list on the Desktop", Category: "Files", Kind: KindFile, Default: true,
 		Description: "The #1 folder file grabbers look in. You'll see it every day: don't open it.",
 		Files: func(u config.UserInfo) []FileSpec {
-			return []FileSpec{{Path: j(u.Desktop, "passwords.txt"), Audit: true, Text: true, Gen: genPasswordsTxt}}
+			return []FileSpec{{Path: j(u.Desktop, passwordsName(u, "desktop")), Audit: true, Text: true, Gen: genPasswordsTxt}}
 		},
 	},
 	{
 		ID: "seed-phrase", Name: "wallet recovery phrase (Documents)", Category: "Files", Kind: KindFile, Default: true,
 		Description: "Crypto stealers grep for 'seed', 'wallet', 'recovery'.",
 		Files: func(u config.UserInfo) []FileSpec {
-			return []FileSpec{{Path: j(u.Documents, "wallet recovery phrase.txt"), Audit: true, Text: true, Gen: genSeedTxt}}
+			name := vary(u, "seed", "wallet recovery phrase.txt", "seed phrase.txt", "metamask seed.txt", "crypto wallet seed.txt",
+				"ledger recovery phrase.txt", "wallet backup seed.txt")
+			return []FileSpec{{Path: j(u.Documents, name), Audit: true, Text: true, Gen: genSeedTxt}}
 		},
 	},
 	{
 		ID: "backup-codes", Name: "2FA backup codes (Documents)", Category: "Files", Kind: KindFile, Default: true,
 		Description: "Backup codes bypass 2FA, so stealers grab them.",
 		Files: func(u config.UserInfo) []FileSpec {
-			return []FileSpec{{Path: j(u.Documents, "google backup codes.txt"), Audit: true, Text: true, Gen: genBackupCodes}}
+			name := vary(u, "codes", "google backup codes.txt", "2fa backup codes.txt", "backup-codes.txt", "google 2fa codes.txt")
+			return []FileSpec{{Path: j(u.Documents, name), Audit: true, Text: true, Gen: genBackupCodes}}
 		},
 	},
 	{
 		ID: "keepass", Name: "KeePass database (Documents)", Category: "Files", Kind: KindFile, Default: true,
 		Description: "Stealers collect *.kdbx files to crack offline.",
 		Files: func(u config.UserInfo) []FileSpec {
-			return []FileSpec{{Path: j(u.Documents, "Passwords.kdbx"), Audit: true, Gen: genKdbx}}
+			name := vary(u, "kdbx", "Passwords.kdbx", "Database.kdbx", "keepass.kdbx", "Personal.kdbx", "passwords backup.kdbx")
+			return []FileSpec{{Path: j(u.Documents, name), Audit: true, Gen: genKdbx}}
 		},
 	},
 
@@ -175,8 +345,8 @@ var Catalog = []Spec{
 			d := j(u.RoamingAppData, `Opera Software\Opera Stable`)
 			return []FileSpec{
 				{Path: j(d, "Local State"), Audit: true, Gen: genLocalState},
-				{Path: j(d, "Default", "Login Data"), Audit: true, Gen: genEmptySQLite},
-				{Path: j(d, "Default", "Network", "Cookies"), Audit: true, Gen: genEmptySQLite},
+				{Path: j(d, "Default", "Login Data"), Audit: true, Gen: genLoginData},
+				{Path: j(d, "Default", "Network", "Cookies"), Audit: true, Gen: genCookies},
 			}
 		},
 	},
@@ -213,15 +383,32 @@ var Catalog = []Spec{
 		OwnerExes: []string{"firefox.exe"}, Signer: "Mozilla",
 		Files: func(u config.UserInfo) []FileSpec {
 			base := j(u.RoamingAppData, `Mozilla\Firefox`)
-			prof := j(base, "Profiles", "q8m3kx2v.default-release")
+			prof := j(base, "Profiles", firefoxProfile(u))
 			return []FileSpec{
-				{Path: j(base, "profiles.ini"), Gen: genProfilesIni},
+				{Path: j(base, "profiles.ini"), Gen: func(*Gen) []byte { return genProfilesIni(firefoxProfile(u)) }},
 				{Path: j(prof, "logins.json"), Audit: true, Gen: genFirefoxLogins},
-				{Path: j(prof, "key4.db"), Audit: true, Gen: genEmptySQLite},
-				{Path: j(prof, "cookies.sqlite"), Audit: true, Gen: genEmptySQLite},
+				{Path: j(prof, "key4.db"), Audit: true, Gen: genKey4},
+				{Path: j(prof, "cookies.sqlite"), Audit: true, Gen: genMozCookies},
 			}
 		},
 	},
+
+	// ---- Browsers you do use: a fake profile inside the real one ----
+	embeddedProfile("chrome-profile", "Chrome", "chrome.exe", "Google",
+		func(u config.UserInfo) string { return j(u.LocalAppData, `Google\Chrome\User Data`) },
+		func(u config.UserInfo) []string {
+			return []string{j(pf(), `Google\Chrome\Application`), j(pf86(), `Google\Chrome\Application`), j(u.LocalAppData, `Google\Chrome\Application`)}
+		}),
+	embeddedProfile("edge-profile", "Edge", "msedge.exe", "Microsoft",
+		func(u config.UserInfo) string { return j(u.LocalAppData, `Microsoft\Edge\User Data`) },
+		func(u config.UserInfo) []string {
+			return []string{j(pf86(), `Microsoft\Edge\Application`), j(pf(), `Microsoft\Edge\Application`)}
+		}),
+	embeddedProfile("brave-profile", "Brave", "brave.exe", "Brave Software",
+		func(u config.UserInfo) string { return j(u.LocalAppData, `BraveSoftware\Brave-Browser\User Data`) },
+		func(u config.UserInfo) []string {
+			return []string{j(pf(), `BraveSoftware\Brave-Browser\Application`), j(pf86(), `BraveSoftware\Brave-Browser\Application`), j(u.LocalAppData, `BraveSoftware\Brave-Browser\Application`)}
+		}),
 
 	// ---- Wallets ----
 	{
@@ -231,7 +418,7 @@ var Catalog = []Spec{
 		Files: func(u config.UserInfo) []FileSpec {
 			d := j(BrowserUserData(u, u.DecoyBrowser), "Default", "Local Extension Settings", metamaskID)
 			return []FileSpec{
-				{Path: j(d, "000003.log"), Audit: true, Gen: genMetamaskLog},
+				{Path: j(d, ldbName(u, "metamask", "000003.log", ".log")), Audit: true, Gen: genMetamaskLog},
 				{Path: j(d, "CURRENT"), Audit: true, Gen: func(*Gen) []byte { return []byte("MANIFEST-000001\n") }},
 				{Path: j(d, "LOCK"), Gen: func(*Gen) []byte { return nil }},
 				{Path: j(d, "MANIFEST-000001"), Gen: genLevelDBManifest},
@@ -260,6 +447,7 @@ var Catalog = []Spec{
 		Markers: func(u config.UserInfo) []string {
 			return []string{j(pf86(), `Electrum\*.exe`), j(pf(), `Electrum\*.exe`)}
 		},
+		Signer: "Electrum",
 		Files: func(u config.UserInfo) []FileSpec {
 			return []FileSpec{{Path: j(u.RoamingAppData, `Electrum\wallets\default_wallet`), Audit: true, Gen: genElectrumWallet}}
 		},
@@ -275,7 +463,7 @@ var Catalog = []Spec{
 		Files: func(u config.UserInfo) []FileSpec {
 			d := j(u.RoamingAppData, `atomic\Local Storage\leveldb`)
 			return []FileSpec{
-				{Path: j(d, "000003.log"), Audit: true, Gen: genAtomicLog},
+				{Path: j(d, ldbName(u, "atomic", "000003.log", ".log")), Audit: true, Gen: genAtomicLog},
 				{Path: j(d, "CURRENT"), Audit: true, Gen: func(*Gen) []byte { return []byte("MANIFEST-000001\n") }},
 			}
 		},
@@ -287,7 +475,7 @@ var Catalog = []Spec{
 		Description: "Stolen tdata = logged-in Telegram account.",
 		Root:        func(u config.UserInfo) string { return j(u.RoamingAppData, `Telegram Desktop`) },
 		Markers: func(u config.UserInfo) []string {
-			return []string{j(u.RoamingAppData, `Telegram Desktop\Telegram.exe`), j(u.LocalAppData, `Packages\TelegramMessengerLLP.TelegramDesktop_*`)}
+			return []string{j(u.RoamingAppData, `Telegram Desktop\Telegram.exe`)}
 		},
 		OwnerExes: []string{"telegram.exe"}, Signer: "Telegram",
 		Files: func(u config.UserInfo) []FileSpec {
@@ -310,7 +498,7 @@ var Catalog = []Spec{
 		Files: func(u config.UserInfo) []FileSpec {
 			d := j(u.RoamingAppData, `discord\Local Storage\leveldb`)
 			return []FileSpec{
-				{Path: j(d, "000005.ldb"), Audit: true, Gen: genDiscordLdb},
+				{Path: j(d, ldbName(u, "discord", "000005.ldb", ".ldb")), Audit: true, Gen: genDiscordLdb},
 				{Path: j(d, "CURRENT"), Audit: true, Gen: func(*Gen) []byte { return []byte("MANIFEST-000001\n") }},
 				{Path: j(d, "LOCK"), Gen: func(*Gen) []byte { return nil }},
 			}
@@ -384,8 +572,17 @@ func Plan(u config.UserInfo, alreadyOurs map[string]bool) []Availability {
 	for _, s := range Catalog {
 		a := Availability{Spec: s, Available: true}
 		if s.Markers != nil {
-			if m := firstExisting(s.Markers(u)); m != "" {
+			// A marker that isn't the genuine app doesn't take away a bait that's
+			// already planted: planting a fake one is how you'd try to get rid of it.
+			if m, genuine := Installed(s, u); m != "" && (genuine || !alreadyOurs[s.ID]) {
 				a.Available, a.Reason = false, "you have it installed ("+m+")"
+			}
+		}
+		if s.Inside != nil {
+			// Needs the real browser: its program, and data it has actually used.
+			_, errData := os.Stat(j(s.Inside(u), "Local State"))
+			if firstExisting(s.Host(u)) == "" || errData != nil {
+				a.Available, a.Reason = false, "you don't use it"
 			}
 		}
 		if a.Available && s.Root != nil && !alreadyOurs[s.ID] {
@@ -415,12 +612,78 @@ func Plan(u config.UserInfo, alreadyOurs map[string]bool) []Availability {
 	return out
 }
 
-// InstalledMarker returns the first marker that exists (the real app is now installed).
+// InstalledMarker returns the first marker that exists (the real app may be installed).
 func InstalledMarker(s Spec, u config.UserInfo) string {
 	if s.Markers == nil {
 		return ""
 	}
 	return firstExisting(s.Markers(u))
+}
+
+// Genuine reports whether the file at path really is the app's executable:
+// validly signed by its publisher. A variable so tests can stand in for it.
+var Genuine = func(path, signer string) bool {
+	r := authenticode.Verify(path)
+	return r.Valid && (signer == "" || strings.Contains(strings.ToLower(r.Signer), strings.ToLower(signer)))
+}
+
+// Installed looks for the app a decoy imitates. It returns the marker found
+// and whether it's genuine.
+//
+// Most of these apps install into your own profile, where no admin rights are
+// needed, so anything running as you can create "Discord\Update.exe" too.
+// An empty or unsigned file there isn't the app: it's what a stealer would
+// plant to make ABA retire its Discord decoy by itself. Only a file signed by
+// the app's publisher counts, or one in Program Files (which takes admin
+// rights to write to).
+func Installed(s Spec, u config.UserInfo) (marker string, genuine bool) {
+	if s.Markers == nil {
+		return "", false
+	}
+	for _, g := range s.Markers(u) {
+		var found []string
+		if strings.ContainsAny(g, "*?[") {
+			found, _ = filepath.Glob(g)
+		} else if _, err := os.Stat(g); err == nil {
+			found = []string{g}
+		}
+		for _, m := range found {
+			if marker == "" {
+				marker = m
+			}
+			if paths.Under(m, pf()) || paths.Under(m, pf86()) || Genuine(m, s.Signer) {
+				return m, true
+			}
+		}
+	}
+	return marker, false
+}
+
+// OwnerDirs are the folders the genuine app installs into (where its markers
+// are): the only places "the real app" can be running from.
+func OwnerDirs(s Spec, u config.UserInfo) []string {
+	var markers []string
+	if s.Markers != nil {
+		markers = s.Markers(u)
+	}
+	if s.Host != nil {
+		markers = append(markers, s.Host(u)...)
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, m := range markers {
+		d := filepath.Dir(m)
+		if strings.ContainsAny(d, "*?[") || seen[strings.ToLower(d)] {
+			continue
+		}
+		seen[strings.ToLower(d)] = true
+		out = append(out, d)
+	}
+	return out
+}
+
+func firefoxProfile(u config.UserInfo) string {
+	return varyChars(u, "firefox", "q8m3kx2v", 8, "abcdefghijklmnopqrstuvwxyz0123456789") + ".default-release"
 }
 
 func firstExisting(globs []string) string {
@@ -492,4 +755,23 @@ func SpecByID(cfg *config.Config, id string) (Spec, bool) {
 		}
 	}
 	return ByID(id)
+}
+
+// Moved reports whether a planted bait's files are no longer where its spec
+// puts them for u (the install was given new bait names).
+func Moved(bs *config.BaitState, s Spec, u config.UserInfo) bool {
+	want := s.Files(u)
+	if len(want) != len(bs.Files) {
+		return true
+	}
+	have := map[string]bool{}
+	for _, f := range bs.Files {
+		have[paths.Key(f.Path)] = true
+	}
+	for _, f := range want {
+		if !have[paths.Key(f.Path)] {
+			return true
+		}
+	}
+	return false
 }

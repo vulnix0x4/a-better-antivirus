@@ -89,12 +89,51 @@ var (
 	cache   = map[string]cacheEntry{}
 )
 
-// Verify checks path, trying the embedded signature first and then the system
-// catalogs. Results are cached for 10 minutes per path.
-func Verify(path string) Result {
+// cacheFor is how long a result is reused. Short on purpose: see fileKey.
+const cacheFor = 2 * time.Minute
+
+// fileKey identifies the file at path as it is right now: its path plus its
+// identity on disk, size and modification time. A result cached under the
+// path alone would let a signed file be verified, then swapped for another
+// one at the same path that inherits the "signed" verdict. (Size and time can
+// be forged by overwriting in place, which is why results also expire soon.)
+func fileKey(path string) string {
 	key := strings.ToLower(path)
+	p, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return key
+	}
+	h, err := windows.CreateFile(p, windows.FILE_READ_ATTRIBUTES, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
+	if err != nil {
+		return key
+	}
+	defer windows.CloseHandle(h)
+	var fi windows.ByHandleFileInformation
+	if windows.GetFileInformationByHandle(h, &fi) != nil {
+		return key
+	}
+	return key + "|" + hex.EncodeToString([]byte{
+		byte(fi.VolumeSerialNumber), byte(fi.VolumeSerialNumber >> 8), byte(fi.VolumeSerialNumber >> 16), byte(fi.VolumeSerialNumber >> 24),
+		byte(fi.FileIndexLow), byte(fi.FileIndexLow >> 8), byte(fi.FileIndexLow >> 16), byte(fi.FileIndexLow >> 24),
+		byte(fi.FileIndexHigh), byte(fi.FileIndexHigh >> 8), byte(fi.FileIndexHigh >> 16), byte(fi.FileIndexHigh >> 24),
+		byte(fi.FileSizeLow), byte(fi.FileSizeLow >> 8), byte(fi.FileSizeLow >> 16), byte(fi.FileSizeLow >> 24), byte(fi.FileSizeHigh),
+		byte(fi.LastWriteTime.LowDateTime), byte(fi.LastWriteTime.LowDateTime >> 8), byte(fi.LastWriteTime.LowDateTime >> 16), byte(fi.LastWriteTime.LowDateTime >> 24),
+		byte(fi.LastWriteTime.HighDateTime), byte(fi.LastWriteTime.HighDateTime >> 8), byte(fi.LastWriteTime.HighDateTime >> 16), byte(fi.LastWriteTime.HighDateTime >> 24),
+	})
+}
+
+// Verify checks path, trying the embedded signature first and then the system
+// catalogs. Results are cached briefly per file (see fileKey).
+func Verify(path string) Result {
+	key := fileKey(path)
 	cacheMu.Lock()
-	if e, ok := cache[key]; ok && time.Since(e.at) < 10*time.Minute {
+	for k, e := range cache {
+		if time.Since(e.at) > cacheFor {
+			delete(cache, k)
+		}
+	}
+	if e, ok := cache[key]; ok {
 		cacheMu.Unlock()
 		return e.res
 	}

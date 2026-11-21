@@ -46,18 +46,22 @@ const (
 	SeDebugPrivilege    = "SeDebugPrivilege"
 
 	fileReadData = 0x0001
+	fileExecute  = 0x0020
 	accessDelete = 0x00010000
 
-	// BaitAuditMask is what we audit on baits: reading content, and deletion/rename.
-	BaitAuditMask = fileReadData | accessDelete
+	// BaitAuditMask is what we audit on baits: reading content, and
+	// deletion/rename. "Execute" counts as reading: a file opened for execute
+	// only can be mapped into memory and read there without ever asking for
+	// read access, which an audit rule on ReadData alone never sees.
+	BaitAuditMask = fileReadData | fileExecute | accessDelete
 )
 
 // AccessMaskIsRead / IsDelete interpret 4663 access masks.
-func AccessMaskIsRead(mask uint32) bool   { return mask&fileReadData != 0 }
+func AccessMaskIsRead(mask uint32) bool   { return mask&(fileReadData|fileExecute) != 0 }
 func AccessMaskIsDelete(mask uint32) bool { return mask&accessDelete != 0 }
 
-// SetBaitAudit replaces the file's SACL with "audit successful ReadData and
-// DELETE by Everyone". Requires SeSecurityPrivilege (admin). Malware running as
+// SetBaitAudit replaces the file's SACL with "audit successful ReadData,
+// Execute and DELETE by Everyone". Requires SeSecurityPrivilege (admin). Malware running as
 // the user can neither see nor remove this rule.
 func SetBaitAudit(path string) error {
 	if err := EnablePrivilege(SeSecurityPrivilege); err != nil {
@@ -95,7 +99,9 @@ func ClearAudit(path string) error {
 		windows.SACL_SECURITY_INFORMATION|windows.UNPROTECTED_SACL_SECURITY_INFORMATION, nil, nil, nil, EmptyACL())
 }
 
-// HasBaitAudit reports whether the file's SACL still audits ReadData.
+// HasBaitAudit reports whether the file's SACL still audits everything in
+// BaitAuditMask (a rule from an older version, without Execute, doesn't count:
+// the health check then re-applies it).
 func HasBaitAudit(path string) (bool, error) {
 	if err := EnablePrivilege(SeSecurityPrivilege); err != nil {
 		return false, err
@@ -115,7 +121,7 @@ func HasBaitAudit(path string) (bool, error) {
 			continue
 		}
 		const systemAuditAceType = 2
-		if ace.Header.AceType == systemAuditAceType && uint32(ace.Mask)&fileReadData != 0 {
+		if ace.Header.AceType == systemAuditAceType && uint32(ace.Mask)&BaitAuditMask == BaitAuditMask {
 			return true, nil
 		}
 	}

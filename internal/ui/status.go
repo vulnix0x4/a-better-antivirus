@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -13,7 +14,7 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/svcctl"
 )
 
-// StatusData is everything the dashboard shows (all readable without admin).
+// StatusData is everything the dashboard shows.
 type StatusData struct {
 	Cfg     *config.Config
 	State   *config.State
@@ -21,14 +22,36 @@ type StatusData struct {
 	Alerts  []*alerts.Alert
 	Err     error
 	At      time.Time
+	// Limited: not running as administrator. ABA's own files (which list every
+	// bait and alert) can't be read then, so the dashboard shows the summary the
+	// service publishes for everyone: health and counts, no details.
+	Limited               bool
+	AlertCount, OpenCount int
 }
 
 func LoadStatus() StatusData {
 	d := StatusData{At: time.Now()}
-	d.Cfg, d.Err = config.LoadConfig()
-	d.State, _ = config.LoadState()
 	d.Service, _ = svcctl.Status()
-	d.Alerts, _ = alerts.List(8)
+	d.Cfg, d.Err = config.LoadConfig()
+	if d.Err == nil {
+		d.State, _ = config.LoadState()
+		d.Alerts, _ = alerts.List(8)
+		return d
+	}
+	if errors.Is(d.Err, config.ErrNotInstalled) {
+		return d
+	}
+	// No access: fall back to the public summary.
+	pub, err := config.LoadPublic()
+	if err != nil {
+		if d.Service == svcctl.Running {
+			d.Err = errors.New("ABA is running, but its status isn't available yet (it's published within a minute of starting)")
+		}
+		return d
+	}
+	d.Err, d.Limited = nil, true
+	d.Cfg, d.State = pub.View()
+	d.AlertCount, d.OpenCount = pub.Alerts, pub.OpenAlerts
 	return d
 }
 
@@ -80,7 +103,11 @@ func RenderStatus(d StatusData) string {
 		if len(st.Blocked) > 0 {
 			lines = append(lines, plural(len(st.Blocked), "program", "programs")+" cut off from the internet.")
 		}
-		lines = append(lines, "", Hint("Look at it:", "aba alerts show <id>")+"     "+Hint("Undo everything when safe:", "aba release"))
+		look := Hint("Look at it:", "aba alerts show <id>")
+		if d.Limited {
+			look = Hint("Look at it:", "aba alerts")
+		}
+		lines = append(lines, "", look+"     "+Hint("Undo everything when safe:", "aba release"))
 		box := lipgloss.NewStyle().Border(lipgloss.ThickBorder()).BorderForeground(Jaw).Padding(0, 2).Width(w - 2).
 			Render(Bad.Bold(true).Render("● RESPONSE ACTIVE") + "\n" + strings.Join(lines, "\n"))
 		b.WriteString(box + "\n\n")
@@ -118,11 +145,18 @@ func RenderStatus(d StatusData) string {
 	}
 
 	// Response card.
-	resp := []string{Bold.Render(cfg.PresetName())}
-	resp = append(resp, Dim.Render("critical    ")+actionList(cfg.Responses[config.TierCritical]))
-	resp = append(resp, Dim.Render("suspicious  ")+actionList(cfg.Responses[config.TierWarn]))
-	if cfg.Learning(time.Now()) && cfg.LearningMatters() {
-		resp = append(resp, Warn.Render("learning, "+Until(cfg.LearningUntil))+Dim.Render(": only critical is stopped"))
+	var resp []string
+	if d.Limited {
+		// How ABA is set to respond isn't published either: a stealer that can
+		// read "alerts only" knows nothing will stop it.
+		resp = append(resp, Dim.Render("settings    ")+"shown to administrators")
+	} else {
+		resp = append(resp, Bold.Render(cfg.PresetName()))
+		resp = append(resp, Dim.Render("critical    ")+actionList(cfg.Responses[config.TierCritical]))
+		resp = append(resp, Dim.Render("suspicious  ")+actionList(cfg.Responses[config.TierWarn]))
+		if cfg.Learning(time.Now()) && cfg.LearningMatters() {
+			resp = append(resp, Warn.Render("learning, "+Until(cfg.LearningUntil))+Dim.Render(": only critical is stopped"))
+		}
 	}
 	if st != nil && st.Isolation != nil {
 		resp = append(resp, Dim.Render("network     ")+Bad.Bold(true).Render("isolated"))
@@ -178,7 +212,19 @@ func RenderStatus(d StatusData) string {
 
 	// Alerts.
 	b.WriteString(Heading(" Recent alerts") + "\n")
-	if len(d.Alerts) == 0 {
+	if d.Limited {
+		// What touched which bait is for administrators' eyes only.
+		switch {
+		case d.AlertCount == 0:
+			b.WriteString(Dim.Render("  Nothing has touched your baits yet. ") + Hint("See what a catch looks like:", "aba test") + "\n")
+		case d.OpenCount > 0:
+			b.WriteString("  " + Warn.Render(plural(d.OpenCount, "alert is", "alerts are")+" waiting for your answer") +
+				Dim.Render(fmt.Sprintf(" (%d in total).  ", d.AlertCount)) + Hint("See them:", "aba alerts") + "\n")
+		default:
+			b.WriteString(Dim.Render("  "+plural(d.AlertCount, "alert", "alerts")+" in the history, all answered.  ") + Hint("See them:", "aba alerts") + "\n")
+		}
+		b.WriteString(Fainter.Render("  Alerts and baits are only shown to administrators (the commands ask for it).") + "\n")
+	} else if len(d.Alerts) == 0 {
 		b.WriteString(Dim.Render("  Nothing has touched your baits yet. ") + Hint("See what a catch looks like:", "aba test") + "\n")
 	} else {
 		b.WriteString(AlertTable(d.Alerts, w) + "\n")

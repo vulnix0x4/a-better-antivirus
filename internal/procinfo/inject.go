@@ -79,6 +79,50 @@ func InjectedCode(pid uint32) (detail string, found bool) {
 	return fmt.Sprintf("it's running %d KB of code that isn't from any file on disk: code was injected into it", biggest>>10), true
 }
 
+// SideLoaded looks for a DLL loaded from the program's own folder (or below
+// it) that signed() rejects, and returns the first one. That's DLL
+// sideloading: a genuine, signed program started from a folder the attacker
+// controls loads whatever DLL sits next to it, and the stealer is that DLL.
+// DLLs from elsewhere (Windows, Program Files, an editor's extensions) are
+// not looked at.
+func SideLoaded(pid uint32, image string, signed func(path string) bool) (dll string, found bool) {
+	h, err := open(pid, windows.PROCESS_QUERY_INFORMATION|windows.PROCESS_VM_READ)
+	if err != nil {
+		return "", false
+	}
+	defer windows.CloseHandle(h)
+	mods := make([]windows.Handle, 2048)
+	var need uint32
+	if err := windows.EnumProcessModulesEx(h, &mods[0], uint32(len(mods))*uint32(unsafe.Sizeof(mods[0])), &need, windows.LIST_MODULES_ALL); err != nil {
+		return "", false
+	}
+	n := int(need / uint32(unsafe.Sizeof(mods[0])))
+	if n > len(mods) {
+		n = len(mods)
+	}
+	dir := strings.ToLower(image[:strings.LastIndexAny(image, `\/`)+1])
+	if len(dir) < 4 {
+		return "", false
+	}
+	buf := make([]uint16, windows.MAX_LONG_PATH)
+	seen := map[string]bool{}
+	for _, m := range mods[:n] {
+		if windows.GetModuleFileNameEx(h, m, &buf[0], uint32(len(buf))) != nil {
+			continue
+		}
+		p := windows.UTF16ToString(buf)
+		lp := strings.ToLower(p)
+		if seen[lp] || !strings.HasPrefix(lp, dir) || samePath(p, image) {
+			continue
+		}
+		seen[lp] = true
+		if !signed(p) {
+			return p, true
+		}
+	}
+	return "", false
+}
+
 // hostsJIT returns the name of a JIT module loaded in the process, if any.
 func hostsJIT(h windows.Handle) string {
 	mods := make([]windows.Handle, 1024)

@@ -10,6 +10,7 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/netguard"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
+	"github.com/vulnix0x4/a-better-antivirus/internal/svcctl"
 )
 
 // Report lists what was done.
@@ -65,6 +66,7 @@ func Release(alertID string) (*Report, error) {
 		rep.bad("couldn't update ABA's records (%v); the network was restored anyway", err)
 		return rep, nil
 	}
+	released()
 	markResolved(alertID, "released")
 	return rep, nil
 }
@@ -79,6 +81,8 @@ func resumeWhere(frozen []config.FrozenProcess, alertID string, rep *Report) []c
 		if !procinfo.Alive(f.PID, f.CreateTime) {
 			continue
 		}
+		// (It's also held frozen by the service, see procinfo.Hold: that part
+		// is let go once it's off the record. See released.)
 		if err := procinfo.Resume(f.PID); err != nil {
 			rep.bad("resume pid %d: %v", f.PID, err)
 			keep = append(keep, f)
@@ -88,6 +92,11 @@ func resumeWhere(frozen []config.FrozenProcess, alertID string, rep *Report) []c
 	}
 	return keep
 }
+
+// released tells the service that frozen processes were just taken off the
+// record, so that it lets go of its holds on them: only then do the ones
+// that were resumed actually run again. (No service, no holds.)
+func released() { svcctl.Control(svcctl.ControlReleased) }
 
 func unblockWhere(blocked []config.BlockedProgram, alertID string, rep *Report) []config.BlockedProgram {
 	var keep []config.BlockedProgram
@@ -133,6 +142,7 @@ func Kill(alertID string) (*Report, error) {
 		st.Frozen = keep
 		return nil
 	})
+	released()
 	if len(rep.Lines) == 0 && len(rep.Errors) == 0 {
 		rep.ok("nothing frozen for this alert (already exited or released)")
 	}
@@ -155,6 +165,7 @@ func Resume(alertID string) (*Report, error) {
 		st.Blocked = unblockWhere(st.Blocked, a.ID, rep)
 		return nil
 	})
+	released()
 	alerts.Update(a.ID, func(x *alerts.Alert) { x.Status, x.Note = "resolved", "you said it was yours" })
 	return rep, err
 }
