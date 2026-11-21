@@ -102,6 +102,8 @@ stealer's author would. The fixes come with tests that replay the bypasses.
   it). `aba` without admin rights shows health and counts; the response settings need admin.
 - ABA says so when something keeps a bait open (which stops instant freeze from guarding it), and can no
   longer be locked out of a bait by changing the file's permissions.
+- After a program lets go of a bait, instant freeze guards it again within a tenth of a second. It could
+  take a full second, and an open in that gap wasn't paused (only logged).
 - If the service is killed while something is frozen, what it froze is ended rather than left frozen with
   no way to thaw it.
 

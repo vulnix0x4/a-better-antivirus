@@ -362,6 +362,9 @@ New-Item -ItemType Directory -Force $toolDir | Out-Null
 $tool = Join-Path $toolDir 'tool.exe'
 Copy-Item $Ghost $tool -Force
 function Evader([string]$mode, [string]$bait) {
+    # The reader before this one has only just let go of the bait (or been
+    # killed): give the service a moment to put its guard back on it.
+    Start-Sleep -Seconds 2
     $procId = & $Medium $tool $mode $bait
     if ($LASTEXITCODE -or -not $procId) { Fail "evasion helper ($mode) didn't start" }
     return [int]$procId

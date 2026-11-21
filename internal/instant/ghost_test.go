@@ -245,6 +245,35 @@ func TestHeldBaitIsReported(t *testing.T) {
 	}
 }
 
+// While something has a bait open it can't be guarded, and an open of it
+// isn't paused. Once that program lets go (a reader ABA let through, or one
+// that was just killed), the guard has to be back within moments, not after
+// the best part of a second.
+func TestGuardIsBackSoonAfterTheBaitIsLetGo(t *testing.T) {
+	bait := newBait(t)
+	f, err := os.Open(bait)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := &Watcher{Self: uint32(os.Getpid())}
+	w.Sync([]string{bait})
+	defer w.Stop()
+	time.Sleep(300 * time.Millisecond)
+	if w.Armed() != 0 {
+		f.Close()
+		t.Fatal("guarded although the bait is held open")
+	}
+	f.Close()
+	let := time.Now()
+	for w.Armed() == 0 {
+		if time.Since(let) > 500*time.Millisecond {
+			t.Fatalf("still not guarded %v after the bait was let go", time.Since(let))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Logf("guarded again %v after the bait was let go", time.Since(let))
+}
+
 // Asking Windows who holds a file runs on every bait open, alongside the 60 ms
 // the watcher waits anyway: it has to fit in roughly that.
 func TestUsersIsQuickEnough(t *testing.T) {

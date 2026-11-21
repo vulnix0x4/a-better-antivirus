@@ -479,12 +479,18 @@ func (w *Watcher) guard(path string, stop windows.Handle) {
 		return r == windows.WAIT_OBJECT_0
 	}
 	fails := 0
+	var busySince time.Time
+	reported := false
 	for {
 		g, err := Arm(path)
 		if err != nil {
+			if fails++; fails == 1 {
+				busySince, reported = time.Now(), false
+			}
 			// Busy or missing: retry quietly. But a bait that stays busy is one
 			// some program is holding open, which keeps the guard off it.
-			if fails++; fails == blockedAfter && errors.Is(err, ErrNotGranted) && w.OnBlocked != nil {
+			if !reported && time.Since(busySince) >= time.Duration(blockedAfter)*time.Second && errors.Is(err, ErrNotGranted) && w.OnBlocked != nil {
+				reported = true
 				var pids []uint32
 				for _, p := range Holders(path) {
 					if p != w.Self {
@@ -496,7 +502,14 @@ func (w *Watcher) guard(path string, stop windows.Handle) {
 					w.OnBlocked(path, pids)
 				}
 			}
-			if stopped(time.Second) {
+			// Whoever has it open usually lets go within moments (a reader that
+			// was just let through, or just killed), and until the guard is back
+			// an open of this bait isn't paused: look again quickly at first.
+			wait := time.Second
+			if time.Since(busySince) < 5*time.Second {
+				wait = 100 * time.Millisecond
+			}
+			if stopped(wait) {
 				return
 			}
 			continue
