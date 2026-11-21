@@ -1,6 +1,6 @@
 module github.com/tailscale/wf
 
-go 1.18
+go 1.26.0
 
 require (
 	go4.org/netipx v0.0.0-20220725152314-7e7bdc8411bf
