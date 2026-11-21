@@ -53,6 +53,13 @@ type server struct {
 	once1     sync.Once
 	once2     sync.Once
 
+	// admit (optional) says whether an access from s.accesses is about a bait,
+	// for a watcher that hears about other files too. The main loop calls it,
+	// so it runs after any reload that came first: an access to a bait added a
+	// moment ago waits for the reload that makes it known, instead of being
+	// judged against the old list and dropped.
+	admit func(*detect.Access) bool
+
 	said  map[string]time.Time // warnings raised lately, so each is raised once
 	pubMu sync.Mutex
 
@@ -189,6 +196,9 @@ func (s *server) run(ctx context.Context, ctl <-chan svcctl.Signal) error {
 			s.log.Printf("service stopping")
 			return nil
 		case oa := <-s.accesses:
+			if s.admit != nil && !s.admit(oa) {
+				continue
+			}
 			h := fnv.New32a()
 			fmt.Fprint(h, oa.PID)
 			queues[h.Sum32()%workers] <- oa

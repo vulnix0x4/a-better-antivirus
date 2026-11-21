@@ -1,0 +1,645 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A Better Antivirus: catch infostealers in the act</title>
+<meta name="description" content="Free, open-source Windows tool. ABA plants fake passwords, wallets and app data where infostealers look, and freezes whatever opens them. Works alongside Windows Defender, not instead of it.">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#0b0c0b" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f2f0e9" media="(prefers-color-scheme: light)">
+<link rel="icon" href="logo.svg" type="image/svg+xml">
+<link rel="icon" href="favicon.png" type="image/png" sizes="48x48">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="preload" href="fonts/jetbrains-mono.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="css/site.css">
+<meta property="og:type" content="website">
+<meta property="og:title" content="A Better Antivirus: catch infostealers in the act">
+<meta property="og:description" content="Decoy passwords, wallets and tokens that only an infostealer would open. Touch one, get frozen. Free and open source, for Windows. Keep Defender on.">
+<!-- Link previews need a full address for the picture. Once the site has its
+     final address, change this to https://<that address>/og.jpg and add og:url. -->
+<meta property="og:image" content="og.jpg">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+<meta property="og:image:alt" content="A Better Antivirus catches infostealers in the act: a real Discord stealer, frozen in 158 ms.">
+<meta name="twitter:card" content="summary_large_image">
+<script src="js/early.js"></script>
+<script src="js/site.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="top" id="top-bar">
+  <div class="wrap top-row">
+    <a class="brand" href="#top" aria-label="A Better Antivirus, back to top">
+      <img src="logo.svg" alt="" width="28" height="28">
+      <span class="brand-name">A Better Antivirus</span>
+    </a>
+    <nav class="top-nav" aria-label="Sections">
+      <a href="#play">Play</a>
+      <a href="#how">How it works</a>
+      <a href="#limits">Limits</a>
+      <a href="https://github.com/vulnix0x4/a-better-antivirus">GitHub</a>
+    </nav>
+    <a class="btn btn-solid btn-sm" href="#download">Download</a>
+  </div>
+  <div class="wire" aria-hidden="true"><span class="wire-node"></span></div>
+</header>
+
+<main id="main">
+
+<!-- ═════════════════════════ HERO + GAME ═════════════════════════ -->
+<section class="hero" id="top" aria-labelledby="hero-title">
+  <div class="wrap hero-grid">
+    <div class="hero-copy">
+      <p class="kicker"><span class="k-dot" aria-hidden="true"></span>Free, open source, for Windows 10 &amp; 11</p>
+      <h1 id="hero-title">Catch infostealers <span class="h-act">in the act.</span></h1>
+      <p class="lede">Infostealers are programs that sweep the saved passwords, crypto wallets and app logins off your PC and upload them, usually within seconds. ABA plants fake ones exactly where they look. Your own apps have no reason to open them. When something suspicious does, ABA <strong class="freeze-word">freezes&nbsp;it</strong>, typically about a tenth of a second later.</p>
+      <div class="cta">
+        <a class="btn btn-solid btn-lg" href="#download"><span class="btn-ico" aria-hidden="true">↓</span> Download for Windows</a>
+        <a class="btn btn-line btn-lg" href="#proof">Watch a real one get caught <span class="btn-meta">47 s</span></a>
+      </div>
+      <p class="os-note" data-os-show="mac linux mobile other" hidden>You're not on Windows. ABA only runs on Windows 10 and 11 for now. <a href="#download">What about my system?</a></p>
+      <p class="defender-line"><strong>Despite the name, keep Windows Defender on.</strong> ABA isn't an antivirus. It's the tripwire for what gets past one. <a href="#defender">Why both?</a></p>
+    </div>
+
+    <!-- The game. Without JavaScript this is a plain, readable list of what a
+         stealer finds on a PC with ABA, baits marked. site.js turns it into
+         the playable version. -->
+    <div class="heist" id="play" data-heist>
+      <div class="heist-win">
+        <div class="heist-bar">
+          <span class="heist-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="heist-title">stealer's-eye view</span>
+          <span class="heist-tag">Simulation</span>
+        </div>
+        <div class="heist-proc" aria-hidden="true">
+          <span><span class="proc-ico">▶</span> game_setup.exe</span>
+          <span class="proc-meta">unsigned · Downloads</span>
+          <span class="heist-clock js-only" data-clock>t+0.000s</span>
+        </div>
+
+        <div class="heist-intro" data-intro>
+          <h2 class="heist-h">You're the stealer.</h2>
+          <p class="heist-p js-only" hidden>This is Sam's PC. Grab anything that looks valuable, then upload it. Somewhere in here are baits.</p>
+          <p class="heist-p no-js">This is what a stealer finds on a PC running ABA. The ones marked <span class="tag tag-bait">bait</span> are ABA's. With JavaScript on, you can try to rob it.</p>
+        </div>
+
+        <div class="heist-files" data-files>
+          <section class="grp" aria-labelledby="g-desk">
+            <h3 class="grp-h" id="g-desk">C:\Users\sam\<b>Desktop</b></h3>
+            <ul class="files">
+              <li class="file" data-kind="bait" data-what="password list" data-size="2 KB" data-why="Fake password list. Every install names its fake files differently, from what file grabbers search for."><span class="f-ico" aria-hidden="true">≡</span><span class="f-name">passwords.txt</span><span class="tag tag-bait">bait</span></li>
+              <li class="file" data-kind="real" data-what="invoice" data-size="184 KB" data-why="Sam's own file. ABA doesn't watch your real files: it watches its baits."><span class="f-ico" aria-hidden="true">▤</span><span class="f-name">invoice_march.pdf</span><span class="tag tag-real">real</span></li>
+            </ul>
+          </section>
+          <section class="grp" aria-labelledby="g-docs">
+            <h3 class="grp-h" id="g-docs">C:\Users\sam\<b>Documents</b></h3>
+            <ul class="files">
+              <li class="file" data-kind="bait" data-what="wallet recovery phrase" data-size="1 KB" data-why="Fake crypto wallet recovery phrase."><span class="f-ico" aria-hidden="true">≡</span><span class="f-name">wallet recovery phrase.txt</span><span class="tag tag-bait">bait</span></li>
+              <li class="file" data-kind="bait" data-what="KeePass database" data-size="38 KB" data-why="Fake KeePass password database."><span class="f-ico" aria-hidden="true">◫</span><span class="f-name">Passwords.kdbx</span><span class="tag tag-bait">bait</span></li>
+              <li class="file" data-kind="real" data-what="tax return" data-size="2.4 MB" data-why="Sam's own file."><span class="f-ico" aria-hidden="true">▤</span><span class="f-name">tax return 2025.pdf</span><span class="tag tag-real">real</span></li>
+            </ul>
+          </section>
+          <section class="grp" aria-labelledby="g-chrome">
+            <h3 class="grp-h" id="g-chrome">…\Google\Chrome\<b>User Data</b> <span class="grp-note">Sam uses Chrome</span></h3>
+            <ul class="files">
+              <li class="file" data-kind="real" data-what="Chrome profile" data-size="5.1 MB" data-why="Sam's real Chrome profile. ABA doesn't watch it: its bait is the fake profile next to it."><span class="f-ico" aria-hidden="true">▸</span><span class="f-name">Default</span><span class="f-sub">Login Data, Cookies</span><span class="tag tag-real">real</span></li>
+              <li class="file" data-kind="bait" data-what="Chrome profile" data-size="4.8 MB" data-why="A fake profile next to the real one. Stealers take every profile folder; Chrome only opens the ones it knows, so it never touches this."><span class="f-ico" aria-hidden="true">▸</span><span class="f-name">Profile 23</span><span class="f-sub">Login Data, Cookies</span><span class="tag tag-bait">bait</span></li>
+              <li class="file" data-kind="real" data-what="Chrome's list of profiles" data-size="96 KB" data-hint="profiles" data-why="Chrome's own list of profiles. It names only Default. A stealer that reads it and takes only those profiles skips Profile 23: one of ABA's honest limitations."><span class="f-ico" aria-hidden="true">≡</span><span class="f-name">Local State</span><span class="tag tag-real">real</span></li>
+            </ul>
+          </section>
+          <section class="grp" aria-labelledby="g-apps">
+            <h3 class="grp-h" id="g-apps">C:\Users\sam\<b>AppData</b> <span class="grp-note">apps Sam doesn't have</span></h3>
+            <ul class="files">
+              <li class="file" data-kind="bait" data-what="Discord token store" data-size="412 KB" data-why="Discord isn't installed here, so nothing legitimate ever reads this. ABA checks what you have installed and only fakes app data like this for apps you don't."><span class="f-ico" aria-hidden="true">▸</span><span class="f-name">discord\Local Storage\leveldb</span><span class="tag tag-bait">bait</span></li>
+              <li class="file" data-kind="bait" data-what="Exodus wallet" data-size="64 KB" data-why="Fake Exodus wallet, for an app that isn't installed."><span class="f-ico" aria-hidden="true">▸</span><span class="f-name">Exodus\exodus.wallet</span><span class="tag tag-bait">bait</span></li>
+              <li class="file" data-kind="bait" data-what="Telegram session" data-size="1.3 MB" data-why="Fake Telegram session."><span class="f-ico" aria-hidden="true">▸</span><span class="f-name">Telegram Desktop\tdata</span><span class="tag tag-bait">bait</span></li>
+              <li class="file" data-kind="bait" data-what="Opera profile" data-size="3.9 MB" data-why="Fake Opera profile: a real database with saved logins and cookies in it, for a browser Sam doesn't use."><span class="f-ico" aria-hidden="true">▸</span><span class="f-name">Opera Software\Opera Stable</span><span class="tag tag-bait">bait</span></li>
+            </ul>
+          </section>
+          <section class="grp" aria-labelledby="g-home">
+            <h3 class="grp-h" id="g-home">C:\Users\<b>sam</b></h3>
+            <ul class="files">
+              <li class="file" data-kind="bait" data-what="AWS keys" data-size="1 KB" data-why="Fake AWS keys. With canary tokens on, they're real canarytokens.org keys: if anyone uses them later, Sam gets an email."><span class="f-ico" aria-hidden="true">≡</span><span class="f-name">.aws\credentials</span><span class="tag tag-bait">bait</span></li>
+            </ul>
+          </section>
+        </div>
+
+        <div class="heist-loot" data-loot hidden>
+          <div class="loot-txt" aria-live="polite" data-loot-txt>Nothing taken yet.</div>
+          <button type="button" class="btn btn-solid btn-sm loot-up" data-upload disabled><span aria-hidden="true">↑</span> Upload</button>
+          <div class="loot-bar" aria-hidden="true"><span data-loot-bar></span></div>
+        </div>
+
+        <!-- Overlays, filled in by site.js -->
+        <canvas class="frost" data-frost aria-hidden="true"></canvas>
+        <div class="stamp" data-stamp aria-hidden="true" hidden>
+          <span class="stamp-word">FROZEN.</span>
+          <span class="stamp-ms" data-stamp-ms>0 ms after it opened the bait</span>
+        </div>
+        <div class="heist-modal" data-modal hidden></div>
+      </div>
+      <p class="heist-foot" data-foot><span class="js-only" hidden>A demonstration that follows how the real ABA behaves. Freeze times are drawn from the 72&ndash;151&nbsp;ms ABA measures in its tests. </span><span class="no-js">The real thing in action: <a href="#proof">a real stealer, frozen in 158 ms</a>.</span></p>
+      <p class="sr-only" aria-live="assertive" data-announce></p>
+    </div>
+  </div>
+</section>
+
+<!-- ═════════════════════════ DEFENDER ═════════════════════════ -->
+<section class="defender" id="defender" aria-labelledby="def-title">
+  <div class="wrap def-grid">
+    <h2 id="def-title" class="def-joke">It's not an antivirus.<br>It's a better one.<sup class="def-ast">*</sup></h2>
+    <div class="def-body">
+      <p class="def-star"><span aria-hidden="true">*</span> The name is a joke. <strong>Keep Windows Defender on.</strong></p>
+      <p>Antivirus tries to stop malware before it runs. ABA is the tripwire for when something gets past it, and that's the part antivirus is bad at. They do different jobs. Use both.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═════════════════════════ PROOF (VIDEO) ═════════════════════════ -->
+<section class="proof" id="proof" aria-labelledby="proof-title">
+  <div class="wrap">
+    <div class="sec-head">
+      <p class="label">Not a simulation</p>
+      <h2 id="proof-title">A real infostealer. Defender off.<br><span class="red">Frozen in 158&nbsp;ms.</span></h2>
+    </div>
+    <figure class="film">
+      <div class="film-frame">
+        <video controls preload="none" playsinline poster="media/demo-poster.webp" width="1920" height="1080" aria-describedby="film-cap">
+          <source src="media/demo.mp4" type="video/mp4">
+          <a href="media/demo.mp4">Download the demo video (MP4, 11 MB)</a>
+        </video>
+      </div>
+      <figcaption id="film-cap" class="film-cap">
+        <span>A real Discord token stealer, disguised as a game, on a Windows 11 test machine with Windows Defender switched off. It went for a fake Discord token. ABA froze it 158&nbsp;ms later, before it could send anything. 47&nbsp;s, with music, no speech.</span>
+      </figcaption>
+    </figure>
+    <details class="transcript">
+      <summary>Read what happens in the video</summary>
+      <ol>
+        <li>Text on a black screen: “This is a real Discord token stealer. Windows Defender is off.”</li>
+        <li>ABA is installed on a Windows 11 test machine with one command. Setup ends with “armed” and 18 bait files planted: fake passwords, wallets and tokens.</li>
+        <li>The desktop. A file called “passwords” is highlighted: it's a bait.</li>
+        <li>“Now the stealer.” A file called zombiesurvival.jar, which looks like a game, is double-clicked. A timer starts.</li>
+        <li>About two seconds later a popup appears: “ABA: javaw.exe opened a bait”. It says the program read the Discord token store and, under “What ABA did”: “Froze it”. A red stamp reads “Frozen. 158 ms after it touched the bait. Before it could send anything.”</li>
+        <li>“It went for the Discord token. A fake one. It's bait.”</li>
+        <li>The popup asks what should happen. “Yes = Kill it” is clicked.</li>
+        <li>ABA's full report in a terminal: what the program read, what launched it, its hash. It ends with “frozen, then killed”. A check for the stealer's process finds nothing.</li>
+        <li>Closing text: “A Better Antivirus. Free and open source.”</li>
+      </ol>
+    </details>
+
+    <!-- 158 ms, felt. Needs JavaScript; without it the paragraph alone stays. -->
+    <div class="react" data-react>
+      <div class="react-copy">
+        <h3 class="react-h">How long is 158&nbsp;ms?</h3>
+        <p>That's how long the stealer in the video had between opening the bait and being frozen. Try to beat it: hit the pad the instant it turns red.</p>
+        <dl class="react-score" data-react-score hidden>
+          <div><dt>You</dt><dd data-react-you>–</dd></div>
+          <div><dt>ABA, in the video</dt><dd>158 ms</dd></div>
+          <div><dt>ABA, in its tests</dt><dd>72–151 ms</dd></div>
+        </dl>
+      </div>
+      <button type="button" class="react-pad" data-react-pad hidden>
+        <span class="react-big" data-react-big>Start</span>
+        <span class="react-small" data-react-small>Click, tap or press Space</span>
+      </button>
+    </div>
+  </div>
+</section>
+
+<!-- ═════════════════════════ WHY IT WORKS ═════════════════════════ -->
+<section class="why" id="why" aria-labelledby="why-title">
+  <div class="wrap">
+    <div class="sec-head">
+      <p class="label">Why it works</p>
+      <h2 id="why-title">Infostealers grab first and upload last. <span class="dim">ABA lives in the gap.</span></h2>
+    </div>
+    <div class="why-text">
+      <p>Infostealers (Lumma, RedLine, Vidar, StealC…) are the most common malware on personal PCs. They sweep your browsers, wallets, Discord and Telegram sessions and documents, zip it all up and upload it, usually within seconds.</p>
+      <p>Most of them <strong>collect first and upload at the end</strong>, and collecting means opening files in known places. ABA puts tripwires in exactly those places.</p>
+    </div>
+
+    <figure class="run" aria-labelledby="run-cap">
+      <p class="run-head"><span class="run-proc">A typical infostealer's run</span><span class="run-arrow" aria-hidden="true">collect first ─── upload last ──▶</span></p>
+      <ol class="run-steps">
+        <li class="rs is-done"><span class="rs-n">Chrome profile</span><span class="rs-s">collected</span></li>
+        <li class="rs is-done"><span class="rs-n">Documents</span><span class="rs-s">collected</span></li>
+        <li class="rs is-hit"><span class="rs-n">Discord token</span><span class="rs-s"><b>a bait: frozen</b></span></li>
+        <li class="rs is-never"><span class="rs-n">Wallets</span><span class="rs-s">never</span></li>
+        <li class="rs is-never"><span class="rs-n">Telegram</span><span class="rs-s">never</span></li>
+        <li class="rs is-never"><span class="rs-n">Zip it up</span><span class="rs-s">never</span></li>
+        <li class="rs is-never rs-up"><span class="rs-n">Upload</span><span class="rs-s">never</span></li>
+      </ol>
+      <figcaption id="run-cap">The tripwire sits in the collecting part. What it gathered before the bait hasn't been sent yet, and now it won't be.</figcaption>
+    </figure>
+
+    <h3 class="sub-h">Four kinds of bait</h3>
+    <ul class="kinds">
+      <li class="kind">
+        <p class="chip">passwords.txt · recovery phrase · 2FA codes · .kdbx</p>
+        <h4>Fake files where file grabbers look</h4>
+        <p>A password list on the Desktop, in Documents and in your home folder, a wallet recovery phrase, 2FA backup codes, a KeePass database. Every install names them differently, so they can't be skipped by name.</p>
+      </li>
+      <li class="kind">
+        <p class="chip">Opera · MetaMask · Exodus · Telegram · Discord · AWS</p>
+        <h4>Fake app data for apps you don't use</h4>
+        <p>Opera, Vivaldi and Yandex profiles with saved logins and cookies, MetaMask, Exodus, Electrum and Atomic wallets, Telegram sessions, Discord tokens, FileZilla servers, AWS keys. The app isn't installed, so nothing legitimate ever reads them. ABA checks what you have and never fakes those; install one later and it retires that decoy and tells you.</p>
+      </li>
+      <li class="kind">
+        <p class="chip">…\Chrome\User Data\Profile 23</p>
+        <h4>A fake profile in the browsers you do use</h4>
+        <p>A <code>Profile 23</code> (or so) next to your real profiles in Chrome, Edge and Brave. Stealers take every profile folder; the browser only opens the ones it knows. It's the bait a stealer can't dodge by checking whether the app is really installed.</p>
+      </li>
+      <li class="kind">
+        <p class="chip">optional · canarytokens.org</p>
+        <h4>Canary tokens</h4>
+        <p>The fake AWS keys and a link in <code>passwords.txt</code> can be real <a href="https://canarytokens.org">canarytokens.org</a> tokens. If someone uses them later, you get an email, even if your PC was never online to tell you.</p>
+      </li>
+    </ul>
+    <p class="big-claim">It catches infostealers by <em>what they do</em>, not by recognising the file. So it works on brand-new ones no antivirus has a signature for yet.</p>
+  </div>
+</section>
+
+<!-- ═════════════════════════ HOW IT WORKS ═════════════════════════ -->
+<section class="how" id="how" aria-labelledby="how-title">
+  <div class="wrap">
+    <div class="sec-head">
+      <p class="label">How it works</p>
+      <h2 id="how-title">Inside the tenth of a second.</h2>
+      <p class="sec-lede">The instant freeze, on by default. Slowed down here; the real thing typically takes about 0.1&nbsp;s.</p>
+    </div>
+
+    <div class="oplock" data-oplock>
+      <div class="op-stage" aria-hidden="true">
+        <svg class="op-svg" viewBox="0 0 600 300" focusable="false">
+          <g class="op-lanes">
+            <line x1="140" y1="40" x2="590" y2="40"/>
+            <line x1="140" y1="100" x2="590" y2="100"/>
+            <line x1="140" y1="170" x2="420" y2="170"/>
+            <line class="op-aba-lane" x1="140" y1="270" x2="590" y2="270"/>
+          </g>
+          <g class="op-names">
+            <text x="0" y="46">chrome</text>
+            <text x="0" y="106">explorer</text>
+            <text x="0" y="176" class="op-sus">game_setup</text>
+            <text x="0" y="276" class="op-aba">ABA</text>
+          </g>
+          <rect class="op-scan" x="130" y="148" width="300" height="44" rx="10"/>
+          <g class="op-bait">
+            <rect x="424" y="146" width="166" height="48" rx="8"/>
+            <text x="507" y="176" text-anchor="middle">passwords.txt</text>
+            <path class="op-lock" d="M499 130 h16 v12 h-16z M502 130 v-5 a5 5 0 0 1 10 0 v5"/>
+          </g>
+          <circle class="op-dot op-d1" cx="150" cy="40" r="7"/>
+          <circle class="op-dot op-d2" cx="150" cy="100" r="7"/>
+          <circle class="op-dot op-d3" cx="150" cy="170" r="9"/>
+          <circle class="op-ring" cx="420" cy="170" r="14"/>
+          <path class="op-signal" d="M507 196 V262"/>
+          <text class="op-lbl op-lbl-stuck" x="300" y="138" text-anchor="middle">paused in the open</text>
+          <text class="op-lbl op-lbl-open" x="300" y="138" text-anchor="middle">woke first: the opener</text>
+          <g class="op-ice"><rect x="300" y="200" width="150" height="34" rx="6"/><text x="375" y="223" text-anchor="middle">FROZEN</text></g>
+        </svg>
+        <p class="op-clock js-only" data-op-clock>slow motion</p>
+        <div class="op-ctl" data-op-ctl hidden>
+          <button type="button" class="btn btn-line btn-sm" data-op-play>Play</button>
+        </div>
+      </div>
+      <ol class="op-steps" data-op-steps>
+        <li><b>ABA holds a lock on every bait.</b> An exclusive <em>opportunistic lock</em>, so Windows tells ABA the moment a file is opened.</li>
+        <li><b>A program opens one.</b> Windows pauses it inside the open and tells ABA at once.</li>
+        <li><b>ABA notes which threads just got stuck,</b> and lets go.</li>
+        <li><b>The one that wakes at that exact instant is the opener:</b> identified precisely, never guessed.</li>
+        <li><b>If it's suspicious, it's frozen.</b> Typically about 0.1&nbsp;s after the open (72–151&nbsp;ms in ABA's tests).</li>
+      </ol>
+    </div>
+    <p class="op-note">To stay safe, the instant freeze only acts on ordinary programs running as you without admin rights: never on system processes or on ABA itself, and if more than one program wakes at once it doesn't guess. A program that asks Windows <em>not</em> to pause it is found by the handle it's left holding. Everything else is caught by the backup: Windows' own file auditing (event 4663), which takes a few ms to about 1&nbsp;s. No kernel driver, no background scanning, no CPU use while idle.</p>
+
+    <h3 class="sub-h">Then, in order</h3>
+    <ol class="after">
+      <li>
+        <h4>Judge how bad it is</h4>
+        <p>Automatically, from what read the bait and how. <a href="#severity">What counts as critical</a></p>
+      </li>
+      <li>
+        <h4>Freeze the whole thing</h4>
+        <p>A stealer is rarely one process. ABA freezes the reader, what it started, the loader or script host that started <em>it</em>, and other running copies, and holds them where only ABA's service can thaw them.</p>
+      </li>
+      <li>
+        <h4>Check before blaming</h4>
+        <p>It verifies the code signature. A signed, legitimate app is unfrozen and just noted.</p>
+      </li>
+      <li>
+        <h4>Take notes while it's frozen</h4>
+        <p>Command line, parent processes, hash, network connections.</p>
+      </li>
+      <li>
+        <h4>Respond</h4>
+        <p>Block its internet, kill it or isolate the PC, as you chose. <code>aba release</code> undoes everything.</p>
+      </li>
+      <li>
+        <h4>Tell you</h4>
+        <p>A desktop popup, and your phone if you set it up: ntfy, Discord webhook, Pushover or email. <em>Kill it</em>, or <em>It's mine</em> to undo it all.</p>
+      </li>
+    </ol>
+
+    <div class="how-grid">
+      <div class="panel" id="severity">
+        <h3 class="panel-h">What counts as critical</h3>
+        <ul class="sev">
+          <li><span class="sev-t sev-crit">critical</span><span>Anything going through <strong>several apps' data</strong> within 2 minutes (a sweep), alone or split over several programs</span></li>
+          <li><span class="sev-t sev-crit">critical</span><span>Unsigned programs in Temp, AppData, Downloads, Desktop…</span></li>
+          <li><span class="sev-t sev-crit">critical</span><span>Script hosts and tools stealers hide in: PowerShell, cmd, mshta, rundll32, certutil, MSBuild…</span></li>
+          <li><span class="sev-t sev-crit">critical</span><span>Tricks to read unseen, injected code in a Windows program, unsigned DLLs sideloaded by a signed app</span></li>
+          <li><span class="sev-t sev-warn">warn</span><span>Signed apps in a user folder, scripting runtimes, other Windows programs in your session</span></li>
+          <li><span class="sev-t sev-info">info</span><span>Signed, installed software in Program Files, Windows services</span></li>
+        </ul>
+        <p class="panel-foot"><strong>Behaviour beats identity.</strong> Stealers often hide inside a legitimate program, so <em>who</em> opened a bait can lie. <em>What</em> it opened can't: a process that reads several different apps' baits is stopped as a stealer whatever it claims to be.</p>
+      </div>
+      <div class="panel">
+        <h3 class="panel-h">You choose how hard it hits</h3>
+        <div class="tbl-wrap" tabindex="0" role="region" aria-label="Response presets">
+          <table class="tbl">
+            <thead><tr><th scope="col">Preset</th><th scope="col">Critical</th><th scope="col">Warn</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">Alert only</th><td>notify</td><td>notify</td></tr>
+              <tr class="is-def"><th scope="row">Balanced <span class="pill">default</span></th><td>freeze + block its internet</td><td>notify</td></tr>
+              <tr><th scope="row">Strict</th><td>freeze + block + isolate the PC</td><td>freeze</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="panel-foot">Isolation uses the Windows Filtering Platform, survives reboots so malware can't wait it out, and still lets ABA's phone alert through.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═════════════════════════ LIMITS ═════════════════════════ -->
+<section class="limits" id="limits" aria-labelledby="limits-title">
+  <div class="wrap">
+    <div class="sec-head">
+      <p class="label">Honest limitations</p>
+      <h2 id="limits-title">Where it stops.</h2>
+      <p class="sec-lede">It's a tripwire, not a shield. Know its edges before you rely on it. <a href="https://github.com/vulnix0x4/a-better-antivirus#honest-limitations">The full list is in the README.</a></p>
+    </div>
+    <ol class="lim">
+      <li>
+        <h3>It only catches infostealers that touch a bait</h3>
+        <p>A stealer that only grabs your real browser data and never touches a bait won't trip it. ABA is open source, so a stealer can be written to know it. What it can't do cheaply is tell which files are baits. But one that reads each browser's own list of profiles, takes only those and nothing else on the PC, stays under the wire.</p>
+      </li>
+      <li>
+        <h3>A fast stealer may get something out first</h3>
+        <p>With the instant freeze, a stealer is frozen about 0.1&nbsp;s after it opens a bait (it gets the fake contents, not your real data). Without it, a few ms to about 1&nbsp;s. One that uploads each item the moment it reads it may send something first; freezing stops what it hasn't sent yet.</p>
+      </li>
+      <li>
+        <h3>It can't beat malware with admin rights</h3>
+        <p>Malware running as administrator can stop the service, clear the audit policy or remove filters. ABA alerts if auditing is switched off, but it can't defend against an attacker who already owns the machine.</p>
+      </li>
+      <li>
+        <h3>The instant freeze is deliberately cautious</h3>
+        <p>It skips programs running as administrator and anything it can't pinpoint with certainty. Those are still caught by the event-log path, just a little later.</p>
+      </li>
+      <li>
+        <h3>Injected code is judged by its results</h3>
+        <p>Watching one process write code into another needs a kernel driver or Microsoft's protected-antivirus signing; ABA has neither. It catches injected stealers by what they read and by the code they leave in Windows programs' memory. That check skips programs that legitimately generate code (.NET, Java, browsers), and module stomping and process ghosting get past it (the sweep rule still applies). A stealer injected into an app you trusted, reading only the one bait you trusted it with, would get through. <code>explorer.exe</code> and a few other desktop processes are never frozen; their internet is cut instead.</p>
+      </li>
+      <li>
+        <h3>A reader that's already gone can't lead to its parent</h3>
+        <p>If a reader exits before its event arrives, on a PC where the instant freeze couldn't single it out, it's reported and its file's internet is cut, but whatever started it isn't known.</p>
+      </li>
+      <li>
+        <h3>If the service is killed mid-incident, what it froze is ended</h3>
+        <p>A hold nobody is left to release would otherwise stay frozen for good. Only a crash or kill does this; stopping, updating or reinstalling releases holds properly.</p>
+      </li>
+      <li>
+        <h3>Some of your own software reads files</h3>
+        <p>Backup, sync and search tools can trip a bait. One click on <em>It's mine</em> handles it. A backup tool that copies all of AppData looks like a sweep until you allow it.</p>
+      </li>
+      <li>
+        <h3><code>~/.aws/credentials</code> is quieter</h3>
+        <p>Every AWS SDK reads it, so a <em>signed</em> program reading it is only logged. Unsigned programs, script hosts and runtimes still trip it.</p>
+      </li>
+      <li>
+        <h3>Popups need you to be signed in</h3>
+        <p>Detections are always logged, phone alerts always go out, and responses happen either way.</p>
+      </li>
+      <li>
+        <h3>Low profile, not hidden</h3>
+        <p>The service is called “File Access Monitor” so it doesn't advertise itself to malware that checks for honeypots. It's fully visible to you.</p>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<!-- ═════════════════════════ DOWNLOAD ═════════════════════════ -->
+<section class="get" id="download" aria-labelledby="get-title">
+  <div class="wrap">
+    <div class="sec-head">
+      <p class="label">Download</p>
+      <h2 id="get-title">Set the trap.</h2>
+      <p class="sec-lede">Free. No account. No telemetry. Setup takes about a minute.</p>
+    </div>
+
+    <p class="os-banner" data-os-show="mac" hidden><strong>You're on a Mac.</strong> ABA only runs on Windows 10 and 11 today. A macOS version is being worked on. There's no date yet.</p>
+    <p class="os-banner" data-os-show="linux" hidden><strong>You're on Linux.</strong> ABA only runs on Windows 10 and 11 today. A Linux version is being worked on. There's no date yet.</p>
+    <p class="os-banner" data-os-show="mobile" hidden><strong>You're on a phone or tablet.</strong> ABA runs on Windows PCs. Open this page on your PC to install it.</p>
+    <p class="os-banner" data-os-show="other" hidden><strong>ABA only runs on Windows 10 and 11 today.</strong> Open this page on a Windows PC to install it.</p>
+
+    <!-- One <li class="os"> per system. To add one later: change is-soon to
+         is-ready, and give it a download link like the Windows one. site.js
+         already recognises macOS and Linux visitors. -->
+    <ul class="oses">
+      <li class="os is-ready" data-os="windows">
+        <div class="os-head">
+          <h3>Windows <span class="os-ver">10 &amp; 11</span></h3>
+          <span class="pill pill-ok">Available</span>
+          <span class="pill pill-you" hidden>Your system</span>
+        </div>
+        <a class="btn btn-solid btn-xl dl" href="https://github.com/vulnix0x4/a-better-antivirus/releases/latest/download/ABA-Setup.exe">
+          <span class="btn-ico" aria-hidden="true">↓</span>
+          <span class="dl-txt"><span class="dl-main">Download <span class="nw">ABA-Setup.exe</span></span><span class="dl-sub">One installer for x64 and ARM64 · from GitHub Releases</span></span>
+        </a>
+        <p class="os-fine">The newest version, straight from <a href="https://github.com/vulnix0x4/a-better-antivirus/releases/latest">ABA's releases on GitHub</a>. It shows up as “A Better Antivirus” in Windows' installed apps.</p>
+      </li>
+      <li class="os is-soon" data-os="mac">
+        <div class="os-head"><h3>macOS</h3><span class="pill">Not yet</span><span class="pill pill-you" hidden>Your system</span></div>
+        <p>Being worked on. No date yet.</p>
+      </li>
+      <li class="os is-soon" data-os="linux">
+        <div class="os-head"><h3>Linux</h3><span class="pill">Not yet</span><span class="pill pill-you" hidden>Your system</span></div>
+        <p>Being worked on. No date yet.</p>
+      </li>
+    </ul>
+
+    <h3 class="sub-h" id="next-title">After you click download</h3>
+    <ol class="steps" aria-labelledby="next-title">
+      <li class="step">
+        <h4>Open <code>ABA-Setup.exe</code></h4>
+        <p>It's in your Downloads folder. Your browser may say the file isn't commonly downloaded: choose to keep it.</p>
+      </li>
+
+      <!-- ═══ UNSIGNED-INSTALLER BLOCK: START ════════════════════════════════
+           Delete everything from here down to "UNSIGNED-INSTALLER BLOCK: END"
+           once the installer is code-signed. The steps renumber themselves.
+           Its styles are under "Unsigned-installer block" in css/site.css. -->
+      <li class="step step-warn" id="smartscreen">
+        <h4>Windows will warn you. That's expected, for now.</h4>
+        <p>ABA's installer isn't code-signed yet; an application for free open-source signing is pending. Until then Windows doesn't recognise the file and shows its blue SmartScreen warning.</p>
+        <div class="ss-wrap">
+          <ol class="ss-how">
+            <li>Click <strong>More info</strong>.</li>
+            <li>Check the app is <code>ABA-Setup.exe</code>, then click <strong>Run anyway</strong>.</li>
+          </ol>
+          <figure class="ss-fig">
+            <div class="ss" role="img" aria-label="Drawing of the Windows SmartScreen warning after clicking More info: a blue box titled “Windows protected your PC”, showing App: ABA-Setup.exe, Publisher: Unknown publisher, and two buttons, Run anyway and Don't run.">
+              <p class="ss-t">Windows protected your PC</p>
+              <p class="ss-p">Microsoft Defender SmartScreen prevented an unrecognized app from starting. Running this app might put your PC at risk.</p>
+              <p class="ss-p ss-meta">App: ABA-Setup.exe<br>Publisher: Unknown publisher</p>
+              <p class="ss-btns"><span class="ss-b ss-hit">Run anyway</span><span class="ss-b">Don't run</span></p>
+            </div>
+            <figcaption>A drawing, not a screenshot: what you'll see after <strong>More info</strong>.</figcaption>
+          </figure>
+        </div>
+        <p class="ss-sac"><strong>Smart App Control.</strong> On Windows 11 PCs where Smart App Control is switched on, Windows can block an unsigned installer outright, with no <em>Run anyway</em>. If that happens, ABA can't be installed on that PC until signing arrives. We don't suggest switching Smart App Control off for it.</p>
+        <details class="hash">
+          <summary>Be sure first: check the file's SHA-256</summary>
+          <p>Every release lists the SHA-256 fingerprint of each file. If yours matches, it's the same file, byte for byte.</p>
+          <ol>
+            <li>Open <a href="https://github.com/vulnix0x4/a-better-antivirus/releases/latest/download/SHA256SUMS.txt">SHA256SUMS.txt</a> from the latest release and find the line ending in <code>ABA-Setup.exe</code>.</li>
+            <li>In PowerShell (Start, type <kbd>PowerShell</kbd>, Enter), run this. It only reads the file:
+              <div class="cmd"><pre tabindex="0" aria-label="PowerShell command"><code id="cmd-hash">(Get-FileHash "$HOME\Downloads\ABA-Setup.exe").Hash</code></pre><button type="button" class="copy" data-copy="cmd-hash" hidden>Copy</button></div>
+            </li>
+            <li>The two must match (capital or small letters don't matter). <strong>If they differ, don't run the file.</strong></li>
+          </ol>
+          <p class="fine">The list itself is signed with ABA's release key (<code>SHA256SUMS.txt.sig</code>). <a href="https://github.com/vulnix0x4/a-better-antivirus/blob/main/SECURITY.md#how-releases-and-updates-are-protected">How releases are protected</a>.</p>
+        </details>
+      </li>
+      <!-- ═══ UNSIGNED-INSTALLER BLOCK: END ═════════════════════════════════ -->
+
+      <li class="step">
+        <h4>Say yes to the admin prompt</h4>
+        <p>ABA needs administrator rights to install its background service and plant the baits.</p>
+      </li>
+      <li class="step">
+        <h4>Answer two questions</h4>
+        <p><strong>Recommended</strong> asks just two things, phone alerts and automatic updates, and uses sensible defaults for the rest. <strong>Customize</strong> lets you pick every bait and response.</p>
+      </li>
+      <li class="step">
+        <h4>Watch it catch a harmless fake stealer</h4>
+        <p>Setup ends by offering a safe test. Here's what it prints:</p>
+        <div class="term" data-term>
+          <div class="term-bar"><span class="heist-dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="term-title">PowerShell</span><span class="heist-tag">Demonstration</span></div>
+          <div class="term-body" data-term-body role="log" aria-label="Terminal output">
+<pre class="term-out" data-term-out><span class="t-prompt">PS C:\Users\you&gt;</span> aba test
+
+ A harmless copy of ABA in your Temp folder is about to read passwords.txt on the Desktop, exactly the way a stealer would. Nothing leaves your PC and your network isn't touched.
+
+ <span class="t-ok">✓</span> <span class="t-k">Caught</span>      critical: unsigned program running from a user-writable folder: typical of stealers
+ <span class="t-ok">✓</span> <span class="t-k">Frozen</span>      72 ms after it opened the bait, before it could read a byte
+ <span class="t-ok">✓</span> <span class="t-k">Alerted</span>     popup on your desktop, and your phone (ntfy)
+ <span class="t-ok">✓</span> <span class="t-k">Cleaned up</span>  the fake stealer was killed and deleted</pre>
+          </div>
+          <form class="term-in" data-term-form hidden>
+            <label class="t-prompt" for="term-input">PS C:\Users\you&gt;</label>
+            <input id="term-input" name="cmd" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="go" aria-describedby="term-help">
+          </form>
+          <p class="term-help" id="term-help" data-term-help hidden>Try <button type="button" class="t-chip" data-cmd="aba test">aba test</button> <button type="button" class="t-chip" data-cmd="aba help">aba help</button> <button type="button" class="t-chip" data-cmd="clear">clear</button></p>
+        </div>
+        <figure class="shot">
+          <a href="media/setup.webp"><img src="media/setup.webp" alt="The end of setup in a terminal: every step ticked, then a card saying “You're protected”: 17 baits planted, Balanced response, phone alerts by ntfy, automatic updates." width="1200" height="869" loading="lazy" decoding="async"></a>
+          <figcaption>The real end of setup.</figcaption>
+        </figure>
+      </li>
+    </ol>
+    <p class="rule"><strong>One rule afterwards: don't open your bait files.</strong> That's a read, and ABA will react. To see what's in one, use <code>aba bait show &lt;id&gt;</code>. Remove it all with <code>aba uninstall</code>.</p>
+
+    <details class="alt">
+      <summary>For technical users: install from PowerShell</summary>
+      <div class="alt-body">
+        <div class="cmd"><pre tabindex="0" aria-label="PowerShell command"><code id="cmd-install">irm https://raw.githubusercontent.com/vulnix0x4/a-better-antivirus/main/install.ps1 | iex</code></pre><button type="button" class="copy" data-copy="cmd-install" hidden>Copy</button></div>
+        <p>It downloads the latest release for your PC, checks it against the release's <code>SHA256SUMS.txt</code>, and starts the setup. <a href="https://github.com/vulnix0x4/a-better-antivirus/blob/main/install.ps1">Read the script first</a> if you like.</p>
+        <p class="warn"><strong>Only ever paste <code>irm … | iex</code> commands from sources you trust.</strong> It's also how many stealers get installed (“paste this to fix your PC”). This one is in the open, short, and refuses to run a download whose checksum doesn't match.</p>
+      </div>
+    </details>
+  </div>
+</section>
+
+<!-- ═════════════════════════ WHAT IT CHANGES + TRUST ═════════════════════════ -->
+<section class="ledger" id="changes" aria-labelledby="changes-title">
+  <div class="wrap">
+    <div class="sec-head">
+      <p class="label">Everything it touches</p>
+      <h2 id="changes-title">What ABA changes on your PC.</h2>
+      <p class="sec-lede">This is all of it. <code>aba uninstall</code> undoes it.</p>
+    </div>
+    <div class="tbl-wrap" tabindex="0" role="region" aria-label="What ABA changes on your PC">
+      <table class="tbl tbl-ledger">
+        <thead><tr><th scope="col">What</th><th scope="col">Where</th><th scope="col">On uninstall</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Program</th><td><code>C:\Program Files\File Access Monitor</code></td><td>removed</td></tr>
+          <tr><th scope="row">Service</th><td><code>FileAccessMonitor</code>, runs as LocalSystem, starts with Windows</td><td>removed</td></tr>
+          <tr><th scope="row">Data, alerts, logs</th><td><code>C:\ProgramData\FileAccessMonitor</code>, admins only</td><td>alerts kept unless <code>--purge</code></td></tr>
+          <tr><th scope="row">Audit policy</th><td>“Audit File System: Success”</td><td>restored to what it was</td></tr>
+          <tr><th scope="row">Baits</th><td>your folders and fake app folders</td><td>removed (files you made are kept)</td></tr>
+          <tr><th scope="row">Firewall filters</th><td>WFP provider “A Better Antivirus”, only while responding</td><td>removed</td></tr>
+          <tr><th scope="row">PATH</th><td>adds the program folder</td><td>removed</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="trust">
+      <div class="trust-net">
+        <h3>What goes over the network</h3>
+        <ul>
+          <li>Phone alerts, if you set them up.</li>
+          <li>Canary token creation, if you opt in (your email goes to canarytokens.org).</li>
+          <li>With automatic updates on, one request a day to <code>api.github.com</code>.</li>
+        </ul>
+        <p class="trust-none">Nothing else. No telemetry.</p>
+        <p class="fine">This site keeps the same promise: no analytics, no trackers, nothing loaded from anywhere else. Even the font and the video are served from here.</p>
+      </div>
+      <ul class="trust-list">
+        <li><h3>Read every line</h3><p>MIT licensed. <a href="https://github.com/vulnix0x4/a-better-antivirus">Source on GitHub</a>.</p></li>
+        <li><h3>Signed updates only</h3><p>An update installs only if <code>SHA256SUMS.txt</code> carries a valid ed25519 signature from ABA's release key and the file matches it. It never downgrades and rolls back if the new version doesn't start.</p></li>
+        <li><h3>Tested on real Windows</h3><p>Every push runs a full install, fake stealers, freeze, kill, isolate and uninstall on a real Windows machine.</p></li>
+        <li><h3>Found a way around it?</h3><p>ABA runs with system rights, so bugs matter. Report them privately: <a href="https://github.com/vulnix0x4/a-better-antivirus/blob/main/SECURITY.md">security policy</a>.</p></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="last" aria-labelledby="last-title">
+  <div class="wrap last-inner">
+    <h2 id="last-title">Leave something out for them.</h2>
+    <a class="btn btn-solid btn-lg" href="#download"><span class="btn-ico" aria-hidden="true">↓</span> Get ABA for Windows</a>
+    <p class="last-note">And keep Windows Defender on.</p>
+  </div>
+</section>
+
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-grid">
+    <div class="foot-brand">
+      <a class="brand" href="#top" aria-label="A Better Antivirus, back to top"><img src="logo.svg" alt="" width="28" height="28" loading="lazy"><span class="brand-name">A Better Antivirus</span></a>
+      <p>It's not an antivirus. It's a better one.<br>(Still: keep Windows Defender on.)</p>
+    </div>
+    <nav aria-label="Project links">
+      <ul class="foot-links">
+        <li><a href="https://github.com/vulnix0x4/a-better-antivirus">GitHub</a></li>
+        <li><a href="https://github.com/vulnix0x4/a-better-antivirus/releases">Releases</a></li>
+        <li><a href="https://github.com/vulnix0x4/a-better-antivirus/blob/main/CHANGELOG.md">Changelog</a></li>
+        <li><a href="https://github.com/vulnix0x4/a-better-antivirus/blob/main/SECURITY.md">Security policy</a></li>
+        <li><a href="https://github.com/vulnix0x4/a-better-antivirus/blob/main/LICENSE">License (MIT)</a></li>
+        <li><a href="https://github.com/vulnix0x4/a-better-antivirus/issues">Report a bug</a></li>
+        <!-- Slot for a future page:
+        <li><a href="code-signing-policy.html">Code signing policy</a></li>
+        -->
+      </ul>
+    </nav>
+    <p class="foot-fine">Windows and Microsoft Defender are trademarks of Microsoft. ABA is an independent project, not affiliated with Microsoft. Site font: JetBrains Mono (<a href="fonts/OFL.txt">SIL Open Font License</a>).</p>
+  </div>
+</footer>
+</body>
+</html>
