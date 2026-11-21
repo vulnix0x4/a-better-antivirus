@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -183,6 +184,31 @@ func pathOfPid(pid int) string {
 		buf = buf[:i]
 	}
 	return string(buf)
+}
+
+// uidOf returns the effective uid of a process (-1 if unknown).
+// struct proc_bsdinfo starts: flags, status, xstatus, pid, ppid, uid (uint32 each).
+func uidOf(pid int) int {
+	buf := make([]byte, 136)
+	if procInfo(pid, procPidTBSDInfo, buf) < 0 || int(binary.LittleEndian.Uint32(buf[12:16])) != pid {
+		return -1
+	}
+	return int(binary.LittleEndian.Uint32(buf[20:24]))
+}
+
+// mayAct is ABA's rule: only ever act on ordinary programs running as a
+// user, never on root/system processes, never on this program or anything
+// above it.
+func mayAct(pid int) bool {
+	if pid <= 1 || uidOf(pid) <= 0 {
+		return false
+	}
+	for p := os.Getpid(); p > 1; p = parentOf(p) {
+		if p == pid {
+			return false
+		}
+	}
+	return !factsForPid(pid).Platform || errandRunners[filepath.Base(pathOfPid(pid))]
 }
 
 // struct proc_bsdinfo starts: flags, status, xstatus, pid, ppid (uint32 each).

@@ -106,12 +106,6 @@ jobs:
           sudo build/aba-spike cpu -seconds 30 -label "one program opening files flat out" -top 3
           wait
 
-      - name: Root-only probes (ES entitlement, leases, suspend, other detectors, dialogs)
-        if: always()
-        continue-on-error: true
-        timeout-minutes: 6
-        run: sudo experiments/root-probes.sh $(id -u)
-
       - name: pf isolation with alerts still getting out
         if: always()
         continue-on-error: true
@@ -150,3 +144,77 @@ jobs:
           for (b, k, p), n in sorted(c.items()): print(f"{b:28} {k:10} {p:28} x{n}")
           EOF
           rm -rf $D
+
+      - name: "Finder copy: is the script that asked found and frozen? (10 runs)"
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 6
+        run: |
+          D=/Users/Shared/aba-spike-finder
+          rm -rf $D; mkdir -p $D/Documents/loot $D/Downloads $D/stage
+          echo "bank: hunter2 (fake)" > $D/Documents/passwords.txt
+          for i in $(seq 40); do echo "loot $i" > $D/Documents/loot/f$i.txt; done
+          sudo build/aba-spike watch -bait $D/Documents/passwords.txt -action stop -seconds 100 -json /tmp/finder-hits.jsonl > /tmp/finder-watch.log 2>&1 &
+          sleep 5
+          for i in $(seq 10); do
+            cp build/fake-stealer $D/Downloads/FreeGameInstaller-$i
+            $D/Downloads/FreeGameInstaller-$i -how finder -bait $D/Documents/passwords.txt -loot $D/Documents/loot -stage $D/stage -rate 500 -stamp $D/stamp-$i -log $D/steps-$i.jsonl > /dev/null 2>&1 &
+            P=$!; sleep 3
+            echo "run $i: fake stealer $P state=$(ps -o state= -p $P | tr -d ' ') copied=$([ -f $D/stage/passwords.txt ] && echo yes || echo no)"
+            kill -9 $P 2>/dev/null; rm -f $D/stage/passwords.txt; sleep 1
+          done
+          sleep 2; sudo pkill -x eslogger || true; wait || true
+          grep -E "^(CRITICAL|INFO|WARN|IGNORED)|chain|verdict|action|timing|Finder log" /tmp/finder-watch.log | grep -B1 -A4 DesktopServices | head -150
+          rm -rf $D
+
+  # Root-only probes on their own runner: one of them stopped a runner dead in
+  # earlier runs (no logs at all came back), so each section is its own step,
+  # with the risky suspend tests last.
+  probes:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: spike/macos
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: spike/macos/go.mod
+          cache: false
+      - name: Build
+        run: (cd experiments/esnative && CGO_ENABLED=1 go build -o ../../build/esnative .)
+      - name: "1. Endpoint Security client without the entitlement"
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 2
+        run: sudo experiments/root-probes.sh $(id -u) "1"
+      - name: "2. File lease"
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 2
+        run: sudo experiments/root-probes.sh $(id -u) "2"
+      - name: "4. Cutting one process's sockets"
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 2
+        run: sudo experiments/root-probes.sh $(id -u) "4"
+      - name: "5. Other detectors (fs_usage, audit, dtrace)"
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 3
+        run: sudo experiments/root-probes.sh $(id -u) "5"
+      - name: "6. Notification and dialog from root"
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 2
+        run: sudo experiments/root-probes.sh $(id -u) "6"
+      - name: "3. Suspend: who can undo it"
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 3
+        run: sudo experiments/root-probes.sh $(id -u) "3"

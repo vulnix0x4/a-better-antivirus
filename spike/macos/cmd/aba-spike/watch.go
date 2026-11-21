@@ -171,6 +171,8 @@ func (w *watcher) handle(line []byte) {
 			h.Action = "frozen (pid_suspend)"
 			stop = func(pid int) bool { return pidSuspend(pid) == nil || syscall.Kill(pid, syscall.SIGSTOP) == nil }
 		}
+		do := stop
+		stop = func(pid int) bool { return mayAct(pid) && do(pid) }
 		// Never Apple's own copy helper: it serves this one copy, but it is
 		// a system process and ABA does not act on those.
 		for _, t := range targets {
