@@ -18,6 +18,7 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/fanwatch"
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
+	"github.com/vulnix0x4/a-better-antivirus/internal/platform"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
 )
 
@@ -201,3 +202,17 @@ func deleteProgramFiles() (string, error) {
 
 // scheduleDelete deletes p (see deleteProgramFiles: now always works).
 func scheduleDelete(p string) { os.Remove(p) }
+
+// appSteps put ABA where people look for an installed program (on Windows,
+// the "Installed apps" list and the Start menu), with an entry that runs
+// `aba uninstall`. removeAppSteps undo it on uninstall. Linux has no such
+// list for a program installed this way; a package (.deb, .rpm) will be what
+// lists it, and a desktop entry is for a later milestone.
+func appSteps(version string) []Step { return nil }
+func removeAppSteps() []Step         { return nil }
+
+// RefreshApp runs after an update: wherever the system lists ABA as an
+// installed program, it now shows the new version.
+func RefreshApp(version string) error {
+	return platform.Unsupported("listing ABA as an installed program")
+}

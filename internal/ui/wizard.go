@@ -54,6 +54,19 @@ func RunWizard(in WizardInput) (install.Options, bool, error) {
 	return o, ok, nil
 }
 
+// KeepOptions is the "Keep my settings" answer without showing the form:
+// what's installed now is repaired or upgraded in place, and nothing is asked
+// (`aba install --yes --keep-settings`, which the setup program uses).
+func KeepOptions(in WizardInput) install.Options {
+	o, _ := newWizard(in).finish()
+	if in.Existing != nil {
+		// The form would ask an install from before automatic updates existed
+		// whether it wants them. Nobody is being asked here, so nothing changes.
+		o.AutoUpdate = in.Existing.AutoUpdate
+	}
+	return o
+}
+
 func newWizard(in WizardInput) *wizard {
 	ex := in.Existing
 	sec := in.Secrets

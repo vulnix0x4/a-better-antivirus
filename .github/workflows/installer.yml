@@ -1,0 +1,98 @@
+name: Installer
+
+# Builds ABA-Setup.exe the way a release does, then installs ABA with it on
+# throwaway Windows machines (x64 and Arm64), checks it, and uninstalls it.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ABA-Setup.exe
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # GoReleaser takes the version from the latest tag
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      # One fixed version of Inno Setup, checked against its SHA-256.
+      - name: Get the Inno Setup compiler
+        shell: pwsh
+        run: ./installer/get-inno.ps1
+
+      # The release's own configuration, stopping short of the two things only
+      # a real release can do: signing (the key is a secret) and publishing.
+      - name: Build everything a release publishes
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --snapshot --clean --skip=sign
+
+      # ABA-Setup.exe is in SHA256SUMS.txt, holds the same aba.exe files that
+      # are published next to it, and the existing files kept their names.
+      - name: Check the installer against the release files
+        shell: pwsh
+        run: ./installer/verify.ps1
+
+      # The same two aba.exe files in an installer that says it holds v0.0.0:
+      # the test below uses it to prove an older installer is refused.
+      - name: Build an installer that claims to be older
+        shell: pwsh
+        run: |
+          foreach ($arch in 'amd64', 'arm64') {
+            go run ./installer/build -arch $arch -bin "dist/installer/bin/aba-$arch.exe" -version v0.0.0 -out dist/installer-older
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          }
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: installer
+          path: |
+            dist/installer/ABA-Setup.exe
+            dist/installer-older/ABA-Setup.exe
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 7
+
+  test:
+    name: Install and uninstall (${{ matrix.arch }})
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            os: windows-latest
+          - arch: arm64
+            os: windows-11-arm
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v8
+        with:
+          name: installer
+          path: artifacts
+
+      # GitHub's Windows runners are elevated with UAC off, so this is the
+      # real thing: a silent install, `aba doctor`, the service, the Installed
+      # apps entry and the Start menu shortcut, a second run that must keep
+      # every setting, an older installer that must be refused, and an
+      # uninstall after which nothing may be left.
+      - name: Install with ABA-Setup.exe, check, uninstall
+        shell: pwsh
+        run: >
+          ./installer/test.ps1
+          -Setup artifacts/installer/ABA-Setup.exe
+          -OldSetup artifacts/installer-older/ABA-Setup.exe
+          -Sums artifacts/SHA256SUMS.txt
+          -Arch ${{ matrix.arch }}

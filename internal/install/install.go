@@ -44,8 +44,9 @@ type Options struct {
 	PhoneMinTier config.Tier
 	CanaryEmail  string // non-empty: create canary tokens
 	CleanRecent  bool
-	KeepLearning bool // reconfigure: don't reset an active learning period
-	AutoUpdate   bool // install signed releases automatically
+	KeepLearning bool   // reconfigure: don't reset an active learning period
+	AutoUpdate   bool   // install signed releases automatically
+	Version      string // this build's version, shown where the system lists installed programs
 }
 
 // Step is one unit of work, shown with a spinner by the UI.
@@ -236,6 +237,7 @@ func Steps(o Options) []Step {
 		}},
 		Step{Name: "Adding aba to your PATH", Soft: true, Run: func() (string, error) { return "", AddToPath(paths.InstallDir()) }},
 	)
+	steps = append(steps, appSteps(o.Version)...)
 	if o.Phone.Enabled() && o.Phone != prevPhone {
 		steps = append(steps, Step{Name: "Sending a test to your phone", Soft: true, Run: func() (string, error) {
 			if err := SendTest(o.Phone); err != nil {
@@ -533,6 +535,9 @@ func UninstallSteps(purge bool) []Step {
 	steps = append(steps, restoreSteps()...)
 	steps = append(steps, []Step{
 		{Name: "Removing from PATH", Soft: true, Run: func() (string, error) { return "", RemoveFromPath(paths.InstallDir()) }},
+	}...)
+	steps = append(steps, removeAppSteps()...)
+	steps = append(steps, []Step{
 		{Name: "Deleting program files", Soft: true, Run: deleteProgramFiles},
 		{Name: "Cleaning up data", Run: func() (string, error) {
 			if purge {

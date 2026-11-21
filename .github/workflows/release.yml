@@ -18,6 +18,12 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go test ./...
+      # ABA-Setup.exe is compiled with Inno Setup, from GoReleaser's build hook
+      # (see .goreleaser.yaml). This fetches one fixed version of the compiler,
+      # checks its SHA-256 and sets ISCC for the next step.
+      - name: Get the Inno Setup compiler
+        shell: pwsh
+        run: ./installer/get-inno.ps1
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
@@ -25,3 +31,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ABA_SIGNING_KEY: ${{ secrets.ABA_SIGNING_KEY }}
+      # The same checks the Installer workflow makes on every pull request, on
+      # the files that were just published: ABA-Setup.exe is in the signed
+      # SHA256SUMS.txt and holds the published aba.exe files.
+      - name: Check the installer against the release
+        shell: pwsh
+        run: ./installer/verify.ps1
