@@ -25,6 +25,10 @@ type arena struct {
 
 const slabSize = 4096
 
+// allocAlign is the alignment of everything Alloc returns: that of the most
+// strictly aligned field in the structs it holds (pointers, uint64s).
+const allocAlign = 8
+
 // grow adds a new slab to the allocator and handles future calls to
 // alloc/calloc out of it.
 func (a *arena) grow() {
@@ -45,6 +49,14 @@ func (a *arena) Alloc(length uintptr) unsafe.Pointer {
 	if length == 0 {
 		panic("can't allocate zero bytes")
 	}
+	// Keep every allocation pointer-aligned. Strings take an even but
+	// otherwise arbitrary number of bytes, so without this the struct
+	// allocated after one can start at an address that isn't a multiple
+	// of 8. Copying a struct that holds pointers there (*ret = fwpmFilter0{...})
+	// goes through the garbage collector's write barrier while a GC is
+	// running, and the runtime throws "bulkBarrierPreWrite: unaligned
+	// arguments", killing the process. (Patched in a-better-antivirus.)
+	length = (length + allocAlign - 1) &^ (allocAlign - 1)
 	if length > a.remaining {
 		a.grow()
 	}
