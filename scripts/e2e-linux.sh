@@ -294,6 +294,47 @@ kill -9 "$p1" "$p2" 2>/dev/null
 ok "everything frozen runs again"
 
 # =====================================================================
+say "A stealer's program is cut off from the network"
+# Balanced cuts a critical reader's program off. The frozen one can't do
+# anything anyway; what shows the cut is the same program started again (a
+# stealer's second stage, or the loot uploader), trying to reach a listener on
+# this very machine: the stand-in phone.
+cp "$GRABBER" "$HOME/Downloads/net-game"; echo "yet another fingerprint" >> "$HOME/Downloads/net-game"; chmod 755 "$HOME/Downloads/net-game"
+p1=$(launch net "$HOME/Downloads/net-game" -out "$OUT/n1" "$PASSWORDS") || fail "couldn't start the fake stealer"
+id=$(expect_frozen "$p1" "$OUT/n1" "fake stealer") || exit 1
+a=$(alerts | jq -c "map(select(.id == \"$id\")) | last")
+[ "$(field "$a" '[.actions[]? | select(.action=="block-program" and .ok)] | length')" = 1 ] || fail "its program wasn't cut off: $(field "$a" '.actions | tostring')"
+ok "the alert cut its program off ($(field "$a" '[.actions[] | select(.action=="block-program")][0].detail'))"
+if command -v nft >/dev/null; then sudo nft list table inet file_access_monitor | sed 's/^/      /'; fi
+p2=$(launch net2 "$HOME/Downloads/net-game" -wait 0 -connect "$PHONE" -out "$OUT/n2") || fail "couldn't start the program again"
+incut() { grep -q 'file-access-monitor.blocked' "/proc/$1/cgroup" 2>/dev/null; }
+wait_until 25 incut "$p2" || fail "the program started again isn't in the cut-off group: $(cat /proc/$p2/cgroup)"
+wait_until 50 has_line '^NET FAIL' "$OUT/n2.net" || fail "the program started again reached the listener: $(cat "$OUT/n2.net" 2>/dev/null)"
+ok "started again, it was cut off inside its exec, and can't reach a listener on this machine ($(cut -c1-90 "$OUT/n2.net"))"
+check "its own user can't take it out of the cut-off group" bash -c "! echo $p2 > /sys/fs/cgroup/cgroup.procs 2>/dev/null"
+if command -v nft >/dev/null; then
+  check "its own user can't remove the rules" bash -c "! nft delete table inet file_access_monitor 2>/dev/null"
+fi
+has "Network cut-off" sudo aba doctor || fail "aba doctor doesn't report on the network cut-off"
+sudo aba doctor | grep 'Network' | sed 's/^/      /'
+sudo aba status --once | grep -i -E 'block|cut|internet' | sed 's/^/      /' || true
+say "... and stays cut off when the service restarts"
+sudo systemctl restart "$UNIT" || fail "couldn't restart the service"
+before=$(cat "$OUT/n2.net")
+wait_until 50 bash -c "[ \"\$(cat '$OUT/n2.net')\" != '$before' ]" || fail "the program stopped trying"
+sleep 1
+has_line '^NET FAIL' "$OUT/n2.net" || fail "after a service restart the program got through: $(cat "$OUT/n2.net")"
+ok "still cut off after a restart ($(cut -c1-60 "$OUT/n2.net"))"
+sudo aba release || fail "aba release"
+wait_until 50 has_line '^NET OK' "$OUT/n2.net" || fail "after aba release the program still can't connect: $(cat "$OUT/n2.net")"
+incut "$p2" && fail "after aba release it's still in the cut-off group"
+ok "after aba release it reaches the listener again"
+if command -v nft >/dev/null; then
+  check "and ABA's firewall table is gone" bash -c "! sudo nft list table inet file_access_monitor >/dev/null 2>&1"
+fi
+kill -9 "$p1" "$p2" 2>/dev/null
+
+# =====================================================================
 say "A sweep: an installed program going through several apps' data"
 pid=$(launch sweep /usr/bin/git hash-object "$(bait_file vivaldi)" "$(bait_file electrum)" "$(bait_file ssh-key)" "$(bait_file aws)") || fail "couldn't start git"
 a=$(wait_alert ".process.pid == $pid and .tier == \"critical\"") || fail "a sweep by a package-owned program wasn't critical"
@@ -335,11 +376,53 @@ ok "the restored bait is watched"
 sudo aba kill "$id" >/dev/null || fail "aba kill"
 
 # =====================================================================
+say "Strict: isolating the machine, with the phone alert still getting out"
+# A phone that isn't on this machine's loopback (which isolation leaves
+# alone): a server in a network namespace of its own, over a veth pair.
+NS=aba-e2e-phone; PHONE2=10.203.0.2:18724
+sudo ip netns add "$NS" && sudo ip link add aba-e2e-h type veth peer name aba-e2e-p && sudo ip link set aba-e2e-p netns "$NS" \
+  && sudo ip addr add 10.203.0.1/24 dev aba-e2e-h && sudo ip link set aba-e2e-h up \
+  && sudo ip netns exec "$NS" ip addr add 10.203.0.2/24 dev aba-e2e-p && sudo ip netns exec "$NS" ip link set aba-e2e-p up \
+  && sudo ip netns exec "$NS" ip link set lo up || fail "couldn't set up the network namespace for the second phone"
+sudo systemd-run --quiet --collect --unit aba-e2e-phone2 ip netns exec "$NS" "$GRABBER" -serve "$PHONE2" -out "$OUT/phone2" || fail "couldn't start the second phone"
+echo aba-e2e-phone2 >> "$OUT/units"
+reach2() { curl -s -m 2 -o /dev/null "http://$PHONE2/probe"; }
+wait_until 50 reach2 || fail "the second phone can't be reached before isolation"
+printf '{"phone":{"kind":"ntfy","ntfy":{"server":"http://%s","topic":"aba-e2e"}},"canary":{}}' "$PHONE2" | base64 -w0 | sudo tee "$DATA/secrets.json" >/dev/null
+sudo jq '.responses.critical = ["freeze","block-program","isolate"] | .preset = "strict"' "$DATA/config.json" | sudo tee "$DATA/config.json.new" >/dev/null \
+  && sudo mv "$DATA/config.json.new" "$DATA/config.json" && sudo chmod 600 "$DATA/config.json" || fail "couldn't switch to strict"
+r=$(reloads); sudo systemctl kill -s HUP "$UNIT" || fail "couldn't tell the service to reload"; wait_reloaded "$r"
+pid=$(launch iso "$HOME/Downloads/other-game" -out "$OUT/i1" "$PASSWORDS") || fail "couldn't start the fake stealer"
+id=$(expect_frozen "$pid" "$OUT/i1" "fake stealer, strict") || exit 1
+a=$(alerts | jq -c "map(select(.id == \"$id\")) | last")
+[ "$(field "$a" '[.actions[]? | select(.action=="isolate" and .ok)] | length')" = 1 ] || fail "the machine wasn't isolated: $(field "$a" '.actions | tostring')"
+ok "isolated by alert $id"
+# From here on new connections fail: release first if anything goes wrong.
+release_net() { sudo "$ABA_BIN" release >/dev/null 2>&1; sudo nft delete table inet file_access_monitor 2>/dev/null; return 0; }
+trap 'release_net; cleanup_units; sudo ip netns del aba-e2e-phone 2>/dev/null' EXIT
+reach2 && { release_net; fail "a program of the user's reached the second phone while the machine is isolated"; }
+ok "a program of the user's can't open a connection out"
+wait_until 100 has_line "POST /aba-e2e | .*other-game" "$OUT/phone2" || { release_net; fail "the phone alert didn't get out of the isolated machine: $(cat "$OUT/phone2" 2>/dev/null)"; }
+ok "but ABA's own phone alert did: $(grep other-game "$OUT/phone2" | head -1 | cut -c1-120)"
+has "isolated" aba status --once || { release_net; fail "the dashboard doesn't say the machine is isolated"; }
+sudo aba doctor | grep -i -E 'isolat|network' | sed 's/^/      /'
+sudo systemctl restart "$UNIT" || { release_net; fail "couldn't restart the service"; }
+wait_until 75 bash -c "systemctl is-active -q $UNIT" || { release_net; fail "the service didn't come back"; }
+sleep 1
+reach2 && { release_net; fail "after a service restart the machine isn't isolated any more"; }
+ok "still isolated after the service restarted"
+sudo aba release || { release_net; fail "aba release"; }
+wait_until 50 reach2 || fail "after aba release the second phone still can't be reached"
+ok "aba release: the network is back"
+trap 'cleanup_units' EXIT
+sudo ip netns del "$NS" 2>/dev/null
+
+# =====================================================================
 say "Uninstall"
 cleanup_units
 sudo aba uninstall --yes --purge || fail "aba uninstall"
 left=()
-for p in "/etc/systemd/system/$UNIT" "$PROG" /usr/local/bin/aba "$DATA" /run/file-access-monitor "/sys/fs/cgroup/$FROZEN"; do
+for p in "/etc/systemd/system/$UNIT" "$PROG" /usr/local/bin/aba "$DATA" /run/file-access-monitor "/sys/fs/cgroup/$FROZEN" /sys/fs/cgroup/file-access-monitor.blocked; do
   [ -e "$p" ] || [ -L "$p" ] && left+=("$p")
 done
 for f in "${BAIT_FILES[@]}" "${BAIT_DIRS[@]}"; do [ -e "$f" ] && left+=("$f"); done
@@ -348,7 +431,8 @@ ok "the service, the program, its data, the frozen group and every bait are gone
 [ "$(systemctl is-active "$UNIT" 2>/dev/null)" = active ] && fail "the service is still running"
 pgrep -x famsvc >/dev/null && fail "a famsvc process is still running"
 check "folders that were yours before are still there" test -d "$HOME/Documents"
+if command -v nft >/dev/null; then sudo nft list table inet file_access_monitor >/dev/null 2>&1 && fail "ABA's firewall table is still there after uninstall"; fi
 ok "nothing left behind"
 
-rm -rf "$OUT" "$HOME/Downloads/free-game" "$HOME/Downloads/other-game" "$HOME/Downloads"/e2e-l1*
+rm -rf "$OUT" "$HOME/Downloads/free-game" "$HOME/Downloads/other-game" "$HOME/Downloads/net-game" "$HOME/Downloads"/e2e-l1*
 printf '\n\033[32mAll end-to-end checks passed.\033[0m\n'

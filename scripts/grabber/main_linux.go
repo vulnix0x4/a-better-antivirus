@@ -2,14 +2,16 @@
 // (scripts/e2e-linux.sh): it opens the files it's given, the way a file
 // grabber would, and writes down what it got. It sends nothing anywhere.
 //
-//	grabber [-child] [-link] [-wait ms] -out FILE file...
+//	grabber [-child] [-link] [-wait ms] [-connect HOST:PORT] -out FILE file...
 //	grabber -serve 127.0.0.1:PORT -out FILE
 //
 // FILE gets one line per file ("READ path bytes" or "ERR path error") and
 // "DONE" at the end; FILE.pid holds its PID, and FILE.child the PID of the
 // helper process it starts with -child (to check that ABA freezes what a
 // stealer started, too). With -link each file is read through a hard link
-// made next to FILE instead of by its own name.
+// made next to FILE instead of by its own name. With -connect it then tries to
+// reach HOST:PORT every 200 ms, the way an upload would start, and FILE.net
+// says how the latest try went: "NET OK n" or "NET FAIL n error".
 //
 // With -serve it's the phone instead: a web server that takes what ABA would
 // post to ntfy and writes each message to FILE as "POST path | title | text",
@@ -20,6 +22,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -36,6 +39,7 @@ func main() {
 	out := flag.String("out", "", "where to write what happened")
 	idle := flag.Bool("idle", false, "do nothing (the helper process)")
 	serve := flag.String("serve", "", "address to take phone alerts on, instead of grabbing")
+	connect := flag.String("connect", "", "address to keep trying to reach after grabbing")
 	flag.Parse()
 	if *serve != "" && *out != "" {
 		err := http.ListenAndServe(*serve, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -94,5 +98,18 @@ func main() {
 		note("READ %s %d", p, len(b))
 	}
 	note("DONE")
+	if *connect != "" {
+		for i := 0; ; i++ {
+			line := fmt.Sprintf("NET OK %d", i)
+			if c, err := net.DialTimeout("tcp", *connect, 500*time.Millisecond); err != nil {
+				line = fmt.Sprintf("NET FAIL %d %v", i, err)
+			} else {
+				c.Close()
+			}
+			os.WriteFile(*out+".net.tmp", []byte(line+"\n"), 0o644)
+			os.Rename(*out+".net.tmp", *out+".net")
+			time.Sleep(200 * time.Millisecond)
+		}
+	}
 	time.Sleep(10 * time.Minute) // stay around: a freeze has to have something to freeze
 }

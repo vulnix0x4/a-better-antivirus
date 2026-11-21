@@ -29,6 +29,7 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/detect"
 	"github.com/vulnix0x4/a-better-antivirus/internal/fanwatch"
+	"github.com/vulnix0x4/a-better-antivirus/internal/netguard"
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
 	"github.com/vulnix0x4/a-better-antivirus/internal/provenance"
@@ -84,6 +85,9 @@ func Run(console bool) error {
 			case unix.SIGUSR2:
 				// Right away, not when the main loop gets to it.
 				go s.safe("holds", s.reconcileHolds)
+				if s.net != nil {
+					s.net.Kick() // a program may just have been let back on the network
+				}
 			default:
 				sdNotify("STOPPING=1")
 				cancel()
@@ -123,6 +127,7 @@ func sdNotify(state string) {
 type watchers struct {
 	fan    *fanwatch.Watcher
 	fanErr error
+	net    *netguard.Guard // keeps network cut-offs in force
 }
 
 func (s *server) initWatchers() {}
@@ -131,6 +136,10 @@ func (s *server) initWatchers() {}
 func (s *server) prepare() {
 	// Whatever the service writes (its log, the alerts) is root's alone.
 	unix.Umask(0o077)
+	// Network cut-offs and isolation on record come back first: after a
+	// reboot nothing is in place, and the service's own control group (which
+	// isolation lets through) is new after every start.
+	s.net = netguard.StartGuard(s.log.Printf)
 	// Who owns which program is asked while an opener is held: have the
 	// answers ready.
 	provenance.Warm()
@@ -211,6 +220,9 @@ func (s *server) startWatching(ctx context.Context) {
 func (s *server) stopWatching() {
 	if s.fan != nil {
 		s.fan.Close()
+	}
+	if s.net != nil {
+		s.net.Close() // what's cut off stays cut off; the next start watches again
 	}
 }
 

@@ -79,6 +79,9 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo loginctl enable-linger "$USER" || true
+          # The nft program only to look at what ABA puts in place (ABA itself talks
+          # to the kernel directly).
+          command -v nft >/dev/null || sudo apt-get install -y -qq nftables >/dev/null
           go test -c -o dist/integration.test ./internal/integration
           go test -c -o dist/baits.test ./internal/baits
           sudo env ABA_INTEGRATION=1 ABA_TEST_USER="$USER" ./dist/integration.test -test.v -test.count=1

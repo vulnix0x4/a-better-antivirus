@@ -1,8 +1,11 @@
 package doctor
 
 import (
+	"fmt"
+
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/fanwatch"
+	"github.com/vulnix0x4/a-better-antivirus/internal/netguard"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
 )
 
@@ -26,6 +29,15 @@ func checkDetection(admin bool, st *config.State, add func(l Level, name, detail
 				}
 			}
 			add(l, h.Name, h.Detail+" (as of the service's last check)", "")
+		}
+	}
+	// Cutting a program off the network, and isolating the machine, need the
+	// kernel's firewall (see netguard).
+	if admin {
+		if ns, err := netguard.GetStatus(); err != nil {
+			add(Warning, "Network cut-off", err.Error(), "")
+		} else {
+			add(OK, "Network cut-off", fmt.Sprintf("ready (nftables table inet %s, %d rule(s) in place)", netguard.TableName, ns.Rules), "")
 		}
 	}
 	if !admin || seen {

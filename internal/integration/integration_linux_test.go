@@ -6,6 +6,7 @@ package integration
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"os/user"
@@ -37,6 +38,19 @@ func TestMain(m *testing.M) {
 		os.WriteFile(os.Getenv("ABA_MARKER"), []byte(out), 0o666)
 		time.Sleep(30 * time.Second)
 		os.Exit(0)
+	case "connect":
+		// Try to reach ABA_ADDR every 100 ms; the marker says how the last try went.
+		for i := 0; ; i++ {
+			out := "OK"
+			c, err := net.DialTimeout("tcp", os.Getenv("ABA_ADDR"), 300*time.Millisecond)
+			if err != nil {
+				out = "FAIL " + err.Error()
+			} else {
+				c.Close()
+			}
+			os.WriteFile(os.Getenv("ABA_MARKER"), []byte(fmt.Sprintf("%s %d", out, i)), 0o666)
+			time.Sleep(100 * time.Millisecond)
+		}
 	case "tick":
 		for i := 0; ; i++ {
 			os.WriteFile(os.Getenv("ABA_MARKER"), []byte(strconv.Itoa(i)), 0o666)
