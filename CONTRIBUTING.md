@@ -13,7 +13,7 @@ Thanks for helping make stealers' lives harder. Bug reports, new bait ideas and 
 
 ## Developing
 
-You need Go (see `go.mod`). ABA itself only runs on Windows so far (see [Platforms](#platforms)).
+You need Go (see `go.mod`). ABA runs on Windows, and its core loop on Linux (see [Platforms](#platforms)).
 
 ```
 go vet ./...
@@ -32,9 +32,22 @@ CI runs those plus `scripts/e2e.ps1`, a full end-to-end run on a throwaway Windo
 stealers, freeze/block/kill, isolation with a phone alert sent while isolated, bait repair, uninstall. Please
 don't run the end-to-end script on your own PC: it isolates the network and plants baits. Use a VM.
 
+On Linux the tests that touch the real thing (fanotify, the cgroup freezer, the package database, planting
+as the folder's owner) need root, and an ordinary account to play the stealer:
+
+```
+go test -c -o /tmp/integration.test ./internal/integration
+sudo env ABA_INTEGRATION=1 ABA_TEST_USER="$USER" /tmp/integration.test -test.v
+```
+
+CI runs those, the same for `./internal/baits`, and `scripts/e2e-linux.sh`: install as a systemd service,
+fake stealers frozen inside their open, kill, legitimate readers let through, resume, trust, release, a sweep,
+a hard-link trick, bait repair, uninstall, nothing left behind. The same warning applies: a throwaway machine.
+
 ## Platforms
 
-ABA runs on Windows. Linux and macOS are being added, and the code is split so that a new system doesn't
+ABA runs on Windows. Linux has its core loop (noticing, freezing, alerting, responding; not yet cutting
+network access or desktop popups), macOS is being added, and the code is split so that a new system doesn't
 touch the shared logic:
 
 - **The core** is every file without a system in its name: the engine, the severity logic, alerts,
@@ -44,9 +57,10 @@ touch the shared logic:
   calls them. Go picks the file by its name, so there is nothing to register. Tests of one system's
   behaviour are named `*_<os>_test.go` the same way.
 
-Linux and macOS have a stub for every such file today. Each returns `platform.ErrUnsupported` ("not
-supported on Linux yet"), so everything builds there and nothing pretends to work. Porting is replacing
-the stubs, keeping the same functions. What a system has to provide:
+macOS has a stub for every such file today, and Linux for the parts it doesn't have yet (`netguard`,
+`session`, `notify`). Each returns `platform.ErrUnsupported` ("not supported on macOS yet"), so everything
+builds there and nothing pretends to work. Porting is replacing the stubs, keeping the same functions. What a
+system has to provide:
 
 | Package | In its `_<os>.go` file |
 |---|---|
@@ -54,8 +68,8 @@ the stubs, keeping the same functions. What a system has to provide:
 | `procinfo` | List and inspect processes, suspend, resume, kill, and `Hold`: keep one frozen so that nothing else running as the user can thaw it |
 | `netguard` | Cut one program's network access; isolate the PC |
 | `provenance` | `Verify`: who made a program, and does the system vouch for it (a code signature, or a package that owns the file) |
-| `classify` | `rules_<os>.go`: script hosts and runtimes, the folders only administrators can write to, path patterns, the wording of a verdict |
-| `baits` | The `Catalog` (where each app keeps its data there), making a planted file look used, and a tripwire on the file if the system needs one |
+| `classify` | `rules_<os>.go`: script hosts and runtimes, the folders only administrators can write to, path patterns, the wording of a verdict. `byOrigin` and `sweepsAllowed`, for a system where the program that opened a bait says too little by itself (on Linux, `cat` is judged by what ran it) |
+| `baits` | The `Catalog` (where each app keeps its data there), making a planted file look used, a tripwire on the file if the system needs one, and `asOwner`: planting in the user's folders without an administrator's rights being led elsewhere |
 | `paths`, `config` | Where ABA lives and how names compare; encrypting the secrets, closing the data folder to non-admins, the state lock |
 | `svcctl`, `install`, `doctor` | Registering, starting and signalling the service; the install steps and user lookup that differ; the system's own health check |
 | `session`, `notify`, `cli` | Showing a popup to whoever is logged in; asking for administrator rights; the fake stealer of `aba test` |
@@ -63,7 +77,7 @@ the stubs, keeping the same functions. What a system has to provide:
 Two rules keep the systems out of each other's way. Work in your system's files; if the core needs
 something new from the system, add it to all three (a stub that returns `platform.Unsupported(...)` is
 fine for the ones you can't write). And helpers only one system needs go in their own package, like
-`winsec`, `evtlog` and `instant` for Windows.
+`winsec`, `evtlog` and `instant` for Windows, and `fanwatch` for Linux.
 
 CI vets and tests on Windows, Linux and macOS. To check the others from one machine:
 
@@ -76,7 +90,7 @@ GOOS=darwin go vet ./...
 
 - Keep the SYSTEM service boring and safe: never act on system processes or on ABA itself, never trust paths
   or data a non-admin user can write, and fail closed.
-- Anything that changes Windows settings must be undone by `aba uninstall`.
+- Anything that changes the system's settings must be undone by `aba uninstall`.
 - User-facing text: plain words, short sentences, say what happened and what to do next.
 - Add a test for anything that decides whether something is malicious.
 
