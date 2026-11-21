@@ -21,7 +21,11 @@ moving() { # is the spinner's heartbeat advancing?
 	[ "$a" = "$b" ] && echo "      => FROZEN" || echo "      => running"
 }
 spinner() {
-	asuser "$B/spin" "$W/hb.txt" > /dev/null 2>&1 &
+	# Detached: sudo and the shell exit at once and the spinner is left to
+	# launchd. A spinner whose parent is sudo drags sudo into every stop
+	# (measured: stopping the child stops sudo too), and a stopped sudo left
+	# under a CI step is what hung GitHub's runners.
+	asuser /bin/sh -c "'$B/spin' '$W/hb.txt' > /dev/null 2>&1 < /dev/null &" < /dev/null
 	sleep 0.5
 	P=$(pgrep -n -u "$U" -x spin)
 	if [ -z "$P" ]; then echo "could not start the spinner"; exit 1; fi
