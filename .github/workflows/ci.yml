@@ -44,21 +44,6 @@ jobs:
         shell: pwsh
         run: ./scripts/e2e.ps1 -Aba ./dist/aba.exe -Medium ./dist/medium.exe -Ghost ./dist/ghost.exe
 
-      # TEMPORARY, while the Linux port (PR #10) is being brought to green: the
-      # end-to-end script prints only the end of the service's crash log, and
-      # what a crash starts with is the part that says why. To be removed.
-      - name: Crash log, from the top (after a failure)
-        if: failure()
-        shell: pwsh
-        run: |
-          $f = "$env:ProgramData\FileAccessMonitor\crash.log"
-          if (Test-Path $f) {
-            $l = @(Get-Content $f)
-            for ($i = 0; $i -lt $l.Count; $i++) {
-              if ($l[$i] -like '--- service*') { $l[$i..([Math]::Min($i + 70, $l.Count - 1))] | Write-Host; Write-Host '......' }
-            }
-          } else { Write-Host 'no crash log' }
-
   # Linux and macOS: everything that builds there. For macOS that's still the
   # OS-neutral core plus stubs, so its job mostly guards the boundary (see
   # "Platforms" in CONTRIBUTING.md). Linux has a backend, and GitHub's Linux
@@ -100,9 +85,13 @@ jobs:
           sudo env ABA_INTEGRATION=1 ABA_TEST_USER="$USER" ./dist/baits.test -test.v -test.count=1 -test.run 'Linux|Planting'
 
       - name: Build
+        run: go build -o dist/aba ./cmd/aba
+
+      - name: Build for the end-to-end run
+        if: runner.os == 'Linux'
         run: |
           go build -ldflags "-s -w -X main.version=ci-${{ github.sha }}" -o dist/aba ./cmd/aba
-          if [ "$RUNNER_OS" = Linux ]; then go build -o dist/grabber ./scripts/grabber; fi
+          go build -o dist/grabber ./scripts/grabber
 
       # Every feature on a throwaway machine: install as a systemd service,
       # fake stealers frozen inside their open, kill, legitimate readers let
