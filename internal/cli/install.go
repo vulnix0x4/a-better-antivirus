@@ -119,6 +119,7 @@ func runInstall(reconfigure bool, f installFlags) error {
 		}
 	}
 
+	o.Version = Version
 	fmt.Println()
 	title := "Setting up A Better Antivirus"
 	if existing != nil {

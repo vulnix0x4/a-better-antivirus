@@ -1,0 +1,33 @@
+package cli
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/vulnix0x4/a-better-antivirus/internal/install"
+)
+
+// Windows' "Installed apps" list runs a command line that ABA wrote into the
+// registry at install time. It has to stay a real aba command: if `uninstall`
+// or one of its flags is renamed, the Uninstall button stops working on every
+// PC that installed earlier.
+func TestInstalledAppsUninstallIsARealCommand(t *testing.T) {
+	const exe = `C:\Program Files\File Access Monitor\aba.exe`
+	for _, quiet := range []bool{false, true} {
+		line := install.UninstallCommand(exe, quiet)
+		rest, ok := strings.CutPrefix(line, `"`+exe+`"`)
+		if !ok {
+			t.Fatalf("%s: the program must come first, in quotes (its folder has spaces)", line)
+		}
+		c, flags, err := newRoot().Find(strings.Fields(rest))
+		if err != nil || c.Name() != "uninstall" {
+			t.Fatalf("%s: runs %q, want uninstall (%v)", line, c.Name(), err)
+		}
+		if err := c.ParseFlags(flags); err != nil {
+			t.Fatalf("%s: %v", line, err)
+		}
+		if yes, _ := c.Flags().GetBool("yes"); yes != quiet {
+			t.Errorf("%s: --yes=%v, want %v (only the quiet form may skip the question)", line, yes, quiet)
+		}
+	}
+}
