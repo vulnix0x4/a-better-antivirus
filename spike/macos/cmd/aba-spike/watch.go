@@ -47,7 +47,7 @@ type hit struct {
 type watcher struct {
 	baits   []string
 	needles [][]byte
-	action  string // stop | kill | none
+	action  string // stop | sigstop | kill | none
 	onHit   func(h *hit)
 	// Programs this watcher must never act on.
 	selfPid int
@@ -111,23 +111,33 @@ func (w *watcher) handle(line []byte) {
 
 	// 2. Stop it. The opener first (that is the one holding the data), then
 	//    the program judged responsible and everything under it.
+	//
+	//    "stop" uses pid_suspend(2): unlike SIGSTOP, another program of the
+	//    same user cannot undo it (measured: SIGCONT does nothing, pid_resume
+	//    is refused). Only root can resume. "sigstop" is there to compare.
 	h.Action = "none"
 	if h.Severity == sevCritical && w.action != "none" {
-		sig := syscall.SIGSTOP
-		h.Action = "frozen (SIGSTOP)"
-		if w.action == "kill" {
-			sig = syscall.SIGKILL
+		var stop func(pid int) bool
+		switch w.action {
+		case "kill":
 			h.Action = "killed (SIGKILL)"
+			stop = func(pid int) bool { return syscall.Kill(pid, syscall.SIGKILL) == nil }
+		case "sigstop":
+			h.Action = "frozen (SIGSTOP)"
+			stop = func(pid int) bool { return syscall.Kill(pid, syscall.SIGSTOP) == nil }
+		default:
+			h.Action = "frozen (pid_suspend)"
+			stop = func(pid int) bool { return pidSuspend(pid) == nil || syscall.Kill(pid, syscall.SIGSTOP) == nil }
 		}
-		if h.Opener.Pid > 1 && syscall.Kill(h.Opener.Pid, sig) == nil {
+		if h.Opener.Pid > 1 && stop(h.Opener.Pid) {
 			h.Stopped = append(h.Stopped, h.Opener.Pid)
 		}
 		h.ActedTime = time.Now()
-		if c := h.Culprit.Pid; c > 1 && c != h.Opener.Pid && syscall.Kill(c, sig) == nil {
+		if c := h.Culprit.Pid; c > 1 && c != h.Opener.Pid && stop(c) {
 			h.Stopped = append(h.Stopped, c)
 		}
 		for _, k := range descendants(h.Culprit.Pid) {
-			if k != h.Opener.Pid && k != w.selfPid && syscall.Kill(k, sig) == nil {
+			if k != h.Opener.Pid && k != w.selfPid && stop(k) {
 				h.Stopped = append(h.Stopped, k)
 			}
 		}
@@ -161,7 +171,7 @@ func (h *hit) print() {
 // cmdWatch: watch the given baits until interrupted.
 func cmdWatch(args []string) {
 	fs := newFlags("watch")
-	action := fs.String("action", "stop", "what to do with a critical reader: stop, kill or none")
+	action := fs.String("action", "stop", "what to do with a critical reader: stop (pid_suspend), sigstop, kill or none")
 	events := fs.String("events", strings.Join(detectEvents, ","), "eslogger events to subscribe to")
 	seconds := fs.Int("seconds", 0, "stop after this many seconds (0: run until killed)")
 	jsonOut := fs.String("json", "", "also append each hit as a JSON line to this file")
@@ -207,4 +217,21 @@ func cmdWatch(args []string) {
 	}
 	err = s.each(w.handle)
 	fmt.Printf("\neslogger ended (%v) after %d events, %.1f MB\n", err, s.Lines.Load(), float64(s.Bytes.Load())/1e6)
+}
+
+// pid_suspend(2) and pid_resume(2) are private system calls (433, 434). Root
+// may use them on another user's process without an entitlement (measured on
+// macOS 15 and 26); a non-root caller gets EPERM even for its own processes.
+func pidSuspend(pid int) error {
+	if _, _, e := syscall.Syscall(433, uintptr(pid), 0, 0); e != 0 {
+		return e
+	}
+	return nil
+}
+
+func pidResume(pid int) error {
+	if _, _, e := syscall.Syscall(434, uintptr(pid), 0, 0); e != 0 {
+		return e
+	}
+	return nil
 }

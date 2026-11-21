@@ -25,9 +25,9 @@ asuser() { sudo -u "#$U" "$@"; }
 try() { # who host -> prints OK/blocked
 	who=$1; host=$2; ip=$3
 	if [ "$who" = root ]; then
-		curl -s -o /dev/null -m 4 --resolve "$host:443:$ip" "https://$host/" && echo OK || echo blocked
+		curl -s -o /dev/null -m 3 --resolve "$host:443:$ip" "https://$host/" && echo OK || echo blocked
 	else
-		asuser curl -s -o /dev/null -m 4 --resolve "$host:443:$ip" "https://$host/" && echo OK || echo blocked
+		asuser curl -s -o /dev/null -m 3 --resolve "$host:443:$ip" "https://$host/" && echo OK || echo blocked
 	fi
 }
 ALERT_IP=$(dig +short A "$ALERT_HOST" | grep -E '^[0-9.]+$' | head -1)

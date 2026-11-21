@@ -30,6 +30,7 @@ type runResult struct {
 	Severity       severity `json:"severity"`
 	Reason         string   `json:"reason"`
 	Frozen         bool     `json:"frozen"`
+	SurvivedCont   bool     `json:"still_frozen_after_the_user_sent_sigcont"`
 	ReadBait       bool     `json:"bait_was_read_before_the_freeze"`
 	LootAfterBait  uint64   `json:"other_files_read_before_the_freeze"`
 	OpenToEventMs  float64  `json:"open_to_kernel_event_ms"`
@@ -97,7 +98,7 @@ func cmdDemo(args []string) {
 	gid := fs.Int("gid", 20, "and this group")
 	dir := fs.String("dir", "/Users/Shared/aba-spike-demo", "scratch folder for the bait and the fake stealer")
 	stealer := fs.String("stealer", "", "path to the built fake-stealer binary")
-	action := fs.String("action", "stop", "stop or kill")
+	action := fs.String("action", "stop", "stop (pid_suspend), sigstop or kill")
 	how := fs.String("how", "open", "how the fake stealer reads the bait: open, mmap")
 	events := fs.String("events", strings.Join(detectEvents, ","), "eslogger events")
 	jsonOut := fs.String("json", "", "write results as JSON to this file")
@@ -217,6 +218,15 @@ func cmdDemo(args []string) {
 				r.Frozen = syscall.Kill(c.Process.Pid, 0) != nil || n1 == n2
 			}
 			r.LootAfterBait = n2
+			if *action != "kill" {
+				// An accomplice running as the same user tries to thaw it.
+				kc := exec.Command("/bin/kill", "-CONT", fmt.Sprint(c.Process.Pid))
+				kc.SysProcAttr = asUser
+				kc.Run()
+				time.Sleep(150 * time.Millisecond)
+				n3, _ := readStamp(stamp)
+				r.SurvivedCont = n3 == n2
+			}
 			steps := readSteps(logf)
 			pre := steps["pre_open"]
 			_, r.ReadBait = steps["read"]
@@ -277,7 +287,7 @@ func cmdDemo(args []string) {
 		sort.Float64s(v)
 		fmt.Printf("  %-34s min %.2f  median %.2f  max %.2f ms  (n=%d)\n", name, v[0], v[len(v)/2], v[len(v)-1], len(v))
 	}
-	caught, right, frozen, readBait := 0, 0, 0, 0
+	caught, right, frozen, readBait, survived := 0, 0, 0, 0, 0
 	var loot0 []float64
 	for _, r := range results {
 		if r.Caught {
@@ -292,10 +302,16 @@ func cmdDemo(args []string) {
 		if r.ReadBait {
 			readBait++
 		}
+		if r.SurvivedCont {
+			survived++
+		}
 		loot0 = append(loot0, float64(r.LootAfterBait))
 	}
 	sort.Float64s(loot0)
 	fmt.Printf("\n%d runs: caught %d, named the right process %d, frozen %d\n", len(results), caught, right, frozen)
+	if *action != "kill" {
+		fmt.Printf("  still frozen after the same user sent it SIGCONT: %d of %d\n", survived, len(results))
+	}
 	summarize("open -> kernel made the event", func(r runResult) float64 { return r.OpenToEventMs })
 	summarize("open -> watcher received it", func(r runResult) float64 { return r.OpenToRecvMs })
 	summarize("open -> SIGSTOP sent", func(r runResult) float64 { return r.OpenToSignalMs })
