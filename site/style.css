@@ -145,6 +145,9 @@ a:hover { text-decoration-thickness: 2px; }
   border-radius: 4px;
 }
 
+/* Inside the always-dark blocks the ring has to be light in both themes. */
+.cmd :focus-visible, .term :focus-visible, .receipt :focus-visible { outline-color: #8ab4ff; }
+
 code, kbd, pre { font-family: var(--mono); font-size: 0.9em; }
 
 code {

@@ -347,7 +347,7 @@
               <li>
                 Open PowerShell (press Start, type <kbd>PowerShell</kbd>, press Enter) and run this. It only reads the file:
                 <div class="cmd">
-                  <pre tabindex="0"><code id="cmd-hash">(Get-FileHash "$HOME\Downloads\ABA-Setup.exe").Hash</code></pre>
+                  <pre tabindex="0" aria-label="PowerShell command"><code id="cmd-hash">(Get-FileHash "$HOME\Downloads\ABA-Setup.exe").Hash</code></pre>
                   <button type="button" class="copy" data-copy="cmd-hash" hidden>Copy</button>
                 </div>
               </li>
@@ -384,7 +384,7 @@
       <div class="alt-body">
         <p>In PowerShell:</p>
         <div class="cmd">
-          <pre tabindex="0"><code id="cmd-install">irm https://raw.githubusercontent.com/vulnix0x4/a-better-antivirus/main/install.ps1 | iex</code></pre>
+          <pre tabindex="0" aria-label="PowerShell command"><code id="cmd-install">irm https://raw.githubusercontent.com/vulnix0x4/a-better-antivirus/main/install.ps1 | iex</code></pre>
           <button type="button" class="copy" data-copy="cmd-install" hidden>Copy</button>
         </div>
         <p>It downloads the latest release for your PC, checks it against the release's <code>SHA256SUMS.txt</code>, and starts the setup. <a href="https://github.com/vulnix0x4/a-better-antivirus/blob/main/install.ps1">Read the script first</a> if you like.</p>
