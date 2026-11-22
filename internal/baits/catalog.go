@@ -64,6 +64,9 @@ type Spec struct {
 	// uses: "Local State" for the Chromium family (when empty), "profiles.ini"
 	// for Firefox. It existing shows the app has been used.
 	Profiles string
+	// ProfileDir is the folder under Inside that Firefox keeps its profile
+	// folders in: "Profiles" on Windows and macOS, Inside itself on Linux.
+	ProfileDir string
 	// Synced (optional) says, in one sentence, that the folder the bait is
 	// planted in is kept in sync with a cloud (on macOS: Desktop and
 	// Documents in iCloud Drive), so the decoy will be uploaded and show up
@@ -215,7 +218,7 @@ func FreeProfile(s Spec, u config.UserInfo) string {
 		used := firefoxProfiles(ud)
 		for try := 0; try < 60; try++ {
 			name := randAlnum(8, "abcdefghijklmnopqrstuvwxyz0123456789") + ".default-release-1"
-			if _, err := os.Stat(j(ud, name)); err != nil && !used[name] {
+			if _, err := os.Stat(j(ud, s.ProfileDir, name)); err != nil && !used[name] {
 				return name
 			}
 		}
@@ -289,15 +292,17 @@ func firefoxFolder(u config.UserInfo, id string) string {
 
 // embeddedFirefox is a fake profile inside a real Firefox: a folder next to
 // the real profiles that profiles.ini doesn't list, so Firefox never opens
-// it, and stealers that take every profile folder do.
-func embeddedFirefox(id, browser, signer string, root func(u config.UserInfo) string, hosts func(u config.UserInfo) []string) Spec {
+// it, and stealers that take every profile folder do. root holds
+// profiles.ini, sub (under root) the profile folders; since is the config
+// version that first offered it (see Spec.Since).
+func embeddedFirefox(id, browser, signer string, since int, root func(u config.UserInfo) string, sub string, hosts func(u config.UserInfo) []string) Spec {
 	return Spec{
-		ID: id, Name: "extra profile inside your " + browser, Category: "Browsers", Kind: KindDecoy, Default: true, Since: 3,
+		ID: id, Name: "extra profile inside your " + browser, Category: "Browsers", Kind: KindDecoy, Default: true, Since: since,
 		Description: "A fake profile next to your real ones. Stealers take every profile; " + browser + " never opens this one.",
 		OwnerExes:   []string{"firefox", "firefox-bin", "firefox-esr", "firefox.exe"}, Signer: signer,
-		Inside: root, Host: hosts, Profiles: firefoxIndex,
+		Inside: root, Host: hosts, Profiles: firefoxIndex, ProfileDir: sub,
 		Files: func(u config.UserInfo) []FileSpec {
-			d := j(root(u), firefoxFolder(u, id))
+			d := j(root(u), sub, firefoxFolder(u, id))
 			return []FileSpec{
 				{Path: j(d, "logins.json"), Audit: true, Gen: genFirefoxLogins},
 				{Path: j(d, "key4.db"), Audit: true, Gen: genKey4},

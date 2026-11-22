@@ -76,12 +76,6 @@ func programs(names ...string) []string {
 	return out
 }
 
-func genGitCredentials(g *Gen) []byte {
-	host := strings.ToLower(g.Last) + "-consulting"
-	return []byte(fmt.Sprintf("https://%s:glpat-%s@gitlab.%s.internal\nhttps://deploy:%s@git.%s.internal\n",
-		g.User, randAlnum(20, alnum), host, randAlnum(40, "0123456789abcdef"), host))
-}
-
 func genAWSBackup(g *Gen) []byte {
 	return bytes.ReplaceAll(genAWSCredentials(g), []byte("\r\n"), []byte("\n"))
 }
@@ -244,27 +238,27 @@ var Catalog = []Spec{
 	// ---- Browsers you do use: a fake profile inside the real one ----
 	// Firefox: Ubuntu's comes as a snap, others as a package or a flatpak, each
 	// with its data in its own place.
-	embeddedFirefox("firefox-profile", "Firefox", "firefox",
-		func(u config.UserInfo) string { return j(u.Profile, ".mozilla", "firefox") },
+	embeddedFirefox("firefox-profile", "Firefox", "firefox", 3,
+		func(u config.UserInfo) string { return j(u.Profile, ".mozilla", "firefox") }, "",
 		func(u config.UserInfo) []string {
 			return []string{"/usr/lib/firefox/firefox", "/usr/lib64/firefox/firefox", "/usr/lib/firefox-esr/firefox-esr", "/opt/firefox/firefox"}
 		}),
 	// (Firefox from 2026 on makes new profiles under ~/.config, the way other
 	// apps keep their data; older installs keep ~/.mozilla.)
-	embeddedFirefox("firefox-xdg-profile", "Firefox", "firefox",
-		func(u config.UserInfo) string { return j(u.RoamingAppData, "mozilla", "firefox") },
+	embeddedFirefox("firefox-xdg-profile", "Firefox", "firefox", 3,
+		func(u config.UserInfo) string { return j(u.RoamingAppData, "mozilla", "firefox") }, "",
 		func(u config.UserInfo) []string {
 			return []string{"/usr/lib/firefox/firefox", "/usr/lib64/firefox/firefox", "/usr/lib/firefox-esr/firefox-esr", "/opt/firefox/firefox"}
 		}),
-	embeddedFirefox("firefox-snap-profile", "Firefox (snap)", "firefox",
+	embeddedFirefox("firefox-snap-profile", "Firefox (snap)", "firefox", 3,
 		func(u config.UserInfo) string {
 			return j(u.Profile, "snap", "firefox", "common", ".mozilla", "firefox")
-		},
+		}, "",
 		func(u config.UserInfo) []string { return []string{"/snap/firefox/current/usr/lib/firefox/firefox"} }),
-	embeddedFirefox("firefox-flatpak-profile", "Firefox (flatpak)", "org.mozilla.firefox",
+	embeddedFirefox("firefox-flatpak-profile", "Firefox (flatpak)", "org.mozilla.firefox", 3,
 		func(u config.UserInfo) string {
 			return j(u.Profile, ".var", "app", "org.mozilla.firefox", ".mozilla", "firefox")
-		},
+		}, "",
 		func(u config.UserInfo) []string {
 			return []string{"/var/lib/flatpak/app/org.mozilla.firefox/current/active/files/lib/firefox/firefox"}
 		}),

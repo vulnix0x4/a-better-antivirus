@@ -13,6 +13,20 @@
   30 seconds and saying ABA didn't catch it. It also says when the mouse or keyboard was used midway, and
   its own fake clipper no longer sets off a real alert.
 
+**Alerts and baits**
+
+- **Alerts say where the program came from.** ABA reads the mark browsers leave on what they download
+  (Windows' Mark of the Web, macOS's quarantine and "where from" attributes, the address Linux browsers,
+  curl and wget record) on the program, the script it ran, or what started it, and shows the address in
+  `aba alerts show`, the popup and phone alerts. A program can fake that mark, so it's a lead, not proof.
+- **Phone alerts name the computer**, for whoever gets alerts from more than one.
+- **A fake profile inside your real Firefox** on Windows and macOS, as on Linux, and **saved git passwords**
+  (`~/.git-credentials`) on Windows. Run `aba setup` to add them to an existing install.
+- **The Windows SSH key bait gets its own name per install**, like the other files. Existing installs keep
+  theirs until `aba bait rename`.
+- **The after-a-detection checklist fits the computer:** no "reset Windows" on a Mac or Linux, and a clipper
+  alert gets its own steps (check recent crypto transfers).
+
 ## v0.7.0
 
 A click-through installer, ABA on macOS and Linux, a bait for clippers, and a website:

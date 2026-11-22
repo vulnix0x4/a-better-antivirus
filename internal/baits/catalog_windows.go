@@ -174,6 +174,11 @@ var Catalog = []Spec{
 		func(u config.UserInfo) []string {
 			return []string{j(pf(), `BraveSoftware\Brave-Browser\Application`), j(pf86(), `BraveSoftware\Brave-Browser\Application`), j(u.LocalAppData, `BraveSoftware\Brave-Browser\Application`)}
 		}),
+	embeddedFirefox("firefox-profile", "Firefox", "Mozilla", 4,
+		func(u config.UserInfo) string { return j(u.RoamingAppData, `Mozilla\Firefox`) }, "Profiles",
+		func(u config.UserInfo) []string {
+			return []string{j(pf(), `Mozilla Firefox\firefox.exe`), j(pf86(), `Mozilla Firefox\firefox.exe`), j(u.LocalAppData, `Mozilla Firefox\firefox.exe`)}
+		}),
 
 	// ---- Wallets ----
 	{
@@ -300,6 +305,15 @@ var Catalog = []Spec{
 				{Path: j(u.Profile, ".aws", "credentials"), Audit: true, Text: true, Gen: genAWSCredentials},
 				{Path: j(u.Profile, ".aws", "config"), Text: true, Gen: genAWSConfig},
 			}
+		},
+	},
+	{
+		ID: "git-credentials", Name: "saved git passwords (~/.git-credentials)", Category: "Credentials", Kind: KindDecoy, Default: true, Since: 4,
+		Description: "Where git keeps passwords in plain text when told to. Git for Windows uses the Credential Manager instead; stealers look here anyway.",
+		// The file itself stands for "the app": if it's there, git's store is in use.
+		Root: func(u config.UserInfo) string { return j(u.Profile, ".git-credentials") },
+		Files: func(u config.UserInfo) []FileSpec {
+			return []FileSpec{{Path: j(u.Profile, ".git-credentials"), Audit: true, Text: true, Gen: genGitCredentials}}
 		},
 	},
 	{

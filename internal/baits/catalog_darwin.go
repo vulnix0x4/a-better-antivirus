@@ -20,8 +20,6 @@ package baits
 
 import (
 	"bytes"
-	"fmt"
-	"strings"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/provenance"
@@ -100,12 +98,6 @@ func appBinaryDirs(name string) func(u config.UserInfo) []string {
 	return func(u config.UserInfo) []string {
 		return []string{"/Applications/" + name + ".app/Contents/MacOS", j(u.Profile, "Applications", name+".app", "Contents", "MacOS")}
 	}
-}
-
-func genGitCredentials(g *Gen) []byte {
-	host := strings.ToLower(g.Last) + "-consulting"
-	return []byte(fmt.Sprintf("https://%s:glpat-%s@gitlab.%s.internal\nhttps://deploy:%s@git.%s.internal\n",
-		g.User, randAlnum(20, alnum), host, randAlnum(40, "0123456789abcdef"), host))
 }
 
 func genAWSBackup(g *Gen) []byte {
@@ -188,6 +180,11 @@ var Catalog = []Spec{
 		func(u config.UserInfo) string { return j(u.RoamingAppData, "Vivaldi") }, appBinaryDirs("Vivaldi")),
 	embeddedProfile("arc-profile", "Arc", "Arc", "The Browser Company",
 		func(u config.UserInfo) string { return j(u.RoamingAppData, "Arc", "User Data") }, appBinaryDirs("Arc")),
+	embeddedFirefox("firefox-profile", "Firefox", "Mozilla", 4,
+		func(u config.UserInfo) string { return j(u.RoamingAppData, "Firefox") }, "Profiles",
+		func(u config.UserInfo) []string {
+			return []string{"/Applications/Firefox.app/Contents/MacOS/firefox", j(u.Profile, "Applications", "Firefox.app", "Contents", "MacOS", "firefox")}
+		}),
 
 	// ---- Wallets ----
 	{
