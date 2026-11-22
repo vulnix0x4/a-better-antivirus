@@ -11,6 +11,9 @@
 //	ghost link     <file>   read it through a hard link (a second name for the file)
 //	ghost linkgone <file>   the same, deleting the link again right after
 //	ghost resume   <pid>    what an accomplice does: un-suspend a frozen process
+//	ghost holders  <file>   for a failing test: whether the file can still be
+//	                        opened (a deleted file that something keeps open
+//	                        can't), and which programs have it open
 //
 // With a third argument, a file, the reader appends a line to it ten times a
 // second after its read: a heartbeat that shows whether it's running or frozen.
@@ -24,6 +27,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/vulnix0x4/a-better-antivirus/internal/instant"
 )
 
 const (
@@ -85,12 +90,54 @@ func resume(pid uint32) error {
 	return nil
 }
 
+// holders describes what keeps path in place: see the usage above.
+func holders(path string) string {
+	p, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return err.Error() + "\n"
+	}
+	h, err := windows.CreateFile(p, windows.FILE_READ_ATTRIBUTES,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
+	if err != nil {
+		// Access denied here, for an administrator with backup semantics,
+		// means the file is deleted and waits for its last handle to close.
+		return fmt.Sprintf("can't open %s: %v\n", path, err)
+	}
+	var fi windows.ByHandleFileInformation
+	windows.GetFileInformationByHandle(h, &fi)
+	windows.CloseHandle(h)
+	out := fmt.Sprintf("%s can be opened (not deleted), %d bytes, written %s\n", path,
+		int64(fi.FileSizeHigh)<<32|int64(fi.FileSizeLow), time.Unix(0, fi.LastWriteTime.Nanoseconds()).UTC().Format(time.RFC3339Nano))
+	pids := instant.Holders(path)
+	if len(pids) == 0 {
+		return out + "  no program has it open\n"
+	}
+	for _, pid := range pids {
+		name := "?"
+		if ph, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid); err == nil {
+			buf := make([]uint16, windows.MAX_LONG_PATH)
+			n := uint32(len(buf))
+			if windows.QueryFullProcessImageName(ph, 0, &buf[0], &n) == nil {
+				name = windows.UTF16ToString(buf[:n])
+			}
+			windows.CloseHandle(ph)
+		}
+		out += fmt.Sprintf("  open in pid %d: %s\n", pid, name)
+	}
+	return out
+}
+
 func main() {
 	if len(os.Args) != 3 && len(os.Args) != 4 {
-		fmt.Fprintln(os.Stderr, "usage: ghost plain|ghost|map|link|linkgone <file> [heartbeat file]  |  ghost resume <pid>")
+		fmt.Fprintln(os.Stderr, "usage: ghost plain|ghost|map|link|linkgone <file> [heartbeat file]  |  ghost resume <pid>  |  ghost holders <file>")
 		os.Exit(2)
 	}
 	mode, path := os.Args[1], os.Args[2]
+	if mode == "holders" {
+		fmt.Print(holders(path))
+		return
+	}
 	if mode == "resume" {
 		var pid uint32
 		fmt.Sscan(path, &pid)

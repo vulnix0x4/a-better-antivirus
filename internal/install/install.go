@@ -344,7 +344,9 @@ func RenameBaits(cfg *config.Config) (string, error) {
 				if !ok || custom[id] || bs.Status == "retired" || (len(spec.RequiresAny) > 0) != dependentsFirst || !baits.Moved(bs, spec, cfg.User) {
 					continue
 				}
-				baits.Remove(bs)
+				if baits.Remove(bs) != nil {
+					continue // stays where it is, and on record: see plantBaits
+				}
 				delete(st.Baits, id)
 				moved++
 			}
@@ -402,7 +404,13 @@ func plantBaits(cfg *config.Config, sec *config.Secrets) (string, error) {
 				if (len(spec.RequiresAny) > 0) != dependentsFirst || !drop(id) {
 					continue
 				}
-				baits.Remove(bs)
+				if err := baits.Remove(bs); err != nil {
+					// Keep it on record (and watched) rather than leave a decoy
+					// nobody knows about: the next change to the baits, or
+					// `aba bait remove` again, tries once more.
+					errs = append(errs, fmt.Sprintf("couldn't take away bait %s (%v); it stays in place for now, try again in a moment", id, err))
+					continue
+				}
 				delete(st.Baits, id)
 				if _, still := want[id]; !still {
 					removed++
