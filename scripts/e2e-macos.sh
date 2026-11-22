@@ -177,6 +177,17 @@ EXODUS=$(bait_file exodus)
 check "baits belong to the user" test "$(stat -f %Su "$PASSWORDS")" = "$ME"
 
 # =====================================================================
+say "An ordinary copy through Finder is left alone"
+# First, before any fake stealer: programs that read several apps' data
+# between them within two minutes count as one stealer split up.
+mkdir -p "$OUT/plain"
+launch /usr/bin/osascript -e "tell application \"Finder\" to duplicate (POSIX file \"$PASSWORDS\" as alias) to folder (POSIX file \"$OUT/plain\" as alias) with replacing" >/dev/null
+a=$(wait_alert '((.process.image // "") | test("osascript$"))') || fail "no record of osascript having Finder copy the bait"
+[ "$(field "$a" .tier)" != critical ] || fail "an AppleScript one-liner having Finder copy a file is critical: $(field "$a" '.verdict.reasons | tostring')"
+[ "$(field "$a" '[.actions[]? | select(.action=="freeze")] | length')" = 0 ] || fail "ABA froze something for an ordinary copy: $(field "$a" '.actions | tostring')"
+ok "a $(field "$a" .tier), nothing frozen ($(field "$a" '.verdict.reasons[0]'))"
+
+# =====================================================================
 say "aba test"
 sudo aba test > "$OUT/test.txt" 2>&1 || { cat "$OUT/test.txt"; fail "aba test"; }
 sed 's/^/      /' "$OUT/test.txt"
@@ -318,14 +329,6 @@ else
   cat "$OUT/f1" 2>/dev/null | sed 's/^/      /'
   fail "no alert for the fake stealer that had Finder copy a bait"
 fi
-
-say "An ordinary copy through Finder is left alone"
-mkdir -p "$OUT/plain"
-launch /usr/bin/osascript -e "tell application \"Finder\" to duplicate (POSIX file \"$PASSWORDS\" as alias) to folder (POSIX file \"$OUT/plain\" as alias) with replacing" >/dev/null
-a=$(wait_alert '((.process.image // "") | test("osascript$"))') || fail "no record of osascript having Finder copy the bait"
-[ "$(field "$a" .tier)" != critical ] || fail "an AppleScript one-liner having Finder copy a file is critical: $(field "$a" '.verdict.reasons | tostring')"
-[ "$(field "$a" '[.actions[]? | select(.action=="freeze")] | length')" = 0 ] || fail "ABA froze something for an ordinary copy: $(field "$a" '.actions | tostring')"
-ok "a $(field "$a" .tier), nothing frozen ($(field "$a" '.verdict.reasons[0]'))"
 
 # =====================================================================
 say "Strict mode: the whole Mac is cut off, and given back"
