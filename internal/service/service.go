@@ -384,6 +384,8 @@ func (s *server) Hold(pids []uint32) {
 			s.log.Printf("hold pid %d: %v", p, err)
 		}
 	}
+	// A frozen program that owns the clipboard makes every copy wait for it.
+	go s.safe("clipboard", func() { s.freeClipboard(pids) })
 }
 
 func (s *server) SuspendMore(root uint32, already []uint32) []uint32 {

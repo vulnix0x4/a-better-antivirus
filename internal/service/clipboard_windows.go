@@ -139,6 +139,38 @@ func (s *server) clipboardBaitNow() {
 	}
 }
 
+// freeClipboard takes the clipboard from any of frozen that owns it, in every
+// session (see clipbait.FreeFromFrozen). It waits for the helpers, which can
+// take a few seconds: run it on its own.
+func (s *server) freeClipboard(frozen []uint32) {
+	if len(frozen) == 0 {
+		return
+	}
+	ids, err := session.ActiveSessions()
+	if err != nil {
+		return
+	}
+	args := []string{"clipboard-free"}
+	for _, p := range frozen {
+		args = append(args, fmt.Sprint(p))
+	}
+	for _, id := range ids {
+		h, err := session.StartSystem(id, s.cliExe, args...)
+		if err != nil {
+			s.log.Printf("clipboard: session %d: %v", id, err)
+			continue
+		}
+		h.In.Close()
+		sc := bufio.NewScanner(h.Out)
+		for sc.Scan() {
+			if line := strings.TrimSpace(sc.Text()); line != "" {
+				s.log.Printf("clipboard: session %d: %s", id, line)
+			}
+		}
+		h.Stop()
+	}
+}
+
 // ensureClipboardSeed makes the seed the guards make bait addresses from, the
 // first time the bait is on. (Here, not in the guards: there may be several.)
 func (s *server) ensureClipboardSeed() {
