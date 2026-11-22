@@ -16,8 +16,15 @@ import (
 )
 
 const (
-	CLIExe     = "aba"    // what people type; /usr/local/bin/aba links to it
-	ServiceExe = "famsvc" // identical copy the service runs from, the bundle's main program
+	// One program file: the app bundle's main program, which the service runs
+	// and which /usr/local/bin/aba links to. (A second copy inside a signed
+	// bundle would be a second piece of signed code, and copying one over the
+	// other would break the signature.)
+	CLIExe     = "famsvc"
+	ServiceExe = "famsvc"
+
+	// CommandName is what people type.
+	CommandName = "aba"
 
 	// The Mac's file systems ignore case unless a volume was formatted
 	// otherwise.

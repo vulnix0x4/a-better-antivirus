@@ -183,9 +183,13 @@ func plistText(exe string) string {
 // unless the program carries a real signature already, signs the bundle
 // ad hoc so that macOS can tell it apart from anything else.
 func InstallOrUpdate(exe string) error {
+	// A bundle that comes signed (the .pkg) has its own description, covered
+	// by its signature: it's left as it is. A bare program gets one.
 	contents := filepath.Dir(filepath.Dir(exe))
-	if err := os.WriteFile(filepath.Join(contents, "Info.plist"), []byte(infoPlist()), 0o644); err != nil {
-		return err
+	if exec.Command("/usr/bin/codesign", "--verify", "--strict", paths.AppBundle()).Run() != nil {
+		if err := os.WriteFile(filepath.Join(contents, "Info.plist"), []byte(infoPlist()), 0o644); err != nil {
+			return err
+		}
 	}
 	if err := sealBundle(); err != nil {
 		return err
