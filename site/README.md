@@ -58,10 +58,10 @@ switched off for the project.
   `UNSIGNED-INSTALLER BLOCK: START` and `UNSIGNED-INSTALLER BLOCK: END`. The steps renumber themselves. Its
   styles are under "Unsigned-installer block" in `css/site.css`.
 - **Code signing policy page:** the footer of `index.html` has a commented-out link for it.
-- **Another system:** the download area is a list with one `<li class="os">` per system. Change `is-soon`
-  to `is-ready` and give it a download link like the Windows one. `site.js` already recognises macOS and
-  Linux visitors.
-- **Final address:** change `og:image` in `index.html` to `https://<address>/og.jpg` and add `og:url`.
+- **The download links** never change between releases: `releases/latest/download/ABA-Setup.exe` (Windows),
+  `releases/latest/download/ABA-macOS.pkg` (macOS) and `install.sh` on `main` (Linux). A release must keep
+  publishing files under those names.
+- **The address** is `https://abetterantivirus.com/` (in `index.html`: `canonical`, `og:url`, `og:image`).
 - **New demo video:** replace `media/demo.mp4` and `media/demo-poster.webp`, and update the text version
   under the video in `index.html`.
 - **Font:** to add characters, re-subset JetBrains Mono (variable, weights 400–800) with `pyftsubset`.

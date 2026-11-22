@@ -59,15 +59,24 @@ release:
 
     > It's not an antivirus. It's a better one.
 
-    Plants fake passwords, wallets and app data that only malware would read, and freezes
-    whatever touches them. Windows 10/11, 64-bit (x64 and ARM).
+    Plants fake passwords, wallets and app data that only an infostealer would read, and freezes
+    whatever touches them. [abetterantivirus.com](https://abetterantivirus.com)
 
-    **Install:** download `ABA-Setup.exe` below, double-click it and follow the steps.
-
+    **Windows 10/11** (x64 and ARM): download `ABA-Setup.exe` below, double-click it and follow the steps.
     Or in PowerShell (downloads this release, checks its hash, runs the guided setup):
     ```powershell
     irm https://raw.githubusercontent.com/vulnix0x4/a-better-antivirus/main/install.ps1 | iex
     ```
+
+    **macOS 14 or newer** (early; Apple silicon and Intel): download `ABA-macOS.pkg` below. It's signed and
+    notarized by Apple. ABA needs Full Disk Access: switch it on for "File Access Monitor" in System Settings.
+
+    **Linux** (early; needs systemd): checks the release's signature, then runs the setup:
+    ```sh
+    curl -fsSL https://raw.githubusercontent.com/vulnix0x4/a-better-antivirus/main/install.sh | sh
+    ```
+    or use the `.deb`, `.rpm` or tarball below.
+
     Then try it safely with `aba test`. Already installed with automatic updates on? You'll get
     this version within a day, or run `aba update` now. What's new: [CHANGELOG.md](https://github.com/vulnix0x4/a-better-antivirus/blob/main/CHANGELOG.md).
 

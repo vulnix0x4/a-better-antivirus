@@ -15,10 +15,10 @@
 <link rel="stylesheet" href="css/site.css">
 <meta property="og:type" content="website">
 <meta property="og:title" content="A Better Antivirus: catch infostealers in the act">
-<meta property="og:description" content="Decoy passwords, wallets and tokens that only an infostealer would open. Touch one, get frozen. Free and open source, for Windows. Keep Defender on.">
-<!-- Link previews need a full address for the picture. Once the site has its
-     final address, change this to https://<that address>/og.jpg and add og:url. -->
-<meta property="og:image" content="og.jpg">
+<meta property="og:description" content="Decoy passwords, wallets and tokens that only an infostealer would open. Touch one, get frozen. Free and open source, for Windows, macOS and Linux. Keep your antivirus on.">
+<link rel="canonical" href="https://abetterantivirus.com/">
+<meta property="og:url" content="https://abetterantivirus.com/">
+<meta property="og:image" content="https://abetterantivirus.com/og.jpg">
 <meta property="og:image:width" content="1280">
 <meta property="og:image:height" content="640">
 <meta property="og:image:alt" content="A Better Antivirus catches infostealers in the act: a real Discord stealer, frozen in 158 ms.">
@@ -52,14 +52,14 @@
 <section class="hero" id="top" aria-labelledby="hero-title">
   <div class="wrap hero-grid">
     <div class="hero-copy">
-      <p class="kicker"><span class="k-dot" aria-hidden="true"></span>Free, open source, for Windows 10 &amp; 11</p>
+      <p class="kicker"><span class="k-dot" aria-hidden="true"></span>Free, open source, for Windows, macOS and Linux</p>
       <h1 id="hero-title">Catch infostealers <span class="h-act">in the act.</span></h1>
       <p class="lede">Infostealers are programs that sweep the saved passwords, crypto wallets and app logins off your PC and upload them, usually within seconds. ABA plants fake ones exactly where they look. Your own apps have no reason to open them. When something suspicious does, ABA <strong class="freeze-word">freezes&nbsp;it</strong>, typically about a tenth of a second later.</p>
       <div class="cta">
-        <a class="btn btn-solid btn-lg" href="#download"><span class="btn-ico" aria-hidden="true">↓</span> Download for Windows</a>
+        <a class="btn btn-solid btn-lg" href="#download"><span class="btn-ico" aria-hidden="true">↓</span> Download</a>
         <a class="btn btn-line btn-lg" href="#proof">Watch a real one get caught <span class="btn-meta">47 s</span></a>
       </div>
-      <p class="os-note" data-os-show="mac linux mobile other" hidden>You're not on Windows. ABA only runs on Windows 10 and 11 for now. <a href="#download">What about my system?</a></p>
+      <p class="os-note" data-os-show="mobile other" hidden>ABA runs on Windows, macOS and Linux computers. <a href="#download">See the downloads</a></p>
       <p class="defender-line"><strong>Despite the name, keep Windows Defender on.</strong> ABA isn't an antivirus. It's the tripwire for what gets past one. <a href="#defender">Why both?</a></p>
     </div>
 
@@ -441,14 +441,10 @@
       <p class="sec-lede">Free. No account. No telemetry. Setup takes about a minute.</p>
     </div>
 
-    <p class="os-banner" data-os-show="mac" hidden><strong>You're on a Mac.</strong> ABA only runs on Windows 10 and 11 today. A macOS version is being worked on. There's no date yet.</p>
-    <p class="os-banner" data-os-show="linux" hidden><strong>You're on Linux.</strong> ABA only runs on Windows 10 and 11 today. A Linux version is being worked on. There's no date yet.</p>
-    <p class="os-banner" data-os-show="mobile" hidden><strong>You're on a phone or tablet.</strong> ABA runs on Windows PCs. Open this page on your PC to install it.</p>
-    <p class="os-banner" data-os-show="other" hidden><strong>ABA only runs on Windows 10 and 11 today.</strong> Open this page on a Windows PC to install it.</p>
+    <p class="os-banner" data-os-show="mobile" hidden><strong>You're on a phone or tablet.</strong> ABA runs on Windows, macOS and Linux computers. Open this page on your computer to install it.</p>
+    <p class="os-banner" data-os-show="other" hidden><strong>ABA runs on Windows 10 &amp; 11, macOS 14 or newer, and Linux with systemd.</strong> Open this page on one of those to install it.</p>
 
-    <!-- One <li class="os"> per system. To add one later: change is-soon to
-         is-ready, and give it a download link like the Windows one. site.js
-         already recognises macOS and Linux visitors. -->
+    <!-- One <li class="os"> per system. site.js marks the visitor's own. -->
     <ul class="oses">
       <li class="os is-ready" data-os="windows">
         <div class="os-head">
@@ -462,17 +458,30 @@
         </a>
         <p class="os-fine">The newest version, straight from <a href="https://github.com/vulnix0x4/a-better-antivirus/releases/latest">ABA's releases on GitHub</a>. It shows up as “A Better Antivirus” in Windows' installed apps.</p>
       </li>
-      <li class="os is-soon" data-os="mac">
-        <div class="os-head"><h3>macOS</h3><span class="pill">Not yet</span><span class="pill pill-you" hidden>Your system</span></div>
-        <p>Being worked on. No date yet.</p>
+      <li class="os is-ready" data-os="mac">
+        <div class="os-head">
+          <h3>macOS <span class="os-ver">14+</span></h3>
+          <span class="pill pill-ok">Early</span>
+          <span class="pill pill-you" hidden>Your system</span>
+        </div>
+        <a class="btn btn-solid btn-xl dl" href="https://github.com/vulnix0x4/a-better-antivirus/releases/latest/download/ABA-macOS.pkg">
+          <span class="btn-ico" aria-hidden="true">↓</span>
+          <span class="dl-txt"><span class="dl-main">Download <span class="nw">ABA-macOS.pkg</span></span><span class="dl-sub">Apple silicon and Intel · signed and notarized by Apple</span></span>
+        </a>
+        <p class="os-fine">Opens without a warning. ABA needs Full Disk Access: switch it on for “File Access Monitor” in System Settings → Privacy &amp; Security.</p>
       </li>
-      <li class="os is-soon" data-os="linux">
-        <div class="os-head"><h3>Linux</h3><span class="pill">Not yet</span><span class="pill pill-you" hidden>Your system</span></div>
-        <p>Being worked on. No date yet.</p>
+      <li class="os is-ready" data-os="linux">
+        <div class="os-head">
+          <h3>Linux</h3>
+          <span class="pill pill-ok">Early</span>
+          <span class="pill pill-you" hidden>Your system</span>
+        </div>
+        <div class="cmd"><pre tabindex="0" aria-label="Terminal command"><code id="cmd-linux">curl -fsSL https://raw.githubusercontent.com/vulnix0x4/a-better-antivirus/main/install.sh | sh</code></pre><button type="button" class="copy" data-copy="cmd-linux" hidden>Copy</button></div>
+        <p class="os-fine">Needs systemd. The script checks the release's signature before it runs anything (<a href="https://github.com/vulnix0x4/a-better-antivirus/blob/main/install.sh">read it first</a>). Also as <code>.deb</code>, <code>.rpm</code> and a tarball on <a href="https://github.com/vulnix0x4/a-better-antivirus/releases/latest">GitHub Releases</a>.</p>
       </li>
     </ul>
 
-    <h3 class="sub-h" id="next-title">After you click download</h3>
+    <h3 class="sub-h" id="next-title">On Windows: after you click download</h3>
     <ol class="steps" aria-labelledby="next-title">
       <li class="step">
         <h4>Open <code>ABA-Setup.exe</code></h4>
@@ -570,10 +579,10 @@
   <div class="wrap">
     <div class="sec-head">
       <p class="label">Everything it touches</p>
-      <h2 id="changes-title">What ABA changes on your PC.</h2>
+      <h2 id="changes-title">What ABA changes on a Windows PC.</h2>
       <p class="sec-lede">This is all of it. <code>aba uninstall</code> undoes it.</p>
     </div>
-    <div class="tbl-wrap" tabindex="0" role="region" aria-label="What ABA changes on your PC">
+    <div class="tbl-wrap" tabindex="0" role="region" aria-label="What ABA changes on a Windows PC">
       <table class="tbl tbl-ledger">
         <thead><tr><th scope="col">What</th><th scope="col">Where</th><th scope="col">On uninstall</th></tr></thead>
         <tbody>
@@ -612,7 +621,7 @@
 <section class="last" aria-labelledby="last-title">
   <div class="wrap last-inner">
     <h2 id="last-title">Leave something out for them.</h2>
-    <a class="btn btn-solid btn-lg" href="#download"><span class="btn-ico" aria-hidden="true">↓</span> Get ABA for Windows</a>
+    <a class="btn btn-solid btn-lg" href="#download"><span class="btn-ico" aria-hidden="true">↓</span> Get ABA</a>
     <p class="last-note">And keep Windows Defender on.</p>
   </div>
 </section>

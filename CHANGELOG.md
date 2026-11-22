@@ -1,5 +1,70 @@
 # Changelog
 
+## v0.7.0
+
+A click-through installer, ABA on macOS and Linux, a bait for clippers, and a website:
+[abetterantivirus.com](https://abetterantivirus.com).
+
+**Installing**
+
+- **`ABA-Setup.exe`.** Download, double-click, answer two questions. It carries both the x64 and the Arm64
+  program and installs the right one. Running it again repairs or upgrades ABA without touching your
+  settings. It can also install silently with options (see `installer/README.md`). The PowerShell one-liner
+  still works.
+- **ABA shows up in Installed apps and the Start menu** as "A Better Antivirus", so you can find and
+  uninstall it like any other program. The service keeps its low-profile name.
+
+**macOS (early)**
+
+- **ABA runs on macOS 14 or newer**, Apple silicon and Intel. It sees a program open a bait a few
+  milliseconds after the open (through Apple's `eslogger`). It freezes the program with `pid_suspend`,
+  which the program's own user can't undo, closes its connections, and in Strict mode cuts the whole Mac off
+  the internet while ABA's own alerts still get out. It judges programs by their code signature and by what
+  started them.
+- **Copies made through Finder are traced back.** A script that has Finder copy a bait (Atomic's method)
+  is found from Finder's own log and frozen. Finder's copy helper is frozen with it, but only then.
+- **`ABA-macOS.pkg`** is signed and notarized by Apple, so it opens without a warning. ABA needs Full Disk
+  Access: switch it on for "File Access Monitor" in System Settings. If iCloud syncs your Desktop and
+  Documents, setup asks before planting decoys there, since they would show up on your other devices.
+- **Not yet:** pausing a program inside its open before it reads (that needs an entitlement Apple hasn't
+  granted yet), cutting just one program's internet, and the injected-code check.
+
+**Linux (early)**
+
+- **ABA runs on Linux with systemd.** The kernel (fanotify) stops a program inside its `open()` of a bait
+  until ABA has judged it, so a stealer is frozen before it reads a byte. It's frozen in a control group its
+  user can't thaw, cut off the internet (nftables), and in Strict mode the machine is isolated. Linux has no
+  code signatures, so ABA goes by who installed the program (a package, in folders only root can write) and
+  by what started it: `cat` typed in your terminal is a warning, the same `cat` run by a script from a
+  download is a stealer.
+- **Desktop popups** with the same choices as on Windows, a decoy put back within a second of being deleted
+  (naming whoever did it), trust for a scheduled backup pinned to its exact command, and the full set of
+  baits including a fake Firefox profile.
+- **Install** with `curl -fsSL https://raw.githubusercontent.com/vulnix0x4/a-better-antivirus/main/install.sh | sh`
+  (it checks the release's signature first), or with the `.deb`, `.rpm` or tarball. `aba update` works.
+
+**Clipboard bait (Windows, off by default)**
+
+- **`aba clipboard on`** catches clippers: malware that swaps a wallet address you copy for the
+  attacker's. While nobody is using the PC, ABA puts a wallet address on the clipboard. A program that
+  swaps it is frozen and your clipboard is put back. The addresses are real ones whose keys ABA holds
+  (`aba clipboard key`). `aba clipboard test` shows it catching a harmless fake clipper.
+- **A frozen program no longer makes every copy wait.** While a frozen program owned the clipboard, copying
+  anything took about 5 seconds. ABA now takes the clipboard back from it.
+
+**Fixes**
+
+- **The service could crash at the moment it cut a frozen program's internet.** The program stayed frozen,
+  but its internet block (and in Strict mode the PC's isolation) didn't happen. The cause was the Windows
+  firewall library ABA uses, which put data at addresses Go's memory manager doesn't allow; ABA now carries
+  a fixed copy of it.
+- **A bait added a moment ago could be read without an alert,** if the read arrived before the service had
+  taken in the new bait.
+- **Removing a bait could leave its file behind for good,** where ABA no longer knew about it: when a
+  program that had just read it still had it open, or when the service's regular check was running at that
+  moment and put it back. `aba bait remove` now also says when it leaves a file in place, and why.
+- **Messages no longer talk about Windows on macOS and Linux.**
+
 ## v0.6.0
 
 Closing the ways around it. Every item here was a working bypass, found by going through ABA the way a
