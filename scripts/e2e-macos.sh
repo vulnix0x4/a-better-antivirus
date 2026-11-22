@@ -315,7 +315,8 @@ sudo sh -c "jq '.responses.critical = [\"freeze\",\"block-program\",\"isolate\"]
 sudo kill -HUP "$(service_pid)"
 wait_reloaded "$r"
 curl -s -m 10 -o /dev/null https://www.apple.com || fail "no internet to begin with"
-pid=$(launch "$HOME/Downloads/free-game" -wait 1000 -out "$OUT/i1" "$EXODUS")
+# (other-game: free-game is trusted with the Exodus wallet by now.)
+pid=$(launch "$HOME/Downloads/other-game" -wait 1000 -out "$OUT/i1" "$EXODUS")
 a=$(wait_alert ".process.pid == $pid and ([.actions[]? | select(.action==\"isolate\")] | length) > 0") || fail "no isolation"
 [ "$(field "$a" '[.actions[]? | select(.action=="isolate" and .ok)] | length')" = 1 ] || fail "isolation failed: $(field "$a" '.actions | tostring')"
 curl -s -m 5 -o /dev/null https://www.apple.com && fail "the Mac still reaches the internet"

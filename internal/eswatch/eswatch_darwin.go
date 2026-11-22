@@ -135,6 +135,14 @@ func (w *Watcher) AddAlias(alias, bait string) {
 	w.mu.Unlock()
 }
 
+// DropAlias stops watching a second name a bait was given.
+func (w *Watcher) DropAlias(alias string) {
+	w.mu.Lock()
+	delete(w.aliases, strings.ToLower(alias))
+	w.rebuild()
+	w.mu.Unlock()
+}
+
 func (w *Watcher) rebuild() {
 	all := append([]string(nil), w.files...)
 	for _, a := range w.aliases {
@@ -376,7 +384,7 @@ func (w *Watcher) line(line []byte) {
 	if e.Process.AuditToken.Pid == self {
 		return // ABA's own service planting and checking baits
 	}
-	for _, ev := range e.touches(got, w.bait) {
+	for _, ev := range e.touches(got, w.bait, w.DropAlias) {
 		w.Matched.Add(1)
 		if w.OnEvent != nil {
 			w.OnEvent(ev)
@@ -458,7 +466,7 @@ func (e *rawEvent) exec() (Exec, bool) {
 }
 
 // touches lists the baits this event is about.
-func (e *rawEvent) touches(got time.Time, baitOf func(string) (string, string, bool)) []Event {
+func (e *rawEvent) touches(got time.Time, baitOf func(string) (string, string, bool), dropAlias func(string)) []Event {
 	at, err := time.Parse(time.RFC3339Nano, e.Time)
 	if err != nil {
 		at = got
@@ -471,6 +479,13 @@ func (e *rawEvent) touches(got time.Time, baitOf func(string) (string, string, b
 		}
 		bait, via, ok := baitOf(path)
 		if !ok {
+			return
+		}
+		if via != "" && op == Delete {
+			// Removing (or renaming) the second name a bait was given leaves
+			// the bait where it was: nothing to report, and nothing more to
+			// watch under that name.
+			dropAlias(via)
 			return
 		}
 		if via != "" && op != Link {

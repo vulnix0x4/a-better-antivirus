@@ -87,4 +87,10 @@ func TestAlias(t *testing.T) {
 	if len(evs) != 1 || evs[0].Path != "/Users/a/Documents/passwords.txt" || evs[0].Alias != "/tmp/P" || evs[0].Op != Read {
 		t.Fatalf("%+v", evs)
 	}
+	// Removing the second name isn't deleting the bait.
+	evs = nil
+	w.read(strings.NewReader(`{"process":{"audit_token":{"euid":501,"pid":802},"executable":{"path":"/bin/rm"}},"event_type":32,"time":"2026-11-21T12:09:23Z","event":{"unlink":{"target":{"path":"/tmp/P"}}}}` + "\n"))
+	if len(evs) != 0 || w.Watching("/tmp/P") {
+		t.Fatalf("removing the link: %+v, still watched: %v", evs, w.Watching("/tmp/P"))
+	}
 }
