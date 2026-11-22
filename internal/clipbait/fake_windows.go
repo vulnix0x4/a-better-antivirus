@@ -11,14 +11,14 @@ import (
 // RunFakeClipper is the harmless clipper `aba clipboard test` catches: it
 // does what a real one does (a hidden window Windows tells about every
 // clipboard change; any wallet address on it is swapped) except that what it
-// swaps in is a fake address of its own, as invalid as a bait. It gives up
+// swaps in is a lookalike of its own, an invalid address. It gives up
 // after d.
 func RunFakeClipper(d time.Duration) {
 	runtime.LockOSThread()
 	mine := map[string]bool{}
 	swaps := map[Coin]string{}
 	for _, c := range Coins {
-		swaps[c] = Bait(c)
+		swaps[c] = Lookalike(c)
 		mine[swaps[c]] = true
 	}
 	h := makeWindow()

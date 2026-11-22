@@ -19,6 +19,7 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/alerts"
 	"github.com/vulnix0x4/a-better-antivirus/internal/baits"
 	"github.com/vulnix0x4/a-better-antivirus/internal/classify"
+	"github.com/vulnix0x4/a-better-antivirus/internal/clipbait"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/doctor"
 	"github.com/vulnix0x4/a-better-antivirus/internal/engine"
@@ -1082,11 +1083,13 @@ func clipboardCmd() *cobra.Command {
 		Short: "Catch clippers with a fake wallet address on the clipboard",
 		Long: "Clippers are malware that swap a crypto wallet address you copied for the attacker's, so\n" +
 			"the money you send goes to them. With this on, while nobody is using the PC, ABA now and\n" +
-			"then puts a fake wallet address on the clipboard for a few seconds and watches it. If a\n" +
+			"then puts a bait wallet address on the clipboard for a few seconds and watches it. If a\n" +
 			"program swaps it, that program is a clipper: it's frozen, cut off and you're alerted.\n\n" +
-			"Your clipboard is put back right after. The fake address never shows up in clipboard\n" +
-			"history and has a wrong checksum, so no wallet would accept it. Plain text on the\n" +
-			"clipboard is saved and put back; while it holds anything else (files, pictures), no bait.",
+			"Your clipboard is put back right after. The bait never shows up in clipboard history.\n" +
+			"It is a real address that ABA made and holds the key to, so a clipper that checks\n" +
+			"addresses can't tell it apart, and nothing sent to it would be lost (`aba clipboard key`).\n" +
+			"Plain text on the clipboard is saved and put back; while it holds anything else (files,\n" +
+			"pictures), no bait.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if runtime.GOOS != "windows" {
@@ -1123,6 +1126,17 @@ func clipboardCmd() *cobra.Command {
 		},
 	}
 	c.AddCommand(&cobra.Command{
+		Use:   "key <address>",
+		Short: "The private key of a bait address, should anything ever be sent to one",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireAdmin(); err != nil {
+				return err
+			}
+			return clipboardKey(args[0])
+		},
+	})
+	c.AddCommand(&cobra.Command{
 		Use:   "test",
 		Short: "Watch it catch a harmless fake clipper",
 		Long: "Starts a harmless fake clipper from your Temp folder and has ABA put a bait out right away,\n" +
@@ -1137,6 +1151,35 @@ func clipboardCmd() *cobra.Command {
 		},
 	})
 	return c
+}
+
+// clipboardKey is `aba clipboard key <address>`.
+func clipboardKey(address string) error {
+	c, i, at, ok := clipbait.Lookup(paths.DataDir(), address)
+	if !ok {
+		return exitf("%s isn't an address ABA put out as a bait", address)
+	}
+	sec, err := config.LoadSecrets()
+	if err != nil {
+		return err
+	}
+	k := clipbait.KeysFromSeed(sec.ClipboardSeed, paths.DataDir(), func(string, ...any) {})
+	if k == nil || k.Address(c, i) != address {
+		return exitf("ABA put %s out, but its key can't be made again (was ABA reinstalled since?)", address)
+	}
+	how := map[clipbait.Coin]string{
+		clipbait.Bitcoin:       "a Bitcoin wallet: import it as a private key (WIF), legacy address",
+		clipbait.BitcoinSegwit: "a Bitcoin wallet: import it as a private key (WIF), native segwit (p2wpkh) address",
+		clipbait.Ethereum:      "an Ethereum wallet (MetaMask and the like): import it as a private key",
+		clipbait.Tron:          "a Tron wallet (TronLink and the like): import it as a private key",
+	}[c]
+	fmt.Println()
+	fmt.Println(" " + ui.Plain.Render("Bait address ") + ui.Bold.Render(address) + ui.Dim.Render(" ("+string(c)+", put out "+at.Local().Format("2 Jan 2006 15:04")+")"))
+	fmt.Println(" " + ui.Plain.Render("Private key  ") + ui.Code.Render(k.PrivateText(c, i)))
+	fmt.Println()
+	fmt.Println(" " + ui.Dim.Render("To get anything sent to it back, use it in "+how+"."))
+	fmt.Println(" " + ui.Dim.Render("Anyone with this key can take what's there: don't share it."))
+	return nil
 }
 
 // testReason is the verdict of the test alert in a few words.
