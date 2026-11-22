@@ -338,14 +338,19 @@ func (g *Guard) snapshot() ([]clipFormat, uint32, error) {
 	total := 0
 	for f := enumFormats(0); f != 0; f = enumFormats(f) {
 		name := formatName(f)
+		if name == "" {
+			name = fmt.Sprintf("format %d", f)
+		}
 		if f != cfText && f != cfOEMText && f != cfUnicodeText && f != cfLocale && !textFormats[name] {
-			if name == "" {
-				name = fmt.Sprintf("format %d", f)
-			}
 			return nil, 0, Skipped("the clipboard holds more than text (" + name + ")")
 		}
 		data, ok := readFormat(f)
+		if !ok && (f == cfText || f == cfOEMText || f == cfLocale) {
+			continue // Windows makes these from the text again when it's put back
+		}
 		if !ok {
+			// Typically: the program that copied it hasn't handed it over yet
+			// (it gives it when asked, and isn't answering).
 			return nil, 0, Skipped("part of the clipboard couldn't be read (" + name + ")")
 		}
 		if total += len(data); total > maxSavedBytes {

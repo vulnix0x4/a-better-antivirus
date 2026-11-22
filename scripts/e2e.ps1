@@ -259,13 +259,16 @@ Aba clipboard on
 WaitReloaded $reloads
 Check (WaitFor { Select-String -Path "$data\service.log" -Pattern 'clipboard bait: guarding session' -Quiet } 90) 'a clipboard guard runs in the desktop session'
 $copied = $null
-try { Set-Clipboard -Value 'text the test copied'; $copied = 'text the test copied' } catch { Write-Host "  (no clipboard here: $_)" }
+# clip.exe hands the text over as it copies it. (Set-Clipboard only promises
+# it, to be handed over when asked, and this script is too busy to answer.)
+cmd /c 'echo text the test copied| clip'
+if ($LASTEXITCODE -eq 0) { $copied = 'text the test copied' } else { Write-Host '  (no clipboard here)' }
 Snap
 Aba clipboard test
 $clip = Fresh | Where-Object { $_.test -and $_.baits -and $_.baits[0].access -eq 'swap' } | Select-Object -Last 1
 Check $clip 'the fake clipper was caught swapping the fake wallet address'
 if ($copied) {
-    Check (WaitFor { (Get-Clipboard) -eq $copied } 15) 'the clipboard was put back afterwards'
+    Check (WaitFor { "$(Get-Clipboard)".Trim() -eq $copied } 15) 'the clipboard was put back afterwards'
 }
 $reloads = Reloads
 Aba clipboard off
