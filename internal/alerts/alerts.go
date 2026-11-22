@@ -16,6 +16,7 @@ import (
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/classify"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
+	"github.com/vulnix0x4/a-better-antivirus/internal/origin"
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
 	"github.com/vulnix0x4/a-better-antivirus/internal/provenance"
@@ -54,6 +55,10 @@ type Process struct {
 	Connections []procinfo.Conn   `json:"connections,omitempty"`
 	TreePIDs    []uint32          `json:"treePids,omitempty"`
 	Exited      bool              `json:"exited,omitempty"`
+	// Origin is where it was downloaded from, as the browser marked the file
+	// (or the script it ran, or what started it). The program could have
+	// written that mark itself: it's a lead, not proof.
+	Origin *origin.Origin `json:"origin,omitempty"`
 }
 
 type ActionResult struct {
@@ -227,13 +232,25 @@ func Update(id string, fn func(*Alert)) (*Alert, error) {
 
 // Checklist is what to do after a critical detection.
 func Checklist(a *Alert) []string {
-	steps := []string{
-		"Keep this " + platform.PC + " offline. Don't log in to anything from it until it's cleaned.",
-		"From another device (your phone), change your passwords: email first (it resets everything else), then banking, then anything saved in this " + platform.PC + "'s browsers.",
-		"Log out everywhere: stolen browser cookies keep sessions alive after a password change. Use 'Sign out of all devices' for Google, Microsoft, Discord, Steam, Telegram (Settings > Devices > Terminate all), social media.",
-		"Crypto: move funds to a NEW wallet created on a clean device. Treat every seed phrase this " + platform.PC + " has ever seen as burned.",
-		"Turn on 2FA with an authenticator app (not SMS) for important accounts.",
-		"Run a Microsoft Defender Offline scan, then strongly consider resetting Windows: stealers often drop more malware.",
+	var steps []string
+	if a.Kind == KindClipper {
+		// A clipper changes what you paste; it doesn't need to read files.
+		// What it costs you is a payment sent to the wrong wallet.
+		steps = []string{
+			"Don't send crypto from this " + platform.PC + " until it's cleaned. Anywhere you must paste an address, compare every character with the real one on another device.",
+			"From another device, check your recent crypto transfers. One sent to an address you don't recognise went to the attacker: contact the exchange's or wallet's support right away.",
+			"Clippers often come with a stealer. From another device (your phone), change your passwords, email first, and move crypto to a NEW wallet created on a clean device.",
+			platform.CleanupStep,
+		}
+	} else {
+		steps = []string{
+			"Keep this " + platform.PC + " offline. Don't log in to anything from it until it's cleaned.",
+			"From another device (your phone), change your passwords: email first (it resets everything else), then banking, then anything saved in this " + platform.PC + "'s browsers.",
+			"Log out everywhere: stolen browser cookies keep sessions alive after a password change. Use 'Sign out of all devices' for Google, Microsoft, Discord, Steam, Telegram (Settings > Devices > Terminate all), social media.",
+			"Crypto: move funds to a NEW wallet created on a clean device. Treat every seed phrase this " + platform.PC + " has ever seen as burned.",
+			"Turn on 2FA with an authenticator app (not SMS) for important accounts.",
+			platform.CleanupStep,
+		}
 	}
 	if a.Process != nil && a.Process.SHA256 != "" {
 		steps = append(steps, "Look the file up on VirusTotal from another device: https://www.virustotal.com/gui/file/"+a.Process.SHA256)

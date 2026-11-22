@@ -29,6 +29,7 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/classify"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/detect"
+	"github.com/vulnix0x4/a-better-antivirus/internal/origin"
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
 	"github.com/vulnix0x4/a-better-antivirus/internal/platform"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
@@ -1271,4 +1272,24 @@ func ProcessDetails(pid uint32, p *alerts.Process) {
 	if p.Image != "" {
 		p.SHA256, _ = procinfo.FileSHA256(p.Image)
 	}
+	p.Origin = origin.Find(originCandidates(p)...)
+}
+
+// originCandidates are the files whose download mark says where this came
+// from: the script a runtime runs, the program itself, then what started it
+// (a downloaded installer that unpacked the stealer into Temp).
+func originCandidates(p *alerts.Process) []string {
+	var files []string
+	if classify.ScriptHost(p.Image) {
+		if s, _ := classify.DroppedScript(p.CommandLine); s != "" {
+			files = append(files, s)
+		}
+	}
+	files = append(files, p.Image)
+	for _, par := range p.Parents {
+		if !par.Exited && par.Image != "" {
+			files = append(files, par.Image)
+		}
+	}
+	return files
 }

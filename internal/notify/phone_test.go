@@ -11,6 +11,7 @@ import (
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/alerts"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
+	"github.com/vulnix0x4/a-better-antivirus/internal/origin"
 )
 
 func TestNtfyAndDiscord(t *testing.T) {
@@ -60,4 +61,30 @@ func TestDialCacheFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	conn.Close()
+}
+
+func TestFromAlertNamesTheMachineAndTheDownload(t *testing.T) {
+	old := machineName
+	defer func() { machineName = old }()
+	machineName = func() string { return cleanName("MOMS-LAPTOP\r\nBcc: x") }
+
+	img := "/tmp/x7f3/evil"
+	a := &alerts.Alert{ID: "x", Title: "Bait read by evil", Tier: config.TierCritical,
+		Process: &alerts.Process{PID: 42, Image: img, Origin: &origin.Origin{File: img, URL: "https://cdn.example/evil.zip"}}}
+	m := FromAlert(a)
+	if m.Title != "Bait read by evil (MOMS-LAPTOPBccx)" {
+		t.Fatalf("title: %q", m.Title)
+	}
+	if !strings.Contains(m.Body, "Downloaded from: https://cdn.example/evil.zip\n") {
+		t.Fatalf("body: %q", m.Body)
+	}
+	// Marked on what started it, not on the program: say which file.
+	a.Process.Origin.File = "/home/b/Downloads/setup"
+	if m := FromAlert(a); !strings.Contains(m.Body, "Downloaded from: https://cdn.example/evil.zip (setup)\n") {
+		t.Fatalf("body: %q", m.Body)
+	}
+	machineName = func() string { return "" }
+	if m := FromAlert(a); m.Title != a.Title {
+		t.Fatalf("no name: %q", m.Title)
+	}
 }

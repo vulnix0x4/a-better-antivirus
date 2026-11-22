@@ -50,6 +50,9 @@ func Details(a *alerts.Alert) string {
 			fmt.Fprintln(&b, p.Image)
 		}
 		fmt.Fprintf(&b, "%s: %s\n", vouchLabel, p.Signature)
+		if p.Origin != nil {
+			fmt.Fprintln(&b, p.Origin.Line(p.Image))
+		}
 		if len(p.Parents) > 0 && !p.Parents[0].Exited {
 			fmt.Fprintf(&b, "Started by: %s\n", procBase(p.Parents[0].Image))
 		}

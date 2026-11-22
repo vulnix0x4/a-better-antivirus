@@ -307,7 +307,9 @@ var Catalog = []Spec{
 		Description: "Grabbers copy the whole .ssh folder.",
 		Caveat:      "Goes in your real .ssh folder. ssh never reads this file name, but tools that scan .ssh will trip it.",
 		Files: func(u config.UserInfo) []FileSpec {
-			return []FileSpec{{Path: j(u.Profile, ".ssh", "id_rsa_backup_2023"), Audit: true, Gen: genSSHKey}}
+			// The first name is the one installs from before per-install names had.
+			name := vary(u, "ssh", "id_rsa_backup_2023", "id_rsa.bak", "id_rsa.old", "id_rsa_backup", "id_rsa.orig", "old_id_rsa", "id_rsa_work")
+			return []FileSpec{{Path: j(u.Profile, ".ssh", name), Audit: true, Gen: genSSHKey}}
 		},
 	},
 }
