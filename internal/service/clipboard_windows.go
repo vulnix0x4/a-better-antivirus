@@ -7,6 +7,7 @@ package service
 
 import (
 	"bufio"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -38,6 +39,7 @@ func (s *server) clipboardBait(on bool) {
 	}
 	want := map[uint32]bool{}
 	if on {
+		s.ensureClipboardSeed()
 		ids, err := session.ActiveSessions()
 		if err != nil {
 			s.log.Printf("clipboard bait: listing sessions: %v", err)
@@ -100,7 +102,7 @@ func (s *server) listenClipGuard(h *session.Helper) {
 // configured, like any critical stealer. The guard is keeping it paused
 // meanwhile, so freezing it first isn't a race.
 func (s *server) onClipper(f *clipbait.Finding) {
-	sw := &detect.Swap{Coin: string(f.Coin), Bait: f.Bait, Replacement: f.Replacement, How: f.How, LatencyMS: f.Latency.Milliseconds()}
+	sw := &detect.Swap{Coin: string(f.Coin), Bait: f.Bait, Replacement: f.Replacement, How: f.How, LatencyMS: f.Latency.Milliseconds(), Keyed: f.Keyed}
 	s.log.Printf("clipboard bait: %s bait %s swapped for %q in %v by pid %d (%s)", f.Coin, f.Bait, f.Replacement, f.Latency, f.PID, f.How)
 	if f.PID == 0 {
 		// Swapped for an address, so a clipper is running, but nothing could
@@ -134,5 +136,18 @@ func (s *server) clipboardBaitNow() {
 		if _, err := fmt.Fprintln(h.In, "bait"); err != nil {
 			s.log.Printf("clipboard bait: asking the guard in session %d for a bait: %v", id, err)
 		}
+	}
+}
+
+// ensureClipboardSeed makes the seed the guards make bait addresses from, the
+// first time the bait is on. (Here, not in the guards: there may be several.)
+func (s *server) ensureClipboardSeed() {
+	sec, err := config.LoadSecrets()
+	if err != nil || sec.ClipboardSeed != "" {
+		return
+	}
+	sec.ClipboardSeed = hex.EncodeToString(clipbait.NewSeed())
+	if err := config.SaveSecrets(sec); err != nil {
+		s.log.Printf("clipboard bait: saving the seed: %v (baits will be lookalikes)", err)
 	}
 }

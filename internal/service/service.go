@@ -205,9 +205,12 @@ func (s *server) run(ctx context.Context, ctl <-chan svcctl.Signal) error {
 			fmt.Fprint(h, oa.PID)
 			queues[h.Sum32()%workers] <- oa
 		case c := <-ctl:
-			// `aba clipboard test` asks for a bait now, the same way.
-			if tr := s.PendingTest(); tr != nil && tr.Clipboard {
+			// `aba clipboard test` asks for a bait now, the same way. That's
+			// all it asks for: the health check opens every bait to look at it,
+			// which takes instant freeze off each for a moment.
+			if tr := s.PendingTest(); tr != nil && tr.Clipboard && c == svcctl.CheckNow {
 				s.safe("clipboard test", s.clipboardBaitNow)
+				continue
 			}
 			if c == svcctl.Reload {
 				if err := s.reload(); err != nil {
