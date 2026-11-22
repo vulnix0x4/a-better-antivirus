@@ -81,6 +81,15 @@ func runClipGuard(in io.Reader, out io.Writer, t clipGuardTiming) error {
 	logf := func(format string, a ...any) { say(map[string]string{"log": fmt.Sprintf(format, a...)}) }
 
 	g := &clipbait.Guard{Candidates: clipbait.Suspects, Logf: logf}
+	// Real addresses, whose keys ABA holds (the service makes the seed).
+	if sec, err := config.LoadSecrets(); err == nil {
+		if k := clipbait.KeysFromSeed(sec.ClipboardSeed, paths.DataDir(), logf); k != nil {
+			g.NewBait = k.Bait
+		}
+	}
+	if g.NewBait == nil {
+		logf("clipboard bait: no seed for real addresses yet; using lookalikes (invalid addresses)")
+	}
 	if err := g.Start(); err != nil {
 		return err
 	}

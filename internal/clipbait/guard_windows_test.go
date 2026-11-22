@@ -243,11 +243,13 @@ func envBlock(env []string) ([]uint16, error) {
 func fakeAttacker(role, text string) string {
 	switch {
 	case patterns[Bitcoin].MatchString(text):
-		return Bait(Bitcoin)[:20] + strings.Repeat("z", 14)
+		return Lookalike(Bitcoin)[:20] + strings.Repeat("z", 14)
 	case patterns[BitcoinScript].MatchString(text):
-		return Bait(BitcoinScript)[:20] + strings.Repeat("z", 14)
+		return Lookalike(BitcoinScript)[:20] + strings.Repeat("z", 14)
 	case patterns[Tron].MatchString(text):
-		return Bait(Tron)[:20] + strings.Repeat("z", 14)
+		return Lookalike(Tron)[:20] + strings.Repeat("z", 14)
+	case patterns[BitcoinSegwit].MatchString(text):
+		return Lookalike(BitcoinSegwit)[:28] + strings.Repeat("z", 14)
 	case patterns[Ethereum].MatchString(text):
 		return "0x" + strings.Repeat("0", 38) + "ff"
 	}
@@ -271,6 +273,9 @@ func swapIn(hwnd uintptr, role string) bool {
 	flog("%s: read %q", role, t)
 	if strings.HasSuffix(t, "zzzzzzzzzzzzzz") || strings.HasSuffix(t, "00ff") {
 		return true // ours already
+	}
+	if role == "checker" && !validAddress(t) {
+		return true // a careful clipper: it leaves invalid addresses alone
 	}
 	a := fakeAttacker(role, t)
 	if role == "copier" && t != "" && Looks(t) {
@@ -321,7 +326,7 @@ func fake(role string) {
 		}
 	}
 	switch role {
-	case "window": // the classic: a hidden window Windows notifies of every change
+	case "window", "checker": // the classic: a hidden window Windows notifies of every change
 		h := makeWindow()
 		pAddClipboardFormatListener.Call(h)
 		var m [48]byte
@@ -372,6 +377,19 @@ func fake(role string) {
 		})
 	}
 	select {}
+}
+
+// validAddress: what a clipper that checks checksums would accept.
+func validAddress(s string) bool {
+	switch {
+	case patterns[Ethereum].MatchString(s):
+		return ethValid(s) || strings.ToLower(s) == s
+	case patterns[BitcoinSegwit].MatchString(s):
+		return bech32Valid(s)
+	case Looks(s):
+		return base58Valid(s)
+	}
+	return false
 }
 
 func pids(cs []child) func() []uint32 {
@@ -516,7 +534,7 @@ func TestBaitStaysOutOfHistory(t *testing.T) {
 	g := newGuard(t, &Guard{})
 	var s clipState
 	g.do(func() {
-		if _, err := g.setBait(Bait(Bitcoin), 0); err != nil {
+		if _, err := g.setBait(Lookalike(Bitcoin), 0); err != nil {
 			t.Error(err)
 		}
 	})
@@ -527,4 +545,25 @@ func TestBaitStaysOutOfHistory(t *testing.T) {
 		}
 	}
 	g.do(g.finish)
+}
+
+// A clipper that checks checksums ignores lookalikes, and falls for real
+// baits: that's why the baits are real addresses.
+func TestCarefulClipperNeedsRealBaits(t *testing.T) {
+	g := newGuard(t, &Guard{})
+	cs := start(t, "checker")
+	g.Candidates = pids(cs)
+	g.put(t, "a shopping list")
+	if f, err := g.Cycle(Bitcoin); f != nil || err != nil {
+		t.Fatalf("a careful clipper swapped a lookalike: %+v, %v", f, err)
+	}
+	keys := &Keys{Seed: NewSeed()}
+	g.NewBait = keys.Bait
+	for _, coin := range []Coin{Bitcoin, Ethereum} {
+		f, err := g.Cycle(coin)
+		if err != nil || f == nil || f.PID != cs[0].pid || !f.Keyed {
+			t.Fatalf("%s: a real bait should catch the careful clipper (pid %d): %+v, %v", coin, cs[0].pid, f, err)
+		}
+		g.Finish()
+	}
 }

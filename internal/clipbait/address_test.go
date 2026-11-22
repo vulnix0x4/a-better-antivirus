@@ -46,36 +46,41 @@ func TestBase58Check(t *testing.T) {
 	}
 }
 
-// Every bait must look real to a clipper and be refused by any wallet.
-func TestBaitsLookRealButAreInvalid(t *testing.T) {
-	for _, c := range Coins {
+// A lookalike must look real to a clipper and be refused by any wallet.
+func TestLookalikesLookRealButAreInvalid(t *testing.T) {
+	for _, c := range append(Coins, BitcoinScript) {
 		seen := map[string]bool{}
 		for i := 0; i < 3000; i++ {
-			b := Bait(c)
+			b := Lookalike(c)
 			if !patterns[c].MatchString(b) || !Looks(b) {
-				t.Fatalf("%s bait %q doesn't have the shape clippers look for", c, b)
+				t.Fatalf("%s lookalike %q doesn't have the shape clippers look for", c, b)
 			}
 			if seen[b] {
-				t.Fatalf("%s bait %q came up twice", c, b)
+				t.Fatalf("%s lookalike %q came up twice", c, b)
 			}
 			seen[b] = true
 			switch c {
 			case Ethereum:
 				if ethValid(b) {
-					t.Fatalf("ethereum bait %q has a valid checksum", b)
+					t.Fatalf("ethereum lookalike %q has a valid checksum", b)
 				}
 				if strings.ToLower(b) == b || strings.ToUpper(b[2:]) == b[2:] {
-					t.Fatalf("ethereum bait %q isn't mixed case, so wallets wouldn't check it", b)
+					t.Fatalf("ethereum lookalike %q isn't mixed case, so wallets wouldn't check it", b)
+				}
+			case BitcoinSegwit:
+				if bech32Valid(b) {
+					t.Fatalf("segwit lookalike %q has a valid checksum", b)
 				}
 			default:
 				if base58Valid(b) {
-					t.Fatalf("%s bait %q has a valid checksum", c, b)
+					t.Fatalf("%s lookalike %q has a valid checksum", c, b)
 				}
 			}
 		}
 	}
-	if !strings.HasPrefix(Bait(Tron), "T") || !strings.HasPrefix(Bait(BitcoinScript), "3") || !strings.HasPrefix(Bait(Bitcoin), "1") {
-		t.Fatal("wrong leading character")
+	if !strings.HasPrefix(Lookalike(Tron), "T") || !strings.HasPrefix(Lookalike(BitcoinScript), "3") ||
+		!strings.HasPrefix(Lookalike(Bitcoin), "1") || !strings.HasPrefix(Lookalike(BitcoinSegwit), "bc1q") {
+		t.Fatal("wrong leading characters")
 	}
 }
 

@@ -273,6 +273,7 @@ if ($copied) {
 $reloads = Reloads
 Aba clipboard off
 WaitReloaded $reloads
+Start-Sleep -Seconds 3   # let the guard go, and everything settle, before the next fake stealer
 
 Step 'Real stealer: frozen, blocked, then killed'
 $s1 = Stealer 'stealer1' $desktopBait

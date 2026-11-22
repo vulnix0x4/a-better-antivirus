@@ -18,6 +18,10 @@ import (
 type Secrets struct {
 	Phone  PhoneConfig  `json:"phone"`
 	Canary CanaryConfig `json:"canary"`
+
+	// ClipboardSeed (hex) is what the clipboard bait's addresses and their
+	// keys are made from (see clipbait.Keys).
+	ClipboardSeed string `json:"clipboardSeed,omitempty"`
 }
 
 type PhoneConfig struct {
