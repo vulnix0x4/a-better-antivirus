@@ -317,11 +317,11 @@ func (s *server) reconcileHolds() {
 
 // ---- engine.Ops ----
 
-func (s *server) ImagePath(pid uint32) (string, error)     { return procinfo.ImagePath(pid) }
-func (s *server) UserSession(pid uint32) bool              { return procinfo.UserSession(pid) }
-func (s *server) Elevated(pid uint32) bool                 { return procinfo.Elevated(pid) }
-func (s *server) CreateTime(pid uint32) int64              { t, _ := procinfo.CreateTime(pid); return t }
-func (s *server) Verify(p string) provenance.Result        { return provenance.Verify(p) }
+func (s *server) ImagePath(pid uint32) (string, error) { return procinfo.ImagePath(pid) }
+func (s *server) UserSession(pid uint32) bool          { return procinfo.UserSession(pid) }
+func (s *server) Elevated(pid uint32) bool             { return procinfo.Elevated(pid) }
+func (s *server) CreateTime(pid uint32) int64          { t, _ := procinfo.CreateTime(pid); return t }
+func (s *server) Verify(p string) provenance.Result    { return provenance.Verify(p) }
 func (s *server) SuspendTree(pid uint32) ([]uint32, error) {
 	frozen, err := procinfo.SuspendTree(pid)
 	if err != nil {
