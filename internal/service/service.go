@@ -317,18 +317,12 @@ func (s *server) reconcileHolds() {
 
 // ---- engine.Ops ----
 
-func (s *server) ImagePath(pid uint32) (string, error) { return procinfo.ImagePath(pid) }
-func (s *server) UserSession(pid uint32) bool          { return procinfo.UserSession(pid) }
-func (s *server) Elevated(pid uint32) bool             { return procinfo.Elevated(pid) }
-func (s *server) CreateTime(pid uint32) int64          { t, _ := procinfo.CreateTime(pid); return t }
-func (s *server) Verify(p string) provenance.Result    { return provenance.Verify(p) }
-func (s *server) SuspendTree(pid uint32) ([]uint32, error) {
-	frozen, err := procinfo.SuspendTree(pid)
-	if err != nil {
-		s.log.Printf("freezing pid %d: %v (%d frozen)", pid, err, len(frozen))
-	}
-	return frozen, err
-}
+func (s *server) ImagePath(pid uint32) (string, error)     { return procinfo.ImagePath(pid) }
+func (s *server) UserSession(pid uint32) bool              { return procinfo.UserSession(pid) }
+func (s *server) Elevated(pid uint32) bool                 { return procinfo.Elevated(pid) }
+func (s *server) CreateTime(pid uint32) int64              { t, _ := procinfo.CreateTime(pid); return t }
+func (s *server) Verify(p string) provenance.Result        { return provenance.Verify(p) }
+func (s *server) SuspendTree(pid uint32) ([]uint32, error) { return s.suspendTree(pid) }
 func (s *server) KillTree(pid uint32) error                { return procinfo.KillTree(pid) }
 func (s *server) Forensics(pid uint32, p *alerts.Process)  { engine.ProcessDetails(pid, p) }
 func (s *server) CommandLine(pid uint32) string            { c, _ := procinfo.CommandLine(pid); return c }
@@ -338,6 +332,17 @@ func (s *server) Isolate() error                           { return netguard.Iso
 func (s *server) DisableAdapters() ([]string, error)       { return netguard.DisableAdapters() }
 func (s *server) Ancestors(pid uint32) []procinfo.Ancestor { return procinfo.Ancestors(pid, 6) }
 func (s *server) RunningImage(path string) []uint32        { return procinfo.RunningImage(path) }
+
+// suspendTree freezes pid and what it started, and says in the log why it
+// couldn't, if it couldn't.
+func (s *server) suspendTree(pid uint32) ([]uint32, error) {
+	frozen, err := procinfo.SuspendTree(pid)
+	if err != nil {
+		s.log.Printf("freezing pid %d: %v (%d frozen)", pid, err, len(frozen))
+	}
+	return frozen, err
+}
+
 func (s *server) UpdateState(fn func(*config.State) error) error {
 	return config.UpdateState(fn)
 }
