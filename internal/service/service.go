@@ -495,18 +495,25 @@ func (s *server) decideOpen(path string, at time.Time, pid uint32) bool {
 var (
 	selfHashOnce sync.Once
 	selfHash     string
+	cliHash      string
 	hashCacheMu  sync.Mutex
 	hashCache    = map[string]string{}
 )
 
 // IsSelf reports whether image is a copy of ABA's own executable, by SHA-256.
 // (A path check isn't enough: the CLI may run from Downloads or a build folder.)
+// The installed CLI counts too: on macOS it isn't byte for byte the service's
+// program, because signing the app bundle changes the bundle's main program.
 func (s *server) IsSelf(image string) bool {
-	selfHashOnce.Do(func() { selfHash, _ = procinfo.FileSHA256(s.selfExe) })
-	if selfHash == "" || image == "" {
+	selfHashOnce.Do(func() {
+		selfHash, _ = procinfo.FileSHA256(s.selfExe)
+		cliHash, _ = procinfo.FileSHA256(s.cliExe)
+	})
+	if image == "" {
 		return false
 	}
-	return s.Hash(image) == selfHash
+	h := s.Hash(image)
+	return h != "" && (h == selfHash || h == cliHash)
 }
 
 // Hash returns a file's SHA-256, cached by path, size and modification time.
