@@ -136,6 +136,8 @@ if [ -n "$FFBIN" ]; then
   timeout 90 "$FFBIN" --headless --screenshot "$OUT/ff.png" about:blank >/dev/null 2>&1 || true
   [ -f "$HOME/.mozilla/firefox/profiles.ini" ] && FIREFOX=yes
   [ -f "$HOME/snap/firefox/common/.mozilla/firefox/profiles.ini" ] && FIREFOX=snap
+  [ -f "$HOME/.config/mozilla/firefox/profiles.ini" ] && FIREFOX=xdg
+  ls -d "$HOME"/.mozilla/firefox/* "$HOME"/.config/mozilla/firefox/* "$HOME"/snap/firefox/common/.mozilla/firefox/* 2>/dev/null | sed "s/^/      /"
 fi
 note "a used Firefox profile to plant inside: ${FIREFOX:-no} (${FFBIN:-no firefox} -> $(readlink -f "${FFBIN:-/nonexistent}" 2>/dev/null))"
 
@@ -189,7 +191,7 @@ if [ -n "$CHROME" ]; then
   check "a fake profile inside the real Chrome" test -n "$(bait_file chrome-profile)"
 fi
 if [ -n "$FIREFOX" ]; then
-  FFBAIT=firefox-profile; [ "$FIREFOX" = snap ] && FFBAIT=firefox-snap-profile
+  FFBAIT=firefox-profile; [ "$FIREFOX" = snap ] && FFBAIT=firefox-snap-profile; [ "$FIREFOX" = xdg ] && FFBAIT=firefox-xdg-profile
   check "a fake profile inside the real Firefox" test -n "$(bait_file $FFBAIT)"
   note "$(bait_file $FFBAIT)"
   ffdir=$(dirname "$(bait_file $FFBAIT)")
@@ -216,7 +218,10 @@ say "A scheduled backup, trusted by its exact command"
 # sweep, frozen. Trusted from the alert, that exact command runs from then on;
 # the same words from a script nobody vouches for are still a stealer.
 BACKUP=(/usr/bin/tar cf "$OUT/backup.tar" "$(bait_file vivaldi)" "$(bait_file electrum)" "$(bait_file ssh-key)" "$(bait_file aws)")
-pid=$(launch backup "${BACKUP[@]}") || fail "couldn't start tar"
+# It runs with the PATH cron gives a job: with a folder others can write to on
+# its PATH, tar could be made to run a helper planted there (gzip, for one),
+# so a command started that way isn't trusted (the runner has such a folder).
+pid=$(launch backup /usr/bin/env PATH=/usr/bin:/bin "${BACKUP[@]}") || fail "couldn't start tar"
 a=$(wait_alert ".process.pid == $pid and .tier == \"critical\"") || fail "a backup-like sweep by tar wasn't caught"
 id=$(field "$a" .id)
 r=$(reloads)
@@ -226,7 +231,7 @@ wait_reloaded "$r"
 sudo aba ignore list | grep -q "run in $HOME" || fail "the rule isn't pinned to the folder: $(sudo aba ignore list)"
 count=$(alerts | jq length)
 rm -f "$OUT/backup.tar"
-timeout 60 sudo systemd-run --quiet --wait --collect --uid "$MY_UID" --gid "$MY_GID" --setenv HOME="$HOME" --working-directory "$HOME" "${BACKUP[@]}" \
+timeout 60 sudo systemd-run --quiet --wait --collect --uid "$MY_UID" --gid "$MY_GID" --setenv HOME="$HOME" --setenv PATH=/usr/bin:/bin --working-directory "$HOME" "${BACKUP[@]}" \
   || fail "the trusted backup was stopped: $(alerts | jq -c "last | {tier, reasons: .verdict.reasons, cmd: .process.commandLine, dir: .process.dir}"); rules: $(sudo aba ignore list); $(sudo grep "trust rule" $DATA/service.log | tail -3)"
 test -s "$OUT/backup.tar" || fail "the trusted backup didn't write its archive"
 sleep 1

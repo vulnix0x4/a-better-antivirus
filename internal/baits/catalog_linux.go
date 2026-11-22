@@ -249,6 +249,13 @@ var Catalog = []Spec{
 		func(u config.UserInfo) []string {
 			return []string{"/usr/lib/firefox/firefox", "/usr/lib64/firefox/firefox", "/usr/lib/firefox-esr/firefox-esr", "/opt/firefox/firefox"}
 		}),
+	// (Firefox from 2026 on makes new profiles under ~/.config, the way other
+	// apps keep their data; older installs keep ~/.mozilla.)
+	embeddedFirefox("firefox-xdg-profile", "Firefox", "firefox",
+		func(u config.UserInfo) string { return j(u.RoamingAppData, "mozilla", "firefox") },
+		func(u config.UserInfo) []string {
+			return []string{"/usr/lib/firefox/firefox", "/usr/lib64/firefox/firefox", "/usr/lib/firefox-esr/firefox-esr", "/opt/firefox/firefox"}
+		}),
 	embeddedFirefox("firefox-snap-profile", "Firefox (snap)", "firefox",
 		func(u config.UserInfo) string {
 			return j(u.Profile, "snap", "firefox", "common", ".mozilla", "firefox")

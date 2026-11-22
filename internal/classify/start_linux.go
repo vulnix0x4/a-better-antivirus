@@ -53,14 +53,14 @@ func changesBehaviour(env []string) string {
 			_, val, _ := strings.Cut(kv, "=")
 			for _, d := range strings.Split(val, ":") {
 				if d == "" || !strings.HasPrefix(d, "/") || view.RootOnly == nil {
-					return "PATH"
+					return "PATH with a folder that isn't a full path (" + d + ")"
 				}
 				// A folder that isn't there is fine where only root could make it.
 				if _, err := os.Lstat(d); err != nil && view.RootOnly(filepath.Dir(d)) {
 					continue
 				}
 				if !view.RootOnly(d) {
-					return "PATH"
+					return "PATH with " + d + ", which not only root can write to"
 				}
 			}
 			continue
