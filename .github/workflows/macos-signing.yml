@@ -1,0 +1,41 @@
+name: macOS signing (dry run)
+
+# Run by hand (Actions > macOS signing > Run workflow, on main): builds the
+# macOS release files the way a release does, signed with ABA's Developer ID
+# certificates and notarized by Apple, without publishing anything. The files
+# are kept as the run's artifact. For checking the certificates and the
+# notarization key before a real release depends on them.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sign:
+    runs-on: macos-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Build, sign and notarize (nothing is published)
+        run: bash scripts/release-macos.sh v0.0.0-signing-test dist-macos
+        env:
+          MACOS_APP_CERT: ${{ secrets.MACOS_APP_CERT }}
+          MACOS_APP_CERT_PASSWORD: ${{ secrets.MACOS_APP_CERT_PASSWORD }}
+          MACOS_INSTALLER_CERT: ${{ secrets.MACOS_INSTALLER_CERT }}
+          MACOS_INSTALLER_CERT_PASSWORD: ${{ secrets.MACOS_INSTALLER_CERT_PASSWORD }}
+          NOTARY_KEY: ${{ secrets.NOTARY_KEY }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+      - name: Check what Gatekeeper says
+        run: |
+          spctl --assess --type install --verbose=2 dist-macos/ABA-v0.0.0-signing-test.pkg
+          codesign --verify --strict --verbose=2 dist-macos/aba_v0.0.0-signing-test_darwin_arm64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-signed
+          path: dist-macos
