@@ -231,8 +231,6 @@ func (e *Engine) ownCopy(pid uint32, image string) (self, disguise bool) {
 	return false, true
 }
 
-const disguiseWhy = "it's a copy of ABA's own program reading a bait without admin rights: ABA never does that, so something is using it as a disguise"
-
 // evasive turns v into a critical verdict because of why.
 func evasive(v classify.Verdict, why string) classify.Verdict {
 	return classify.Verdict{Tier: config.TierCritical, Evasion: true, Swept: v.Swept, Reasons: append([]string{why}, v.Reasons...)}
@@ -287,7 +285,7 @@ func (e *Engine) DecideInstantWhy(pid uint32, path string) (bool, string) {
 	}
 	if e.Ops.Elevated(pid) {
 		done(false)
-		return false, image + " runs as administrator"
+		return false, image + asAdmin
 	}
 	sig := e.Ops.Verify(image)
 	v := cls.Final(image, pid, e.baitRef(baitID), sig)
@@ -1260,6 +1258,7 @@ func ProcessDetails(pid uint32, p *alerts.Process) {
 		p.Exited = true
 	}
 	p.CommandLine, _ = procinfo.CommandLine(pid)
+	p.Dir = procinfo.WorkingDir(pid)
 	if snap, err := procinfo.Snapshot(); err == nil {
 		p.Parents = procinfo.ParentChain(snap, pid, 4)
 		p.TreePIDs = procinfo.Tree(snap, pid)

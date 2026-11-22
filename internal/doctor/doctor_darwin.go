@@ -66,3 +66,15 @@ var syncTools = map[string]string{
 	"carbon copy cloner": "Carbon Copy Cloner", "superduper!": "SuperDuper!", "chronosync": "ChronoSync",
 	"rclone": "rclone", "restic": "restic", "borg": "Borg", "kopia": "Kopia", "backupd": "Time Machine",
 }
+
+// What the baits check says about the tripwire on each file. On macOS there's
+// nothing on the file itself: eslogger reports every open, and the service
+// picks out the baits. So there's nothing more for an administrator to check.
+const (
+	lostTripwire = "%d file(s) aren't watched"
+	verifyHint   = ""
+)
+
+// recentFolder: macOS keeps the files you opened in its own lists, not as
+// shortcut files, so there's nothing of that kind to check.
+func recentFolder(u config.UserInfo) string { return "" }

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/vulnix0x4/a-better-antivirus/internal/platform"
 	"os"
 	"path/filepath"
 	"sort"
@@ -45,6 +46,7 @@ type Process struct {
 	PID         uint32            `json:"pid"`
 	Image       string            `json:"image"`
 	CommandLine string            `json:"commandLine,omitempty"`
+	Dir         string            `json:"dir,omitempty"` // the folder it ran in, where the system shows that
 	User        string            `json:"user,omitempty"`
 	SHA256      string            `json:"sha256,omitempty"`
 	Signature   provenance.Result `json:"signature"`
@@ -226,10 +228,10 @@ func Update(id string, fn func(*Alert)) (*Alert, error) {
 // Checklist is what to do after a critical detection.
 func Checklist(a *Alert) []string {
 	steps := []string{
-		"Keep this PC offline. Don't log in to anything from it until it's cleaned.",
-		"From another device (your phone), change your passwords: email first (it resets everything else), then banking, then anything saved in this PC's browsers.",
+		"Keep this " + platform.PC + " offline. Don't log in to anything from it until it's cleaned.",
+		"From another device (your phone), change your passwords: email first (it resets everything else), then banking, then anything saved in this " + platform.PC + "'s browsers.",
 		"Log out everywhere: stolen browser cookies keep sessions alive after a password change. Use 'Sign out of all devices' for Google, Microsoft, Discord, Steam, Telegram (Settings > Devices > Terminate all), social media.",
-		"Crypto: move funds to a NEW wallet created on a clean device. Treat every seed phrase this PC has ever seen as burned.",
+		"Crypto: move funds to a NEW wallet created on a clean device. Treat every seed phrase this " + platform.PC + " has ever seen as burned.",
 		"Turn on 2FA with an authenticator app (not SMS) for important accounts.",
 		"Run a Microsoft Defender Offline scan, then strongly consider resetting Windows: stealers often drop more malware.",
 	}

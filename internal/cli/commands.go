@@ -355,7 +355,7 @@ func runTest() error {
 	fmt.Println(ui.Banner("safe test"))
 	fmt.Println()
 	fmt.Println(" " + ui.Plain.Render("A harmless copy of ABA in your Temp folder is about to read ") + ui.Bold.Render(baitName) + ui.Plain.Render(","))
-	fmt.Println(" " + ui.Plain.Render("exactly the way a stealer would. Nothing leaves your PC and your network isn't touched."))
+	fmt.Println(" " + ui.Plain.Render(words.testNetwork))
 	fmt.Println()
 	fmt.Println(" " + ui.Good.Render(ui.IconArr) + ui.Dim.Render(" Running the fake stealer…"))
 
@@ -586,9 +586,9 @@ func learnCmd() *cobra.Command {
 			for i, s := range sugg {
 				label := fmt.Sprintf("%-9s %3d× %s", s.tier, s.count, ui.TruncateMiddle(s.rule.Path, 70))
 				if s.rule.Signer != "" {
-					label += ui.Dim.Render("  signed: " + s.rule.Signer)
+					label += ui.Dim.Render(words.signed + s.rule.Signer)
 				} else {
-					label += ui.Bad.Render("  UNSIGNED")
+					label += ui.Bad.Render(words.unsigned)
 				}
 				label += ui.Fainter.Render("  (" + trust.Describe(s.rule, names) + ")")
 				opts = append(opts, huh.NewOption(label, i).Selected(s.tier == config.TierInfo && s.rule.Signer != ""))
@@ -601,7 +601,7 @@ func learnCmd() *cobra.Command {
 			}
 			var pick []int
 			if err := huh.NewMultiSelect[int]().Title("Ignore which programs from now on?").
-				Description("Only ignore software you recognise. Unsigned programs are almost never safe to ignore.").
+				Description(words.learnWarning).
 				Options(opts...).Value(&pick).WithTheme(theme()).Run(); err != nil || len(pick) == 0 {
 				fmt.Println(ui.Dim.Render("No changes."))
 				return nil
@@ -636,7 +636,7 @@ func ignoreCmd() *cobra.Command {
 				return err
 			}
 			if len(cfg.Ignore) == 0 {
-				fmt.Println(ui.Dim.Render("No ignore rules (Defender and Windows Search are always ignored)."))
+				fmt.Println(ui.Dim.Render(words.noRules))
 				return nil
 			}
 			names := baitNames()
@@ -650,7 +650,7 @@ func ignoreCmd() *cobra.Command {
 	var tricks bool
 	add := &cobra.Command{
 		Use: "add <path-pattern>", Short: "Ignore a program (globs: * within a folder, ** across folders)",
-		Example: `  aba ignore add "C:\Program Files\Backblaze\bztransmit64.exe" --signer Backblaze`,
+		Example: words.ignoreExample,
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireAdmin(); err != nil {
@@ -701,7 +701,7 @@ func tricksRuleProblem(pattern, signer string, tricks bool) string {
 		return ""
 	}
 	if (&classify.Classifier{Env: classify.DefaultEnv()}).UserWritable(pattern) {
-		return "--allow-tricks needs --signer for a program outside Program Files and Windows: anything could be put at that path later"
+		return words.tricks
 	}
 	return ""
 }
@@ -746,7 +746,7 @@ func baitCmd() *cobra.Command {
 		},
 	})
 	c.AddCommand(&cobra.Command{
-		Use: "catalog", Short: "Every bait ABA knows and whether it fits this PC",
+		Use: "catalog", Short: words.catalogShort,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if svcState, _ := svcctl.Status(); svcState != svcctl.NotInstalled {
 				if err := requireAdmin(); err != nil { // which ones are planted is admin-only
@@ -856,7 +856,7 @@ func baitCmd() *cobra.Command {
 		},
 	})
 	c.AddCommand(&cobra.Command{
-		Use: "rename", Short: "Give the baits new file names, this PC's own",
+		Use: "rename", Short: words.renameShort,
 		Long: "ABA is open source, so the names it gives baits are no secret: every install picks its own from what file\n" +
 			"grabbers look for. This picks again: baits whose name changes are removed and planted under the new one.\n" +
 			"Baits you added yourself, and fake profiles inside your browsers, stay where they are.",
@@ -1021,10 +1021,10 @@ func notifyCmd() *cobra.Command {
 func demoAlert() *alerts.Alert {
 	a := &alerts.Alert{
 		ID: "DEMO", Time: time.Now(), Kind: alerts.KindRead, Tier: config.TierCritical,
-		Title:   "Possible stealer: FreeRobux.exe read your bait",
-		Summary: `DEMO: unsigned program running from a user-writable folder (C:\Users\you\Downloads): typical of stealers`,
-		Baits:   []alerts.BaitHit{{Name: "passwords.txt on the Desktop", Path: `C:\Users\you\Desktop\passwords.txt`, Access: "read", Time: time.Now()}},
-		Process: &alerts.Process{PID: 4242, Image: `C:\Users\you\Downloads\FreeRobux.exe`},
+		Title:   words.demoTitle,
+		Summary: words.demoSummary,
+		Baits:   []alerts.BaitHit{{Name: "passwords.txt on the Desktop", Path: words.demoBait, Access: "read", Time: time.Now()}},
+		Process: &alerts.Process{PID: 4242, Image: words.demoImage},
 	}
 	a.AddAction(config.ActionFreeze, nil, "1 process(es) frozen")
 	a.AddAction(config.ActionBlockProgram, nil, "")
@@ -1037,10 +1037,8 @@ func instantCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "instant [on|off]",
 		Short: "Freeze readers the moment they open a bait",
-		Long: "Instant freeze holds every bait with a Windows oplock. When a program opens one, Windows\n" +
-			"pauses it inside the open; ABA works out who it is and, if it's suspicious, freezes it\n" +
-			"before it reads anything. The normal detection keeps running as a backup.",
-		Args: cobra.MaximumNArgs(1),
+		Long:  words.instantLong,
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireAdmin(); err != nil {
 				return err

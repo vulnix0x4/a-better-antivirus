@@ -54,6 +54,26 @@ $env:ABA_ARGS = 'install --yes --preset strict --learning 0'; irm https://raw.gi
 
 Despite the name, **keep Windows Defender on.** Antivirus tries to stop malware from running; ABA is the tripwire for when something gets past it, and that's the part antivirus is bad at.
 
+## Linux
+
+ABA runs on Linux too: desktops, servers and developer machines with systemd, amd64 and arm64. In a terminal:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/vulnix0x4/a-better-antivirus/main/install.sh | sh
+```
+
+It downloads the latest release for your machine, checks that its `SHA256SUMS-linux.txt` is signed with ABA's release key (the same key the automatic updates check) and that the download matches it, and runs `sudo aba install` ([read the script first](install.sh) if you like). Or download the `.deb`, `.rpm` or `.tar.gz` from [Releases](https://github.com/vulnix0x4/a-better-antivirus/releases/latest), install it, and run `sudo aba install`. Removing the package takes ABA off the machine again; `aba update` and automatic updates work as on Windows.
+
+What's different from Windows:
+
+- **Noticing and freezing.** The kernel tells ABA the moment any program opens a bait (fanotify) and holds that program inside the open until ABA has looked at it, so a stealer is frozen before it reads a byte. It's frozen in a control group that nothing running as you can thaw. A deleted, renamed or replaced bait is noticed at once too, with whoever did it, and put back.
+- **Who made a program.** Linux has no code signatures, so ABA goes by the package that owns the file, in a folder only root can write to, and by what started it: `cat` typed in your terminal is a warning, the same `cat` run by a script from a downloaded package is a stealer.
+- **Cutting the internet.** A stealer's program is moved into a control group whose traffic the kernel's firewall (nftables) drops, loopback included, along with anything that starts that program later. Isolation drops every new connection except ABA's own phone alert, and keeps connections that were already open (your SSH session to a server survives, so you can still `sudo aba release` it). Both stay in place when the service stops or the machine restarts, until you release them. A program the system itself provides (bash, python3, cat) is never cut off for every program on the machine: what ABA froze of it stays frozen.
+- **Alerts.** A desktop notification with the same choices as the Windows popup, where your desktop shows buttons on notifications; answering one asks for your password. A server with nobody at a desktop gets the phone alert, the log, and a line in the terminal of the program that was frozen.
+- **Trusting a scheduled backup.** A `tar` or `rsync` of your home folder started by cron or a systemd timer looks like a sweep. `sudo aba trust <id>` trusts that exact command, in its folder, and only when it's started the way it was: the same words from a script nobody vouches for are still a stealer.
+
+Not supported on Linux yet: machines without systemd, protecting root's own account, network cut-off without nftables (old or stripped-down kernels, and containers that may not change the host's firewall: ABA still freezes there, and says so in `aba doctor`), cutting off programs that run inside containers, and Firefox profiles that live elsewhere than the package's, the snap's or the flatpak's usual folder.
+
 ## Why this works
 
 Infostealers (Lumma, RedLine, Vidar, StealC…) are the most common malware on personal PCs. They sweep your browsers, wallets, Discord/Telegram sessions and documents, zip it all up and upload it, usually within seconds. Most of them **collect first and upload at the end**, and collecting means opening files in known places. ABA puts tripwires in exactly those places.

@@ -92,6 +92,9 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo loginctl enable-linger "$USER" || true
+          # The nft program only to look at what ABA puts in place (ABA itself talks
+          # to the kernel directly).
+          command -v nft >/dev/null || sudo apt-get install -y -qq nftables >/dev/null
           go test -c -o dist/integration.test ./internal/integration
           go test -c -o dist/baits.test ./internal/baits
           sudo env ABA_INTEGRATION=1 ABA_TEST_USER="$USER" ./dist/integration.test -test.v -test.count=1
@@ -105,6 +108,9 @@ jobs:
         run: |
           go build -ldflags "-s -w -X main.version=ci-${{ github.sha }}" -o dist/aba ./cmd/aba
           go build -o dist/grabber ./scripts/grabber
+          go build -o dist/notifyd ./scripts/notifyd
+          # pkexec, for answering a desktop notification with administrator rights.
+          command -v pkexec >/dev/null || sudo apt-get install -y -qq pkexec >/dev/null || true
 
       # Every feature on a throwaway machine: install as a systemd service,
       # fake stealers frozen inside their open, kill, legitimate readers let
@@ -112,7 +118,21 @@ jobs:
       # repair, uninstall, and nothing left behind.
       - name: End-to-end
         if: runner.os == 'Linux'
-        run: bash scripts/e2e-linux.sh ./dist/aba ./dist/grabber
+        run: bash scripts/e2e-linux.sh ./dist/aba ./dist/grabber ./dist/notifyd
+
+      # The Linux files a release publishes (.goreleaser-linux.yaml), built the
+      # way the release workflow builds them, short of signing and publishing;
+      # then the checks it makes on them: the .deb installed, set up and
+      # removed, install.sh run against this local copy of the release.
+      - name: Build the Linux release files
+        if: runner.os == 'Linux'
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          version: "~> v2"
+          args: release --snapshot --clean --skip=sign,publish --config .goreleaser-linux.yaml
+      - name: Check the packages and install.sh
+        if: runner.os == 'Linux'
+        run: bash scripts/packages-linux.sh dist-linux
 
       # The release build for macOS, as the release workflow makes it, but
       # nothing published or signed.

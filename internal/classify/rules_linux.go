@@ -29,6 +29,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -238,6 +239,7 @@ type procView struct {
 	Started  func(pid uint32) int64 // 0 once it's gone
 	Verify   func(path string) provenance.Result
 	RootOnly func(path string) bool
+	Environ  func(pid uint32) []string // NAME=value
 }
 
 var view = procView{
@@ -259,6 +261,13 @@ var view = procView{
 		return t
 	},
 	Verify: provenance.Verify,
+	Environ: func(pid uint32) []string {
+		b, err := os.ReadFile("/proc/" + strconv.Itoa(int(pid)) + "/environ")
+		if err != nil {
+			return nil
+		}
+		return strings.Split(strings.TrimRight(string(b), "\x00"), "\x00")
+	},
 	RootOnly: func(path string) bool {
 		ok, _ := provenance.RootOnly(path)
 		return ok
@@ -553,6 +562,10 @@ type traced struct {
 	image   string
 	at      time.Time
 	o       origin
+	// How it was started, for a rule pinned to a command (see sameStart).
+	links []link
+	cwd   string
+	env   []string
 }
 
 // Remember works out who is behind pid now and keeps the answer for a couple
@@ -579,14 +592,23 @@ func trace(image string, pid uint32) origin {
 			return t.o // it has exited: what was seen while it ran
 		}
 	}
-	o := judge(chain(pid, image), started == 0)
+	links := chain(pid, image)
+	o := judge(links, started == 0)
+	var cwd string
+	var env []string
+	if started != 0 {
+		cwd = view.Cwd(pid)
+		if view.Environ != nil {
+			env = view.Environ(pid)
+		}
+	}
 	traceMu.Lock()
 	for p, x := range traceCache {
 		if time.Since(x.at) > 2*time.Minute {
 			delete(traceCache, p)
 		}
 	}
-	traceCache[pid] = traced{started: started, image: image, at: time.Now(), o: o}
+	traceCache[pid] = traced{started: started, image: image, at: time.Now(), o: o, links: links, cwd: cwd, env: env}
 	traceMu.Unlock()
 	return o
 }

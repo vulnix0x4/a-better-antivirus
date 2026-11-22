@@ -5,6 +5,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 
@@ -169,5 +170,38 @@ func TestPlantingAsTheOwner(t *testing.T) {
 		if _, err := os.Lstat(p); err == nil {
 			t.Errorf("%s should be gone after Remove", p)
 		}
+	}
+}
+
+// A fake profile inside a real Firefox: a folder profiles.ini doesn't list,
+// which Firefox therefore never opens. Once profiles.ini lists it, Firefox
+// has taken it as its own (adopted), and the bait has to go.
+func TestFirefoxProfileInside(t *testing.T) {
+	home := t.TempDir()
+	u := config.UserInfo{Profile: home, RoamingAppData: filepath.Join(home, ".config"), Embedded: map[string]string{}}
+	s, ok := ByID("firefox-profile")
+	if !ok {
+		t.Fatal("no firefox-profile bait")
+	}
+	root := s.Inside(u)
+	os.MkdirAll(filepath.Join(root, "abcd1234.default-release"), 0o700)
+	os.WriteFile(filepath.Join(root, "profiles.ini"), []byte("[Profile0]\nName=default-release\nIsRelative=1\nPath=abcd1234.default-release\nDefault=1\n"), 0o600)
+	name := FreeProfile(s, u)
+	if name == "abcd1234.default-release" || !strings.HasSuffix(name, ".default-release-1") || len(name) != len("abcd1234.default-release-1") {
+		t.Fatalf("FreeProfile = %q", name)
+	}
+	u.Embedded[s.ID] = name
+	files := s.Files(u)
+	if len(files) == 0 || filepath.Dir(files[0].Path) != filepath.Join(root, name) {
+		t.Fatalf("files %+v, want them in %s", files, filepath.Join(root, name))
+	}
+	if Adopted(s, u) {
+		t.Fatal("adopted before profiles.ini lists it")
+	}
+	f, _ := os.OpenFile(filepath.Join(root, "profiles.ini"), os.O_APPEND|os.O_WRONLY, 0)
+	f.WriteString("\n[Profile1]\nName=work\nIsRelative=1\nPath=" + name + "\n")
+	f.Close()
+	if !Adopted(s, u) {
+		t.Fatal("profiles.ini lists it, but it isn't seen as adopted")
 	}
 }

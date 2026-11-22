@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime/debug"
+	"sync"
 	"syscall"
 	"time"
 
@@ -29,6 +30,7 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/detect"
 	"github.com/vulnix0x4/a-better-antivirus/internal/fanwatch"
+	"github.com/vulnix0x4/a-better-antivirus/internal/netguard"
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
 	"github.com/vulnix0x4/a-better-antivirus/internal/provenance"
@@ -84,6 +86,9 @@ func Run(console bool) error {
 			case unix.SIGUSR2:
 				// Right away, not when the main loop gets to it.
 				go s.safe("holds", s.reconcileHolds)
+				if s.net != nil {
+					s.net.Kick() // a program may just have been let back on the network
+				}
 			default:
 				sdNotify("STOPPING=1")
 				cancel()
@@ -123,6 +128,11 @@ func sdNotify(state string) {
 type watchers struct {
 	fan    *fanwatch.Watcher
 	fanErr error
+	net    *netguard.Guard // keeps network cut-offs in force
+	dirs   *fanwatch.Dirs  // the folders baits are in
+
+	repairMu sync.Mutex
+	repairT  *time.Timer
 }
 
 func (s *server) initWatchers() {}
@@ -131,6 +141,10 @@ func (s *server) initWatchers() {}
 func (s *server) prepare() {
 	// Whatever the service writes (its log, the alerts) is root's alone.
 	unix.Umask(0o077)
+	// Network cut-offs and isolation on record come back first: after a
+	// reboot nothing is in place, and the service's own control group (which
+	// isolation lets through) is new after every start.
+	s.net = netguard.StartGuard(s.log.Printf)
 	// Who owns which program is asked while an opener is held: have the
 	// answers ready.
 	provenance.Warm()
@@ -148,6 +162,14 @@ func (s *server) prepare() {
 			s.log.Printf("this kernel has no fanotify permission events: bait opens are reported after the fact, not held")
 		}
 	}
+	if d, err := fanwatch.NewDirs(); err != nil {
+		s.log.Printf("watching bait folders: %v; a deleted bait is noticed at the next check instead", err)
+	} else {
+		d.OnChange, d.Logf = s.onBaitGone, s.log.Printf
+		s.dirs = d
+	}
+	// Why a command trusted by its exact words wasn't taken as the trusted one.
+	classify.StartLog = s.log.Printf
 	if err := procinfo.FreezerStatus(); err != nil {
 		s.log.Printf("freezer: %v; frozen programs will only be stopped (SIGSTOP), which another program of the same user can undo", err)
 	}
@@ -171,23 +193,84 @@ func (s *server) guardCounts() (armed, want int) {
 // baitsChanged is told whenever the set of bait files may have changed (and
 // after every check of the baits): mark what's there now.
 func (s *server) baitsChanged(st *config.State) {
-	if s.fan == nil {
-		return
-	}
-	var files []string
+	var files, all []string
 	for _, bs := range st.Baits {
 		if bs.Status == "retired" {
 			continue
 		}
 		for _, f := range bs.Files {
+			all = append(all, f.Path)
 			if f.Audit {
 				files = append(files, f.Path)
 			}
 		}
 	}
+	if s.dirs != nil {
+		s.mu.Lock()
+		home := ""
+		if s.cfg != nil {
+			home = s.cfg.User.Profile
+		}
+		s.mu.Unlock()
+		for _, err := range s.dirs.Sync(all, home) {
+			s.log.Printf("watching bait folders: %v", err)
+		}
+	}
+	if s.fan == nil {
+		return
+	}
 	for _, err := range s.fan.Sync(files) {
 		s.log.Printf("watching baits: %v", err)
 	}
+}
+
+// onBaitGone hears from the kernel that a bait was deleted, renamed away or
+// replaced, or a folder holding baits was. Whoever did it is reported the way
+// a deletion is everywhere (an alert, no response: deleting isn't stealing),
+// and the baits are put back at once instead of at the next check.
+func (s *server) onBaitGone(c fanwatch.Change) {
+	img := ""
+	if c.PID != 0 {
+		classify.Remember(c.PID)
+		img, _ = procinfo.ImagePath(c.PID)
+	}
+	if img != "" && s.IsSelf(img) && procinfo.Elevated(c.PID) {
+		return // `aba bait remove`, `aba uninstall`: ABA's own tooling, as root
+	}
+	s.log.Printf("bait %s: %s by pid %d (%s)", c.Path, c.What, c.PID, img)
+	if c.PID != 0 {
+		var uid, uname string
+		if id, err := procinfo.UserID(c.PID); err == nil {
+			uid = id
+			if u, err := user.LookupId(id); err == nil {
+				uname = u.Username
+			}
+		}
+		for _, b := range c.Baits {
+			a := &detect.Access{Time: c.At, Op: detect.OpDelete, Path: b, PID: c.PID, Image: img, UserID: uid, User: uname}
+			select {
+			case s.accesses <- a:
+			default:
+			}
+		}
+	}
+	s.repairSoon()
+}
+
+// repairSoon runs a check of the baits in a moment, once for a burst of
+// changes (rm -r of a folder of them).
+func (s *server) repairSoon() {
+	s.repairMu.Lock()
+	defer s.repairMu.Unlock()
+	if s.repairT != nil {
+		return
+	}
+	s.repairT = time.AfterFunc(700*time.Millisecond, func() {
+		s.repairMu.Lock()
+		s.repairT = nil
+		s.repairMu.Unlock()
+		unix.Kill(os.Getpid(), unix.SIGUSR1) // the same as `aba doctor --fix` asking
+	})
 }
 
 // saveProgress: there's no log position to keep on Linux, only the sign of
@@ -204,6 +287,10 @@ func (s *server) startWatching(ctx context.Context) {
 		go s.fan.Run()
 		s.log.Printf("watching baits with fanotify (openers held: %v)", s.fan.Held())
 	}
+	if s.dirs != nil {
+		go s.dirs.Run()
+		s.log.Printf("watching the folders baits are in")
+	}
 	go s.watchEscapes(ctx)
 	s.once1.Do(func() { close(s.listening) })
 }
@@ -211,6 +298,12 @@ func (s *server) startWatching(ctx context.Context) {
 func (s *server) stopWatching() {
 	if s.fan != nil {
 		s.fan.Close()
+	}
+	if s.net != nil {
+		s.net.Close() // what's cut off stays cut off; the next start watches again
+	}
+	if s.dirs != nil {
+		s.dirs.Close()
 	}
 }
 
@@ -336,9 +429,9 @@ func (s *server) watchEscapes(ctx context.Context) {
 var ttyName = regexp.MustCompile(`^/dev/(pts/\d+|tty\d+)$`)
 
 // tellTerminal writes a line to the terminal a just-frozen program runs in.
-// Linux has no alert popups yet, and a command that silently stops in the
-// middle of someone's terminal explains nothing. (It doesn't say which file:
-// that's for `aba alerts`, as root.)
+// A server has no desktop to show an alert on, and a command that silently
+// stops in the middle of someone's terminal explains nothing. (It doesn't say
+// which file: that's for `aba alerts`, as root.)
 func tellTerminal(pid uint32) {
 	for fd := 0; fd <= 2; fd++ {
 		p, err := os.Readlink(fmt.Sprintf("/proc/%d/fd/%d", pid, fd))

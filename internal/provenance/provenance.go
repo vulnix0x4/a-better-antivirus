@@ -23,16 +23,4 @@ type Result struct {
 	Error   string `json:"error,omitempty"`
 }
 
-func (r Result) String() string {
-	switch {
-	case r.Valid:
-		s := "signed by " + r.Signer
-		if r.Catalog {
-			s += " (catalog)"
-		}
-		return s
-	case r.Signed:
-		return "INVALID signature (" + r.Error + ")"
-	}
-	return "unsigned"
-}
+func (r Result) String() string { return describe(r) }

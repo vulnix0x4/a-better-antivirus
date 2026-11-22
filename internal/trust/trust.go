@@ -42,9 +42,18 @@ func Rule(a *alerts.Alert) (rule config.IgnoreRule, why string) {
 	rule.Note = "trusted " + time.Now().Format("2006-01-02") + " from alert " + a.ID
 	if swept {
 		// It went through several apps' data. Trusting that means trusting it
-		// with every bait (a backup tool): only for an ordinary program.
-		if system || classify.ScriptHost(exe) {
+		// with every bait (a backup tool): only for an ordinary program, or
+		// where the system lets one exact command be trusted that way (a
+		// scheduled tar or rsync of your home folder on Linux), in the folder
+		// it ran in.
+		if (system || classify.ScriptHost(exe)) && !classify.SweepTrustable(p.Image) {
 			return config.IgnoreRule{}, exe + " went through several apps' data; that's never trusted for a " + platform.OSName() + " program or script host"
+		}
+		if classify.SweepTrustable(p.Image) {
+			if strings.TrimSpace(p.CommandLine) == "" || p.Dir == "" {
+				return config.IgnoreRule{}, exe + " went through several apps' data, and ABA couldn't see the exact command and the folder it ran in, so trusting it would trust it with anything"
+			}
+			rule.Dir = p.Dir
 		}
 	} else {
 		for _, h := range a.Baits {
@@ -71,7 +80,7 @@ func Rule(a *alerts.Alert) (rule config.IgnoreRule, why string) {
 			hash, _ = procinfo.FileSHA256(p.Image)
 		}
 		if hash == "" {
-			return config.IgnoreRule{}, "ABA couldn't fingerprint " + exe + " (it's unsigned, so it's only trusted by fingerprint)"
+			return config.IgnoreRule{}, "ABA couldn't fingerprint " + exe + " (" + fingerprintWhy + ")"
 		}
 		rule.Path, rule.SHA256 = p.Image, strings.ToLower(hash)
 	}
@@ -93,12 +102,14 @@ func OneClick(a *alerts.Alert) bool {
 func Describe(r config.IgnoreRule, names map[string]string) string {
 	var parts []string
 	switch {
+	case r.CommandLine != "" && r.Dir != "":
+		parts = append(parts, "only this exact command, run in "+r.Dir+": "+r.CommandLine)
 	case r.CommandLine != "":
 		parts = append(parts, "only this exact command: "+r.CommandLine)
 	case r.SHA256 != "":
 		parts = append(parts, "only this exact file (fingerprint "+short(r.SHA256)+"…)")
 	case r.Signer != "":
-		parts = append(parts, "signed by "+r.Signer)
+		parts = append(parts, vouchedBy+r.Signer)
 	}
 	if len(r.Baits) == 0 {
 		parts = append(parts, "all baits")

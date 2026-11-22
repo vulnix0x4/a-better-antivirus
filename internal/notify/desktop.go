@@ -7,6 +7,7 @@ package notify
 
 import (
 	"fmt"
+	"github.com/vulnix0x4/a-better-antivirus/internal/platform"
 	"strings"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/alerts"
@@ -48,7 +49,7 @@ func Details(a *alerts.Alert) string {
 		if p.Image != "" {
 			fmt.Fprintln(&b, p.Image)
 		}
-		fmt.Fprintf(&b, "Signature: %s\n", p.Signature)
+		fmt.Fprintf(&b, "%s: %s\n", vouchLabel, p.Signature)
 		if len(p.Parents) > 0 && !p.Parents[0].Exited {
 			fmt.Fprintf(&b, "Started by: %s\n", procBase(p.Parents[0].Image))
 		}
@@ -101,7 +102,7 @@ func ShowPopup(a *alerts.Alert, cli string) {
 		}
 		text += "Cancel = Decide later (it stays frozen)" + warnings(a)
 		if isolated {
-			text += "\n\nYour PC is isolated from the network. When it's safe, run `aba release` as admin."
+			text += "\n\nYour " + platform.PC + " is isolated from the network. When it's safe, run `aba release` as admin."
 		}
 		switch messageBox(title, text, mbYesNoCancel|mbIconError) {
 		case idYes:
@@ -116,7 +117,7 @@ func ShowPopup(a *alerts.Alert, cli string) {
 			}
 		}
 	case isolated:
-		text := body + "\nYour PC is isolated from the network (ABA's own alerts still get out).\n\nYes = Restore the internet now (only if you're sure)\nNo = Keep it isolated"
+		text := body + "\nYour " + platform.PC + " is isolated from the network (ABA's own alerts still get out).\n\nYes = Restore the internet now (only if you're sure)\nNo = Keep it isolated"
 		if messageBox(title, text, mbYesNo|mbIconError) == idYes {
 			if cli != "" {
 				RunElevated(cli, "release")

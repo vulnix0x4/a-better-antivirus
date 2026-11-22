@@ -35,3 +35,11 @@ func OSName() string {
 	}
 	return runtime.GOOS
 }
+
+// Capital is s with its first letter capitalised, to start a sentence with.
+func Capital(s string) string {
+	if s == "" || s[0] < 'a' || s[0] > 'z' {
+		return s
+	}
+	return string(s[0]-'a'+'A') + s[1:]
+}
