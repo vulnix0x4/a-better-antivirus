@@ -168,6 +168,8 @@ func (s *server) prepare() {
 		d.OnChange, d.Logf = s.onBaitGone, s.log.Printf
 		s.dirs = d
 	}
+	// Why a command trusted by its exact words wasn't taken as the trusted one.
+	classify.StartLog = s.log.Printf
 	if err := procinfo.FreezerStatus(); err != nil {
 		s.log.Printf("freezer: %v; frozen programs will only be stopped (SIGSTOP), which another program of the same user can undo", err)
 	}

@@ -23,6 +23,8 @@ package classify
 //   - with a library in it that nobody vouches for.
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
@@ -50,7 +52,14 @@ func changesBehaviour(env []string) string {
 			// from folders only root can write to.
 			_, val, _ := strings.Cut(kv, "=")
 			for _, d := range strings.Split(val, ":") {
-				if d == "" || !strings.HasPrefix(d, "/") || view.RootOnly == nil || !view.RootOnly(d) {
+				if d == "" || !strings.HasPrefix(d, "/") || view.RootOnly == nil {
+					return "PATH"
+				}
+				// A folder that isn't there is fine where only root could make it.
+				if _, err := os.Lstat(d); err != nil && view.RootOnly(filepath.Dir(d)) {
+					continue
+				}
+				if !view.RootOnly(d) {
 					return "PATH"
 				}
 			}
@@ -65,34 +74,56 @@ func changesBehaviour(env []string) string {
 	return ""
 }
 
+// StartLog, when set, is told why a command that matches a rule's words
+// wasn't taken as the trusted one (the service log: "why was my backup
+// frozen?").
+var StartLog func(format string, args ...any)
+
 // sameStart reports whether pid was started the way a rule pinned to a
 // command line means (see the top of this file).
 func (c *Classifier) sameStart(r config.IgnoreRule, pid uint32) bool {
+	why := startDiffers(r, pid)
+	if why != "" && StartLog != nil {
+		StartLog("pid %d runs the command of a trust rule (%s), but not the trusted way: %s", pid, r.Note, why)
+	}
+	return why == ""
+}
+
+func startDiffers(r config.IgnoreRule, pid uint32) string {
 	if pid == 0 {
-		return false
+		return "no process"
 	}
-	if r.Dir != "" && view.Cwd(pid) != r.Dir {
-		return false
+	if cwd := view.Cwd(pid); r.Dir != "" && cwd != r.Dir {
+		return "it runs in " + cwd + ", not " + r.Dir
 	}
-	if view.Environ != nil && changesBehaviour(view.Environ(pid)) != "" {
-		return false
+	if view.Environ != nil {
+		if name := changesBehaviour(view.Environ(pid)); name != "" {
+			return "its environment sets " + name
+		}
 	}
 	image := view.Image(pid)
 	if image == "" {
-		return false
+		return "it has exited"
 	}
 	links := chain(pid, image)
-	if len(links) == 0 || links[0].foreign != "" {
-		return false
+	if len(links) == 0 {
+		return "it has exited"
+	}
+	if links[0].foreign != "" {
+		return "it runs code from " + links[0].foreign
 	}
 	for i := 1; i < len(links); i++ {
 		l := &links[i]
 		switch {
-		case !l.rootOnly, l.foreign != "",
-			l.code == codeScript && !l.scriptRO,
-			l.code == codeInput && l.terminal == "":
-			return false
+		case !l.rootOnly:
+			return "it was started by " + l.image + ", which nobody vouches for"
+		case l.foreign != "":
+			return "it was started by " + l.name + ", which runs code from " + l.foreign
+		case l.code == codeScript && !l.scriptRO:
+			return "it was started by " + l.script + ", a script nobody vouches for"
+		case l.code == codeInput && l.terminal == "":
+			return "it was started by " + l.name + " running commands piped into it"
 		}
 	}
-	return true
+	return ""
 }
