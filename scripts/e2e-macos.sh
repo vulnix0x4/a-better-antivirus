@@ -301,12 +301,27 @@ if a=$(wait_alert ".process.pid == $pid"); then
   [ "$(field "$a" .tier)" = critical ] || fail "the copy through Finder is $(field "$a" .tier): $(field "$a" '.verdict.reasons | tostring')"
   check "the fake stealer behind the copy is frozen" frozen "$OUT/f1"
   sudo grep "copied by Finder's helper" "$DATA/service.log" | tail -1 | sed 's/^/      /'
+  # Finder's helper is frozen with it if it's still copying; a small file is
+  # usually copied before the event arrives, and then there's no helper left.
+  if field "$a" '[.actions[]? | select(.action=="freeze") | .detail] | join(" ")' | grep -q DesktopServicesHelper; then
+    ok "Finder's helper was frozen with it, mid-copy"
+  else
+    note "Finder's helper had finished the copy before the freeze: $(field "$a" '[.actions[]? | select(.action=="freeze") | .detail] | join(" ")')"
+  fi
   sudo aba kill "$(field "$a" .id)" >/dev/null
 else
   sudo grep -E "Finder|DesktopServices" "$DATA/service.log" | tail -5 | sed 's/^/      /'
   cat "$OUT/f1" 2>/dev/null | sed 's/^/      /'
   fail "no alert for the fake stealer that had Finder copy a bait"
 fi
+
+say "An ordinary copy through Finder is left alone"
+mkdir -p "$OUT/plain"
+launch /usr/bin/osascript -e "tell application \"Finder\" to duplicate (POSIX file \"$PASSWORDS\" as alias) to folder (POSIX file \"$OUT/plain\" as alias) with replacing" >/dev/null
+a=$(wait_alert '((.process.image // "") | test("osascript$"))') || fail "no record of osascript having Finder copy the bait"
+[ "$(field "$a" .tier)" != critical ] || fail "an AppleScript one-liner having Finder copy a file is critical: $(field "$a" '.verdict.reasons | tostring')"
+[ "$(field "$a" '[.actions[]? | select(.action=="freeze")] | length')" = 0 ] || fail "ABA froze something for an ordinary copy: $(field "$a" '.actions | tostring')"
+ok "a $(field "$a" .tier), nothing frozen ($(field "$a" '.verdict.reasons[0]'))"
 
 # =====================================================================
 say "Strict mode: the whole Mac is cut off, and given back"

@@ -11,7 +11,8 @@ package service
 //
 //   - A copy Finder makes for a script is opened by Finder's helper, not by
 //     the script. Finder's log says who has been driving it (see eswatch),
-//     and the access goes to that program instead.
+//     and the access goes to that program instead, with the helper as its
+//     helper: frozen with it if it's judged a stealer, so the copy stops.
 //   - A short-lived reader (cat, a shell running one line) is often gone by
 //     the time eslogger's report arrives, and so the engine couldn't freeze
 //     what started it. Then the access goes to the nearest program in its
@@ -282,9 +283,14 @@ func (s *server) onEvent(ev eswatch.Event) {
 		s.es.AddAlias(ev.Alias, ev.Path)
 		s.eng.NoteEvasion(pid, fmt.Sprintf(aliasWhy, ev.Alias))
 	}
+	var helpers []uint32
 	if eswatch.IsFinderCopier(ev.Proc) {
 		if p, img, why := s.finderSender(); p != 0 {
 			s.log.Printf("bait %s was copied by Finder's helper (pid %d) for %s (pid %d), %s", ev.Path, pid, img, p, why)
+			// The helper is frozen with the program that asked for the copy,
+			// if that one is judged a stealer: then the copy stops where it
+			// is. Copies you make yourself are never touched.
+			helpers = []uint32{pid}
 			pid, image = p, img
 		}
 	} else if !procinfo.Alive(pid, 0) {
@@ -300,7 +306,7 @@ func (s *server) onEvent(ev eswatch.Event) {
 	if ev.Op == eswatch.Delete {
 		op = detect.OpDelete
 	}
-	a := &detect.Access{Time: ev.At, Op: op, Path: ev.Path, Alias: ev.Alias, PID: pid, Image: image}
+	a := &detect.Access{Time: ev.At, Op: op, Path: ev.Path, Alias: ev.Alias, PID: pid, Image: image, Helpers: helpers}
 	if ev.Op == eswatch.Link {
 		a.Alias = ev.Alias
 	}
