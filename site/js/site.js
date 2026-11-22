@@ -356,16 +356,16 @@
         cls = "heist-modal is-escape";
         var chromeOnly = S.loot.some(function (li) { return li.getAttribute("data-hint") === "profiles"; });
         head = "You got away.";
-        body = "That's ABA's real limit, and the README says so: a stealer that only takes real data and never touches a bait doesn't trip it." +
+        body = "That's ABA's real limit: a stealer that only takes real files and never touches a bait won't trip it." +
           (chromeOnly ? " Reading Chrome's own list of profiles, like you did, is exactly how one could skip Profile 23." : "") +
-          " Most stealers grab everything they know at once, which is what ABA counts on. And it's why you keep Windows Defender on.";
+          " Most infostealers grab everything they can find at once, which is what ABA counts on. It's also why you keep Windows Defender on.";
       }
       modal.className = cls;
       modal.setAttribute("role", "dialog");
       modal.setAttribute("aria-labelledby", "m-big");
       modal.innerHTML =
         '<p class="m-big" id="m-big">' + head + "</p><p>" + body + "</p>" +
-        '<p class="m-stats"><span><b>' + baits + "</b> of " + files.length + " things on Sam's PC were baits</span>" + (S.ms ? "<span>frozen in <b>" + S.ms + " ms</b></span>" : "") + "</p>" +
+        '<p class="m-stats"><span><b>' + baits + "</b> of " + files.length + " items on Sam's PC were baits</span>" + (S.ms ? "<span>frozen in <b>" + S.ms + " ms</b></span>" : "") + "</p>" +
         '<div class="m-btns"><button type="button" class="btn btn-solid btn-sm" data-a="again">Play again</button>' +
         (S.ms ? '<button type="button" class="btn btn-line btn-sm" data-a="share">Share</button>' : "") +
         '<button type="button" class="btn btn-line btn-sm" data-a="see">See the baits</button></div>' +
@@ -385,7 +385,7 @@
       announce.textContent = modal.textContent.slice(0, 200);
     }
     function showAgain() {
-      lootTxt.innerHTML = "Every bait is marked. Each says why it's there.";
+      lootTxt.innerHTML = "Every bait is marked. Click any row to see why it's there.";
       upBtn.hidden = true;
       var again = el("button", "btn btn-solid btn-sm loot-up", "Play again"); again.type = "button";
       again.addEventListener("click", function () { again.remove(); upBtn.hidden = false; reset(); });
