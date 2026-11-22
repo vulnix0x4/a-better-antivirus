@@ -156,13 +156,14 @@ has "Watching baits" sudo aba doctor || fail "aba doctor doesn't report on watch
 launch "$GRABBER" -serve "$PHONE" -out "$OUT/phone" >/dev/null
 printf '{"phone":{"kind":"ntfy","ntfy":{"server":"http://%s","topic":"aba-e2e"}},"canary":{}}' "$PHONE" | base64 | tr -d '\n' | sudo tee "$DATA/secrets.json" >/dev/null
 sudo chmod 600 "$DATA/secrets.json"
-sleep 1
+r=$(reloads); sudo kill -HUP "$(service_pid)" || fail "couldn't tell the service to reload"; wait_reloaded "$r"
 sudo aba phone test || fail "aba phone test"
 wait_until 50 has_line 'POST /aba-e2e | A Better Antivirus test alert' "$OUT/phone" || fail "the test alert didn't reach the phone: $(cat "$OUT/phone" 2>/dev/null)"
 ok "aba phone test reached the phone"
 
 sudo aba bait list | sed 's/^/      /'
-check "no bait in Documents or on the Desktop by default" bash -c "! state | jq -r '.baits[].files[].path' | grep -qE '/(Documents|Desktop)/'"
+state | jq -r '.baits[].files[].path' | grep -qE '/(Documents|Desktop)/' && fail "a bait was planted in Documents or on the Desktop by default"
+ok "no bait in Documents or on the Desktop by default"
 check "the real AWS credentials file isn't faked" test ! -e "$HOME/.aws/credentials"
 PASSWORDS=$(bait_file home-passwords)
 EXODUS=$(bait_file exodus)
