@@ -901,6 +901,14 @@ func baitCmd() *cobra.Command {
 					return exitf("no bait %q", args[0])
 				}
 			}
+			var planted []config.BaitFile // the files ABA made for it, to check afterwards
+			if st, _ := config.LoadState(); st != nil && st.Baits[args[0]] != nil {
+				for _, f := range st.Baits[args[0]].Files {
+					if f.Created {
+						planted = append(planted, f)
+					}
+				}
+			}
 			cfg.Baits = keep
 			if err := config.SaveConfig(cfg); err != nil {
 				return err
@@ -915,6 +923,20 @@ func baitCmd() *cobra.Command {
 				return err
 			}
 			fmt.Println(ui.Good.Render(ui.IconOK) + " removed " + args[0])
+			// ABA only deletes a file it made if it's still exactly as it left it
+			// (else a real app may have moved in): say so when one stays.
+			for _, f := range planted {
+				fi, err := os.Stat(f.Path)
+				if err != nil {
+					continue
+				}
+				why := "it's still there"
+				if fi.Size() != f.Size || !fi.ModTime().Equal(f.ModTime) {
+					why = fmt.Sprintf("it changed after ABA made it, so it may be something else's now (%d bytes, written %s; ABA's was %d bytes, written %s)",
+						fi.Size(), fi.ModTime().UTC().Format(time.RFC3339Nano), f.Size, f.ModTime.UTC().Format(time.RFC3339Nano))
+				}
+				fmt.Println(" " + ui.Warn.Render("!") + " " + ui.Plain.Render("left "+f.Path+" in place: "+why+". Delete it yourself if it's not yours."))
+			}
 			return nil
 		},
 	})
