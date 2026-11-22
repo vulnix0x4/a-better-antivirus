@@ -48,7 +48,18 @@ func TestSubscribeApplicationLog(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	got := make(chan string, 8)
-	go sub.Run(ctx, func(x string) { got <- x })
+	// Close only once Run has returned: Windows reuses a closed handle's
+	// value, and a Run still going would read the next subscription's events.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		sub.Run(ctx, func(x string) {
+			select {
+			case got <- x:
+			case <-ctx.Done():
+			}
+		})
+	}()
 	time.Sleep(200 * time.Millisecond)
 	start := time.Now()
 	l.Info(1, marker)
@@ -57,11 +68,18 @@ func TestSubscribeApplicationLog(t *testing.T) {
 		case x := <-got:
 			if strings.Contains(x, marker) {
 				t.Logf("event delivered in %v", time.Since(start))
+				// The bookmark moves past an event once fn has returned and
+				// the batch is done, a moment after fn hands it to us here.
 				bm := sub.BookmarkXML()
+				for wait := time.Now(); !strings.Contains(bm, "RecordId") && time.Since(wait) < 5*time.Second; {
+					time.Sleep(10 * time.Millisecond)
+					bm = sub.BookmarkXML()
+				}
 				if !strings.Contains(bm, "RecordId") {
 					t.Fatalf("bookmark not advanced: %q", bm)
 				}
 				cancel()
+				<-done
 				sub.Close()
 				// Resuming from the bookmark must not replay the same event.
 				l.Info(1, marker+"-2")
@@ -69,11 +87,19 @@ func TestSubscribeApplicationLog(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				defer sub2.Close()
 				ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel2()
 				got2 := make(chan string, 8)
-				go sub2.Run(ctx2, func(x string) { got2 <- x })
+				done2 := make(chan struct{})
+				go func() {
+					defer close(done2)
+					sub2.Run(ctx2, func(x string) {
+						select {
+						case got2 <- x:
+						case <-ctx2.Done():
+						}
+					})
+				}()
+				defer func() { cancel2(); <-done2; sub2.Close() }()
 				select {
 				case x := <-got2:
 					if !strings.Contains(x, marker+"-2") {
