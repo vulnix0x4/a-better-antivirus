@@ -213,39 +213,6 @@ grep -q "Frozen" "$OUT/test.txt" || fail "aba test didn't freeze the fake steale
 ok "aba test caught and froze its fake stealer"
 
 # =====================================================================
-say "A scheduled backup, trusted by its exact command"
-# tar of several apps' data, started by the system (as a timer would): a
-# sweep, frozen. Trusted from the alert, that exact command runs from then on;
-# the same words from a script nobody vouches for are still a stealer.
-BACKUP=(/usr/bin/tar cf "$OUT/backup.tar" "$(bait_file vivaldi)" "$(bait_file electrum)" "$(bait_file ssh-key)" "$(bait_file aws)")
-# It runs with the PATH cron gives a job: with a folder others can write to on
-# its PATH, tar could be made to run a helper planted there (gzip, for one),
-# so a command started that way isn't trusted (the runner has such a folder).
-pid=$(launch backup /usr/bin/env PATH=/usr/bin:/bin "${BACKUP[@]}") || fail "couldn't start tar"
-a=$(wait_alert ".process.pid == $pid and .tier == \"critical\"") || fail "a backup-like sweep by tar wasn't caught"
-id=$(field "$a" .id)
-r=$(reloads)
-sudo aba trust "$id" > "$OUT/trust.txt" 2>&1 || { cat "$OUT/trust.txt"; fail "aba trust on the sweep"; }
-sed 's/^/      /' "$OUT/trust.txt"
-wait_reloaded "$r"
-sudo aba ignore list | grep -q "run in $HOME" || fail "the rule isn't pinned to the folder: $(sudo aba ignore list)"
-count=$(alerts | jq length)
-rm -f "$OUT/backup.tar"
-timeout 60 sudo systemd-run --quiet --wait --collect --uid "$MY_UID" --gid "$MY_GID" --setenv HOME="$HOME" --setenv PATH=/usr/bin:/bin --working-directory "$HOME" "${BACKUP[@]}" \
-  || fail "the trusted backup was stopped: $(alerts | jq -c "last | {tier, reasons: .verdict.reasons, cmd: .process.commandLine, dir: .process.dir}"); rules: $(sudo aba ignore list); $(sudo grep "trust rule" $DATA/service.log | tail -3)"
-test -s "$OUT/backup.tar" || fail "the trusted backup didn't write its archive"
-sleep 1
-check "the trusted backup ran without a new alert" test "$(alerts | jq length)" = "$count"
-printf '#!/bin/sh\n%s\nsleep 300\n' "$(printf '%q ' "${BACKUP[@]}")" > "$HOME/Downloads/replay.sh"; chmod +x "$HOME/Downloads/replay.sh"
-launch replay "$HOME/Downloads/replay.sh" >/dev/null || fail "couldn't start the replay"
-a=$(wait_alert '((.process.image // "") | test("/tar$")) and .tier == "critical" and (.verdict.reasons | join(" ") | test("replay.sh"))') \
-  || fail "the backup's exact words, run by a script from Downloads, weren't caught"
-ok "the same words from a script nobody vouches for: frozen ($(field "$a" '[.verdict.reasons[] | select(test("replay.sh"))][0]' | cut -c1-110))"
-sudo aba kill "$(field "$a" .id)" >/dev/null
-rm -f "$HOME/Downloads/replay.sh"
-
-
-# =====================================================================
 say "A fake stealer opens a bait"
 install -m 755 "$GRABBER" "$HOME/Downloads/free-game"
 pid=$(launch stealer "$HOME/Downloads/free-game" -child -out "$OUT/s1" "$PASSWORDS") || fail "couldn't start the fake stealer"
@@ -276,14 +243,14 @@ ok "the stealer and what it started are gone"
 # =====================================================================
 say "Legitimate readers are let through"
 # An installed program (git), started by the system: a note in the history.
-sudo systemd-run --quiet --wait --collect --uid "$MY_UID" --gid "$MY_GID" /usr/bin/git hash-object "$PASSWORDS" > "$OUT/git.txt" 2>&1 \
+timeout 60 sudo systemd-run --quiet --wait --collect --uid "$MY_UID" --gid "$MY_GID" /usr/bin/git hash-object "$PASSWORDS" > "$OUT/git.txt" 2>&1 \
   || { cat "$OUT/git.txt"; fail "a package-owned program couldn't read the bait"; }
 a=$(wait_alert '((.process.image // "") | test("/git$")) and .kind == "read"') || fail "no record of git reading the bait"
 [ "$(field "$a" .tier)" = info ] || fail "git reading a bait is $(field "$a" .tier), want info: $(field "$a" '.verdict.reasons | tostring')"
 [ "$(field "$a" '.actions | length')" = 0 ] || fail "ABA acted on git: $(field "$a" '.actions | tostring')"
 ok "git (package-owned) read the bait: noted, not touched ($(field "$a" '.verdict.reasons | join("; ")'))"
 # A file tool with nothing suspicious behind it: a warning, not a freeze.
-sudo systemd-run --quiet --wait --collect --uid "$MY_UID" --gid "$MY_GID" /usr/bin/cat "$PASSWORDS" > /dev/null 2>&1 || fail "cat couldn't read the bait"
+timeout 60 sudo systemd-run --quiet --wait --collect --uid "$MY_UID" --gid "$MY_GID" /usr/bin/cat "$PASSWORDS" > /dev/null 2>&1 || fail "cat couldn't read the bait"
 a=$(wait_alert '((.process.image // "") | test("/cat$")) and .tier == "warn"') || fail "no warning for cat reading the bait"
 [ "$(field "$a" '.actions | length')" = 0 ] || fail "ABA acted on cat: $(field "$a" '.actions | tostring')"
 ok "cat, started by the system: a warning, not touched ($(field "$a" '.verdict.reasons[0]'))"
@@ -432,6 +399,38 @@ a=$(wait_alert ".process.pid == $pid and .tier == \"critical\"") || fail "a swee
 frozen "$pid" || fail "the sweeping program wasn't frozen"
 ok "frozen at the third app's data ($(field "$a" '.verdict.swept | join(", ")'))"
 sudo aba kill "$(field "$a" .id)" >/dev/null || fail "aba kill"
+
+say "A scheduled backup, trusted by its exact command"
+# tar of several apps' data, started by the system (as a timer would): a
+# sweep, frozen. Trusted from the alert, that exact command runs from then on;
+# the same words from a script nobody vouches for are still a stealer.
+BACKUP=(/usr/bin/tar cf "$OUT/backup.tar" "$(bait_file vivaldi)" "$(bait_file electrum)" "$(bait_file ssh-key)" "$(bait_file aws)")
+# It runs with the PATH cron gives a job: with a folder others can write to on
+# its PATH, tar could be made to run a helper planted there (gzip, for one),
+# so a command started that way isn't trusted (the runner has such a folder).
+pid=$(launch backup /usr/bin/env PATH=/usr/bin:/bin "${BACKUP[@]}") || fail "couldn't start tar"
+a=$(wait_alert ".process.pid == $pid and .tier == \"critical\"") || fail "a backup-like sweep by tar wasn't caught"
+id=$(field "$a" .id)
+r=$(reloads)
+sudo aba trust "$id" > "$OUT/trust.txt" 2>&1 || { cat "$OUT/trust.txt"; fail "aba trust on the sweep"; }
+sed 's/^/      /' "$OUT/trust.txt"
+wait_reloaded "$r"
+sudo aba ignore list | grep -q "run in $HOME" || fail "the rule isn't pinned to the folder: $(sudo aba ignore list)"
+count=$(alerts | jq length)
+rm -f "$OUT/backup.tar"
+timeout 60 sudo systemd-run --quiet --wait --collect --uid "$MY_UID" --gid "$MY_GID" --setenv HOME="$HOME" --setenv PATH=/usr/bin:/bin --working-directory "$HOME" "${BACKUP[@]}" \
+  || fail "the trusted backup was stopped: $(alerts | jq -c "last | {tier, reasons: .verdict.reasons, cmd: .process.commandLine, dir: .process.dir}"); rules: $(sudo aba ignore list); $(sudo grep "trust rule" $DATA/service.log | tail -3)"
+test -s "$OUT/backup.tar" || fail "the trusted backup didn't write its archive"
+sleep 1
+check "the trusted backup ran without a new alert" test "$(alerts | jq length)" = "$count"
+printf '#!/bin/sh\n%s\nsleep 300\n' "$(printf '%q ' "${BACKUP[@]}")" > "$HOME/Downloads/replay.sh"; chmod +x "$HOME/Downloads/replay.sh"
+launch replay "$HOME/Downloads/replay.sh" >/dev/null || fail "couldn't start the replay"
+a=$(wait_alert '((.process.image // "") | test("/tar$")) and .tier == "critical" and (.verdict.reasons | join(" ") | test("replay.sh"))') \
+  || fail "the backup's exact words, run by a script from Downloads, weren't caught"
+ok "the same words from a script nobody vouches for: frozen ($(field "$a" '[.verdict.reasons[] | select(test("replay.sh"))][0]' | cut -c1-110))"
+sudo aba kill "$(field "$a" .id)" >/dev/null
+rm -f "$HOME/Downloads/replay.sh"
+
 
 say "A trick: reading a bait through a hard link"
 # (The link is made next to the -out file: in the home folder, on the bait's file system.)
