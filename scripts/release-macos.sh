@@ -194,13 +194,19 @@ if [ -n "$SIGNED" ] && [ -n "${NOTARY_KEY:-}" ]; then
 elif [ -n "$SIGNED" ]; then
   echo "no notarization key: signed, but not notarized"
 fi
+# The same package under a name that never changes, for a link that always
+# gets the newest one (releases/latest/download/ABA-macOS.pkg), like
+# ABA-Setup.exe on Windows. Copied after stapling, so it carries the ticket.
+if [ -n "$SIGNED" ]; then
+  cp "$PKG" "$OUT/ABA-macOS.pkg"
+fi
 
 # ---- the checksum list ----
 say "Checksums"
 (
   cd "$OUT"
   files=(aba_${TAG}_darwin_arm64 aba_${TAG}_darwin_amd64)
-  [ -n "$SIGNED" ] && files+=("ABA-$TAG.pkg")
+  [ -n "$SIGNED" ] && files+=("ABA-$TAG.pkg" "ABA-macOS.pkg")
   shasum -a 256 "${files[@]}" > SHA256SUMS-macos.txt
   cat SHA256SUMS-macos.txt
 )
@@ -214,6 +220,6 @@ if [ "$UPLOAD" = --upload ]; then
   say "Uploading to the release $TAG"
   [ -n "${ABA_SIGNING_KEY:-}" ] || { echo "refusing to publish an unsigned checksum list"; exit 1; }
   files=("$OUT"/aba_${TAG}_darwin_* "$OUT/SHA256SUMS-macos.txt" "$OUT/SHA256SUMS-macos.txt.sig")
-  [ -n "$SIGNED" ] && files+=("$PKG")
+  [ -n "$SIGNED" ] && files+=("$PKG" "$OUT/ABA-macOS.pkg")
   gh release upload "$TAG" "${files[@]}" --clobber
 fi
