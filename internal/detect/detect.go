@@ -46,6 +46,7 @@ type Swap struct {
 	Replacement string // what the program put there instead: the attacker's address ("" if it only wiped it)
 	How         string // how the program was pinned down
 	LatencyMS   int64  // how quickly it swapped
+	Keyed       bool   // the bait was a real address whose key ABA holds
 }
 
 // Access is one program touching one bait.

@@ -1214,7 +1214,11 @@ func swapVerdict(sw *detect.Swap) classify.Verdict {
 	if sw.Replacement != "" {
 		reasons = append(reasons, "the address it swapped in (the attacker's): "+sw.Replacement)
 	}
-	reasons = append(reasons, "the fake address: "+sw.Bait+" (it's invalid on purpose: no wallet accepts it)")
+	if sw.Keyed {
+		reasons = append(reasons, "the bait address: "+sw.Bait+" (a real one, whose key ABA holds: anything sent to it isn't lost, see `aba clipboard key`)")
+	} else {
+		reasons = append(reasons, "the bait address: "+sw.Bait+" (invalid on purpose: no wallet accepts it)")
+	}
 	return classify.Verdict{Tier: config.TierCritical, Reasons: reasons}
 }
 

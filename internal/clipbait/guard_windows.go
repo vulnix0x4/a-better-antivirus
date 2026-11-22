@@ -118,6 +118,8 @@ type Finding struct {
 	Held bool `json:"held,omitempty"`
 	// Interrupted: someone started using the PC midway, so the search stopped.
 	Interrupted bool `json:"interrupted,omitempty"`
+	// Keyed: the bait was a real address whose key ABA holds (not a lookalike).
+	Keyed bool `json:"keyed,omitempty"`
 }
 
 // Guard puts baits on the clipboard of the session it runs in. Its methods
@@ -135,6 +137,9 @@ type Guard struct {
 	// Window is how long a bait waits for a swap; Confirm how long each step
 	// of proving a program is the clipper waits.
 	Window, Confirm time.Duration
+	// NewBait makes the address for each bait: Keys.Bait, for real addresses
+	// whose keys ABA holds. Nil: lookalikes (invalid addresses; see Lookalike).
+	NewBait func(Coin) string
 
 	onThread func() error // tests: put the thread on a private desktop
 
@@ -283,7 +288,7 @@ func (g *Guard) cycle(c Coin) (*Finding, error) {
 		return nil, err
 	}
 	g.saved, g.have = saved, true
-	bait := Bait(c)
+	bait := g.newBait(c)
 	at, err := g.setBait(bait, start)
 	if err != nil {
 		g.have = false
@@ -303,7 +308,7 @@ func (g *Guard) cycle(c Coin) (*Finding, error) {
 		g.have, g.baits = false, nil
 		return nil, Skipped("something else was copied")
 	}
-	f := &Finding{Time: time.Now(), Coin: c, Bait: bait, Replacement: o.text, Latency: o.latency}
+	f := &Finding{Time: time.Now(), Coin: c, Bait: bait, Replacement: o.text, Latency: o.latency, Keyed: g.NewBait != nil}
 	g.identify(f, o)
 	if f.Replacement == "" && f.PID == 0 {
 		// Wiped, but by nothing that could be pinned down: that alone isn't
@@ -313,6 +318,15 @@ func (g *Guard) cycle(c Coin) (*Finding, error) {
 		return nil, nil
 	}
 	return f, nil
+}
+
+func (g *Guard) newBait(c Coin) string {
+	if g.NewBait != nil {
+		if b := g.NewBait(c); b != "" {
+			return b
+		}
+	}
+	return Lookalike(c)
 }
 
 func (g *Guard) finish() {
@@ -565,7 +579,7 @@ func appendPID(xs []uint32, p uint32) []uint32 {
 // So the Guard opens the clipboard and takes it over first, and pauses the
 // program while it has the clipboard open itself (see takeOver).
 func (g *Guard) pauseTest(pid uint32) (proven, interrupted bool) {
-	bait := Bait(Coins[g.coin%len(Coins)])
+	bait := g.newBait(Coins[g.coin%len(Coins)])
 	g.coin++
 	at, ok := g.takeOver(bait, pid)
 	if !ok {

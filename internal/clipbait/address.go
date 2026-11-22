@@ -7,8 +7,8 @@
 // with another wallet address, so if that happens, a clipper did it; then
 // which program it is gets worked out (see Guard).
 //
-// This file is the part that doesn't depend on the operating system: making
-// fake addresses, and recognising addresses. The clipboard work is Windows
+// This file and wallet.go are the part that doesn't depend on the operating
+// system: making bait addresses, and recognising addresses. The clipboard work is Windows
 // only, in guard_windows.go.
 package clipbait
 
@@ -21,29 +21,30 @@ import (
 	"strings"
 )
 
-// Coin is a kind of address a bait can imitate.
+// Coin is a kind of address a bait can be.
 type Coin string
 
 const (
-	Bitcoin       Coin = "bitcoin"        // 1...  (pay-to-public-key-hash)
-	BitcoinScript Coin = "bitcoin-script" // 3...  (pay-to-script-hash)
-	Ethereum      Coin = "ethereum"       // 0x... (also BNB Chain, Polygon and the like)
-	Tron          Coin = "tron"           // T...  (where most USDT moves)
+	Bitcoin       Coin = "bitcoin"        // 1...   (pay-to-public-key-hash)
+	BitcoinSegwit Coin = "bitcoin-segwit" // bc1q... (pay-to-witness-public-key-hash)
+	BitcoinScript Coin = "bitcoin-script" // 3...   (pay-to-script-hash): recognised, not baited
+	Ethereum      Coin = "ethereum"       // 0x...  (also BNB Chain, Polygon and the like)
+	Tron          Coin = "tron"           // T...   (where most USDT moves)
 )
 
 // Coins is the order baits go through: clippers often only look for some.
-var Coins = []Coin{Bitcoin, Ethereum, Tron, BitcoinScript}
+var Coins = []Coin{Bitcoin, Ethereum, Tron, BitcoinSegwit}
 
-// The patterns clippers use, roughly: they go by shape, never checksums.
+// The patterns clippers use, roughly: they go by shape.
 var patterns = map[Coin]*regexp.Regexp{
 	Bitcoin:       regexp.MustCompile(`^1[1-9A-HJ-NP-Za-km-z]{25,34}$`),
+	BitcoinSegwit: regexp.MustCompile(`^bc1q[02-9ac-hj-np-z]{38}$`),
 	BitcoinScript: regexp.MustCompile(`^3[1-9A-HJ-NP-Za-km-z]{25,34}$`),
 	Ethereum:      regexp.MustCompile(`^0x[0-9a-fA-F]{40}$`),
 	Tron:          regexp.MustCompile(`^T[1-9A-HJ-NP-Za-km-z]{33}$`),
 }
 
-// bech32 Bitcoin addresses (bc1...) are what clippers swap too, but no fake
-// one is made of them: only recognised.
+// Other bech32 Bitcoin addresses (taproot, scripts): only recognised.
 var bech32 = regexp.MustCompile(`^(bc1|BC1)[02-9ac-hj-np-zAC-HJ-NP-Z]{25,87}$`)
 
 // Looks reports whether s, as a whole, is shaped like a wallet address. A
@@ -62,10 +63,11 @@ func Looks(s string) bool {
 	return false
 }
 
-// Bait makes a fresh fake address. It has the shape of a real one, so a
+// Lookalike makes an address that has the shape of a real one, so a
 // clipper's pattern matches it, but a wrong checksum, so every wallet refuses
-// it: if one were ever pasted by mistake, no money could go anywhere.
-func Bait(c Coin) string {
+// it. Real baits come from Keys (valid, and ABA holds their keys); lookalikes
+// are what's used without them, and what the fake clippers in tests swap in.
+func Lookalike(c Coin) string {
 	for {
 		var s string
 		switch c {
@@ -77,6 +79,12 @@ func Bait(c Coin) string {
 			s = base58Bad(0x41)
 		case Ethereum:
 			s = ethBad()
+		case BitcoinSegwit:
+			raw := make([]byte, 20)
+			rand.Read(raw)
+			good := bech32Segwit("bc", 0, raw)
+			last := strings.IndexByte(bech32Charset, good[len(good)-1])
+			s = good[:len(good)-1] + string(bech32Charset[(last+1)%32])
 		default:
 			return ""
 		}
