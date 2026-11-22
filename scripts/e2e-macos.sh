@@ -75,9 +75,11 @@ PIDS=()
 # parent), and print its PID.
 launch() {
   local pf="$OUT/launch.$RANDOM$RANDOM"
-  ( "$@" > /dev/null 2>&1 < /dev/null & echo $! > "$pf" )
-  local pid; pid=$(cat "$pf"); PIDS+=("$pid"); echo "$pid"
+  ( "$@" > "$pf.log" 2>&1 < /dev/null & echo $! > "$pf" )
+  local pid; pid=$(cat "$pf"); PIDS+=("$pid"); ln -sf "$pf.log" "$OUT/output.$pid"; echo "$pid"
 }
+# output PID: what a launched program printed.
+output() { cat "$OUT/output.$1" 2>/dev/null | tail -20 | sed 's/^/      | /'; }
 cleanup() {
   local p
   for p in "${PIDS[@]:-}"; do [ -n "$p" ] && sudo kill -9 "$p" 2>/dev/null; done
@@ -274,6 +276,7 @@ pid=$(launch /usr/bin/python3 -c "$SWEEP" "$OUT/sw""$(bait_file vivaldi)" "$(bai
 echo "$pid" > "$OUT/sw.pid"
 a=$(wait_alert ".process.pid == $pid and .tier == \"critical\"") || fail "a sweep wasn't critical"
 note "$(field "$a" '.verdict.reasons[0]')"
+alive "$pid" || { output "$pid"; fail "python exited by itself"; }
 check "frozen" frozen "$OUT/sw"
 sudo aba kill "$(field "$a" .id)" >/dev/null || fail "aba kill"
 
@@ -286,6 +289,7 @@ pid=$(launch /usr/bin/python3 -c "$LINK" "$OUT/hl" "$PASSWORDS")
 echo "$pid" > "$OUT/hl.pid"
 a=$(wait_alert ".process.pid == $pid and .tier == \"critical\"") || fail "reading a bait through a hard link wasn't critical"
 note "$(field "$a" '.verdict.reasons[0]')"
+alive "$pid" || { output "$pid"; fail "python exited by itself"; }
 check "frozen" frozen "$OUT/hl"
 sudo aba kill "$(field "$a" .id)" >/dev/null || fail "aba kill"
 rm -f "$OUT/hl.lnk"
