@@ -13,7 +13,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -50,12 +50,11 @@ jobs:
         shell: pwsh
         run: ./scripts/e2e.ps1 -Aba ./dist/aba.exe -Medium ./dist/medium.exe -Ghost ./dist/ghost.exe
 
-  # Linux and macOS: everything that builds there. For macOS that's still the
-  # OS-neutral core plus stubs, so its job mostly guards the boundary (see
-  # "Platforms" in CONTRIBUTING.md). Linux has a backend, and GitHub's Linux
-  # runners have passwordless sudo, a real kernel and systemd, so its steps go
-  # on to the real thing, like the Windows job. CGO stays off, like in the
-  # release builds.
+  # Linux and macOS: everything that builds there, then the real thing, like
+  # the Windows job. GitHub's Linux runners have passwordless sudo, a real
+  # kernel and systemd; its macOS runners have passwordless sudo and System
+  # Integrity Protection off, so ABA can be given Full Disk Access there
+  # without a person clicking. CGO stays off, like in the release builds.
   test-unix:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -67,7 +66,7 @@ jobs:
     env:
       CGO_ENABLED: "0"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -126,6 +125,28 @@ jobs:
       - name: Check the packages and install.sh
         if: runner.os == 'Linux'
         run: bash scripts/packages-linux.sh dist-linux
+
+      - name: Build for the end-to-end run (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          go build -ldflags "-s -w -X main.version=ci-${{ github.sha }}" -o dist/aba ./cmd/aba
+          go build -o dist/grabber ./scripts/grabber
+
+      # Every feature on a throwaway Mac: install as a launchd daemon with Full
+      # Disk Access, fake stealers frozen, kill, a tool let through, resume,
+      # trust, release, a sweep, a hard-link trick, a copy made through
+      # Finder, Strict mode's isolation, uninstall, nothing left behind.
+      - name: End-to-end (macOS)
+        if: runner.os == 'macOS'
+        timeout-minutes: 15
+        run: bash scripts/e2e-macos.sh ./dist/aba ./dist/grabber
+
+      - name: Service log (after a failure, macOS)
+        if: failure() && runner.os == 'macOS'
+        run: |
+          sudo tail -n 300 "/Library/Application Support/File Access Monitor/Data/service.log" || true
+          sudo cat "/Library/Application Support/File Access Monitor/Data/crash.log" || true
+          sudo log show --last 10m --predicate 'process == "tccd"' --style compact | grep -i fileaccessmonitor | tail -40 || true
 
       - name: Service log (after a failure)
         if: failure() && runner.os == 'Linux'

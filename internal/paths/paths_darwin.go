@@ -1,27 +1,57 @@
 package paths
 
-// macOS isn't supported yet: this file only lets the rest of ABA build there.
-// Where ABA installs and keeps its data on macOS is for the port to decide.
-// Until then both point at a folder that doesn't exist, so nothing is read or
-// written by accident and ABA reports itself as not installed.
+// Where ABA lives on macOS. Like on Windows and Linux it goes by a neutral
+// name ("File Access Monitor"), in the folder macOS keeps such things in.
+//
+// The program is an app bundle that never shows a window. It's a bundle so
+// that it gets a name and a place in System Settings' Full Disk Access list,
+// which ABA needs (see svcctl_darwin.go): the service runs Apple's eslogger,
+// and macOS only lets a program with Full Disk Access do that.
+
+import (
+	"fmt"
+	"path/filepath"
+
+	"golang.org/x/sys/unix"
+)
 
 const (
-	CLIExe     = "aba"
-	ServiceExe = "famsvc"
+	CLIExe     = "aba"    // what people type; /usr/local/bin/aba links to it
+	ServiceExe = "famsvc" // identical copy the service runs from, the bundle's main program
 
 	// The Mac's file systems ignore case unless a volume was formatted
 	// otherwise.
 	foldCase = true
+
+	// BundleID names the program to macOS (Full Disk Access, launchd).
+	BundleID = "com.fileaccessmonitor.service"
 )
 
-const notPorted = "/nonexistent/aba-not-ported"
+// SupportDir holds everything of ABA's: the app and its data. Only root can
+// write there.
+func SupportDir() string { return "/Library/Application Support/" + ServiceDisplayName }
 
-func InstallDir() string { return notPorted + "/program" }
-func DataDir() string    { return notPorted + "/data" }
+// AppBundle is the program as macOS sees it.
+func AppBundle() string { return filepath.Join(SupportDir(), ServiceDisplayName+".app") }
+
+// InstallDir holds the program files, inside the bundle.
+func InstallDir() string { return filepath.Join(AppBundle(), "Contents", "MacOS") }
+
+// DataDir holds config, state, alerts and the log. Only root can read them:
+// they list every bait and every program you trusted. What `aba` shows
+// without root comes from PublicStatusFile.
+func DataDir() string { return filepath.Join(SupportDir(), "Data") }
 
 // Long has nothing to expand: there are no 8.3 short names here.
 func Long(p string) string { return p }
 
 // FileID identifies the file at p whatever name it's reached by (two hard
-// links to one file have the same ID). Not written for macOS yet.
-func FileID(p string) (string, bool) { return "", false }
+// links to one file have the same ID): its device and inode. It doesn't open
+// the file and doesn't follow a symbolic link at p.
+func FileID(p string) (string, bool) {
+	var st unix.Stat_t
+	if err := unix.Lstat(p, &st); err != nil {
+		return "", false
+	}
+	return fmt.Sprintf("%x:%x", uint64(st.Dev), st.Ino), true
+}

@@ -384,7 +384,7 @@ func remove(bs *config.BaitState) error {
 		// rewrote it (e.g. the real app moved in and saved its own data there),
 		// it's no longer ours: keep it.
 		if f.Created && unchanged(f) {
-			if err := os.Remove(f.Path); err != nil && !errors.Is(err, os.ErrNotExist) && firstErr == nil {
+			if err := removeFile(f.Path); err != nil && !errors.Is(err, os.ErrNotExist) && firstErr == nil {
 				firstErr = err
 			} else if err == nil {
 				// The name stays visible until every handle closes (the service's
@@ -398,6 +398,19 @@ func remove(bs *config.BaitState) error {
 				}
 			}
 		}
+	}
+	if firstErr != nil {
+		// The bait stays on record with what's left of it (see removeFile's
+		// callers): drop the files that are gone, or the next check would take
+		// them for deleted by someone and put them back.
+		left := bs.Files[:0]
+		for _, f := range bs.Files {
+			if _, err := os.Lstat(f.Path); err == nil {
+				left = append(left, f)
+			}
+		}
+		bs.Files = left
+		return firstErr
 	}
 	// A just-deleted file can linger for a moment while another handle on it
 	// closes (e.g. ABA's own instant-freeze guard letting go), so retry briefly.
@@ -413,6 +426,23 @@ func remove(bs *config.BaitState) error {
 		}
 	}
 	return firstErr
+}
+
+// removeFile deletes path, giving a program that has it open a few seconds to
+// let go. On Windows a file can't be deleted while a program has it open
+// without allowing that (most do, e.g. ABA's own guard; many don't, e.g. any
+// Go or C program's plain open), and the bait was often read just before it
+// is removed: by a reader that was frozen, then let go or killed, and is still
+// on its way out.
+func removeFile(path string) error {
+	var err error
+	for try := 0; try < 20; try++ {
+		if err = os.Remove(path); err == nil || errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	return err
 }
 
 // removeEmptyTree deletes dir and empty subdirectories, keeping anything with
