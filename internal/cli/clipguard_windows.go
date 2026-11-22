@@ -20,6 +20,7 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/engine"
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
+	"github.com/vulnix0x4/a-better-antivirus/internal/session"
 	"github.com/vulnix0x4/a-better-antivirus/internal/svcctl"
 	"github.com/vulnix0x4/a-better-antivirus/internal/ui"
 )
@@ -29,6 +30,7 @@ import (
 // service over its standard input and output, one JSON object per line:
 //
 //	out: {"finding": {...}}  a clipper swapped a bait (clipbait.Finding)
+//	     {"test": {...}}     how a bait asked for went, if nothing was caught (clipbait.TestResult)
 //	     {"log": "..."}      for the service's log
 //	in:  done                the service has dealt with the last finding
 //	     bait                put a bait out now (`aba clipboard test`)
@@ -61,6 +63,15 @@ func clipGuardCmds() []*cobra.Command {
 				fmt.Println(did)
 			}
 			return err
+		},
+	}, {
+		// Run by the guard as the person, to save and put back their
+		// clipboard: see clipbait.RunKeeper.
+		Use:    "clipboard-keeper save|restore",
+		Hidden: true,
+		Args:   cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return clipbait.RunKeeper(args[0], os.Stdin, os.Stdout)
 		},
 	}, {
 		Use:    "test-clipper",
@@ -100,6 +111,12 @@ func runClipGuard(in io.Reader, out io.Writer, t clipGuardTiming) error {
 	logf := func(format string, a ...any) { say(map[string]string{"log": fmt.Sprintf(format, a...)}) }
 
 	g := &clipbait.Guard{Candidates: clipbait.Suspects, Logf: logf}
+	if exe, err := os.Executable(); err == nil {
+		g.AsUser = func(args ...string) (*session.Helper, error) { return session.StartAsUser(exe, args...) }
+	}
+	tested := func(result, reason string) {
+		say(map[string]any{"test": clipbait.TestResult{Time: time.Now(), Result: result, Reason: reason}})
+	}
 	// Real addresses, whose keys ABA holds (the service makes the seed).
 	if sec, err := config.LoadSecrets(); err == nil {
 		if k := clipbait.KeysFromSeed(sec.ClipboardSeed, paths.DataDir(), logf); k != nil {
@@ -149,14 +166,26 @@ func runClipGuard(in io.Reader, out io.Writer, t clipGuardTiming) error {
 		case errors.As(err, &skipped):
 			if now {
 				logf("clipboard bait: test: %v", err)
+				tested("skipped", string(skipped))
 			}
 			next = time.Now().Add(spread(t.Every / 4)) // try again sooner
 		case err == nil && f == nil && now:
 			logf("clipboard bait: test: the bait went out and nothing swapped it")
+			tested("untouched", "")
 		case err != nil:
 			logf("clipboard bait: %v", err)
+			if now {
+				tested("error", err.Error())
+			}
 		case f != nil:
 			say(map[string]any{"finding": f})
+			if now && f.PID == 0 {
+				why := ""
+				if f.Interrupted {
+					why = "the mouse or keyboard was used midway"
+				}
+				tested("unproven", why)
+			}
 			// The clipper stays paused (and the bait out) until the service has
 			// frozen it, or decided not to.
 			select {
@@ -170,6 +199,40 @@ func runClipGuard(in io.Reader, out io.Writer, t clipGuardTiming) error {
 			g.Finish()
 		}
 	}
+}
+
+// clipboardTestFailed says why `aba clipboard test` caught nothing, in the
+// guard's own words, and what to do about it.
+func clipboardTestFailed(r *clipbait.TestResult) error {
+	bad := func(s string) { fmt.Println(" " + ui.Bad.Bold(true).Render(ui.IconBad) + " " + ui.Plain.Render(s)) }
+	hint := func(s string) { fmt.Println("   " + ui.Dim.Render(s)) }
+	switch r.Result {
+	case "skipped":
+		bad("No bait went out: " + r.Reason + ".")
+		switch {
+		case strings.Contains(r.Reason, "using the PC"):
+			hint("Run it again, and keep your hands off the mouse and keyboard until it's done.")
+		case strings.Contains(r.Reason, "the clipboard holds"), strings.Contains(r.Reason, "couldn't be read"),
+			strings.Contains(r.Reason, "very large"):
+			hint("ABA only puts a bait over text it can put back exactly. Copy a few words of text and run it again.")
+		default:
+			hint("Run it again in a moment.")
+		}
+	case "unproven":
+		bad("ABA saw the fake clipper swap the bait, but couldn't prove which program did it.")
+		if r.Reason != "" {
+			hint("It stopped because " + r.Reason + ". Run it again, and keep your hands off the mouse and keyboard.")
+		} else {
+			hint("The log says more: " + paths.LogFile())
+		}
+	case "untouched":
+		bad("The bait went out, but the fake clipper didn't swap it.")
+		hint("The log says more: " + paths.LogFile())
+	default:
+		bad("The bait couldn't go out: " + r.Reason + ".")
+		hint("The log says more: " + paths.LogFile())
+	}
+	return exitf("test failed")
 }
 
 // runClipboardTest is `aba clipboard test`: a harmless fake clipper, and a
@@ -210,6 +273,7 @@ func runClipboardTest() error {
 		}
 	}()
 	pid := clipper.PID
+	os.Remove(paths.ClipboardTestFile())
 	tr, _ := json.Marshal(engine.TestRequest{PID: pid, Nonce: strconv.Itoa(int(pid)), Since: time.Now(), Clipboard: true})
 	if err := os.WriteFile(paths.TestFile(), tr, 0o644); err != nil {
 		return err
@@ -222,7 +286,8 @@ func runClipboardTest() error {
 	fmt.Println(" " + ui.Good.Render(ui.IconArr) + ui.Dim.Render(" Bait out…"))
 	start := time.Now()
 	var found *alerts.Alert
-	for time.Since(start) < 30*time.Second && found == nil {
+	var result *clipbait.TestResult
+	for time.Since(start) < 30*time.Second && found == nil && result == nil {
 		time.Sleep(200 * time.Millisecond)
 		list, _ := alerts.List(5)
 		for _, a := range list {
@@ -230,9 +295,20 @@ func runClipboardTest() error {
 				found = a
 			}
 		}
+		if b, err := os.ReadFile(paths.ClipboardTestFile()); err == nil && found == nil {
+			var r clipbait.TestResult
+			if json.Unmarshal(b, &r) == nil && r.Time.After(start.Add(-5*time.Second)) {
+				result = &r
+			}
+		}
 	}
 	clipper.Close()
 	fmt.Println()
+	if result != nil {
+		os.Remove(paths.TestFile())
+		os.Remove(paths.ClipboardTestFile())
+		return clipboardTestFailed(result)
+	}
 	if found == nil {
 		os.Remove(paths.TestFile())
 		fmt.Println(" " + ui.Bad.Bold(true).Render(ui.IconBad) + " " + ui.Plain.Render("ABA didn't catch it within 30 seconds."))

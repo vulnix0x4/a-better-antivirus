@@ -57,6 +57,39 @@ func StartSystem(id uint32, exe string, args ...string) (*Helper, error) {
 	if err := windows.SetTokenInformation(tok, windows.TokenSessionId, (*byte)(unsafe.Pointer(&id)), 4); err != nil {
 		return nil, err
 	}
+	return startHelper(tok, id, `winsta0\default`, exe, args)
+}
+
+// StartAsUser runs exe with args as the person logged on to this process's
+// session (with their everyday token, as their own programs run), on its
+// desktop, with no window. For a SYSTEM helper (see StartSystem) that needs
+// something done as the person: what it starts is within their reach, so
+// it's only ever given work whose result can't hurt if it's tampered with.
+func StartAsUser(exe string, args ...string) (*Helper, error) {
+	var id uint32
+	if err := windows.ProcessIdToSessionId(windows.GetCurrentProcessId(), &id); err != nil {
+		return nil, err
+	}
+	enableTcb() // WTSQueryUserToken takes SeTcbPrivilege
+	var tok windows.Token
+	if err := windows.WTSQueryUserToken(id, &tok); err != nil {
+		return nil, err
+	}
+	defer tok.Close()
+	return startHelper(tok, id, `winsta0\default`, exe, args)
+}
+
+// StartOn runs exe with args as this process, on desktop (station\desktop),
+// with pipes for its input and output, like the helpers above. For tests.
+func StartOn(desktop, exe string, args ...string) (*Helper, error) {
+	var id uint32
+	windows.ProcessIdToSessionId(windows.GetCurrentProcessId(), &id)
+	return startHelper(0, id, desktop, exe, args)
+}
+
+// startHelper runs exe as tok (0: as this process), in session id, on
+// desktop, with pipes for its input and output.
+func startHelper(tok windows.Token, id uint32, desktop, exe string, args []string) (*Helper, error) {
 
 	sa := windows.SecurityAttributes{Length: uint32(unsafe.Sizeof(windows.SecurityAttributes{})), InheritHandle: 1}
 	var inR, inW, outR, outW windows.Handle
@@ -88,7 +121,7 @@ func StartSystem(id uint32, exe string, args ...string) (*Helper, error) {
 		closeAll()
 		return nil, err
 	}
-	desk, _ := windows.UTF16PtrFromString(`winsta0\default`)
+	desk, _ := windows.UTF16PtrFromString(desktop)
 	six := windows.StartupInfoEx{ProcThreadAttributeList: al.List()}
 	six.Cb = uint32(unsafe.Sizeof(six))
 	six.Desktop = desk
@@ -102,8 +135,13 @@ func StartSystem(id uint32, exe string, args ...string) (*Helper, error) {
 	cl, _ := windows.UTF16PtrFromString(cmdline)
 	app, _ := windows.UTF16PtrFromString(exe)
 	var pi windows.ProcessInformation
-	if err := windows.CreateProcessAsUser(tok, app, cl, nil, nil, true,
-		windows.CREATE_NO_WINDOW|windows.EXTENDED_STARTUPINFO_PRESENT, nil, nil, &six.StartupInfo, &pi); err != nil {
+	flags := uint32(windows.CREATE_NO_WINDOW | windows.EXTENDED_STARTUPINFO_PRESENT)
+	if tok == 0 {
+		err = windows.CreateProcess(app, cl, nil, nil, true, flags, nil, nil, &six.StartupInfo, &pi)
+	} else {
+		err = windows.CreateProcessAsUser(tok, app, cl, nil, nil, true, flags, nil, nil, &six.StartupInfo, &pi)
+	}
+	if err != nil {
 		closeAll()
 		return nil, err
 	}
@@ -129,6 +167,10 @@ func enableTcb() {
 	tp.Privileges[0] = windows.LUIDAndAttributes{Luid: luid, Attributes: windows.SE_PRIVILEGE_ENABLED}
 	windows.AdjustTokenPrivileges(tok, false, &tp, 0, nil, nil)
 }
+
+// Process is the helper's process handle, to wait on. It's the Helper's:
+// don't close it.
+func (h *Helper) Process() windows.Handle { return h.process }
 
 // Exited reports whether the helper has ended.
 func (h *Helper) Exited() bool {

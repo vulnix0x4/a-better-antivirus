@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+**Clipboard bait**
+
+- **Baits go out over what people really copy.** As SYSTEM, ABA's clipboard guard could read only the plain
+  text of a copy, not the HTML a browser or editor puts next to it, nor what the new Notepad copies. It
+  won't put a bait over what it can't put back, so it skipped nearly every real copy. Your clipboard is
+  now saved and put back by a short-lived helper running as you; catching and freezing the clipper stays
+  with SYSTEM.
+- **`aba clipboard test` says why at once** when no bait went out (and what to do), instead of waiting
+  30 seconds and saying ABA didn't catch it. It also says when the mouse or keyboard was used midway, and
+  its own fake clipper no longer sets off a real alert.
+
 ## v0.7.0
 
 A click-through installer, ABA on macOS and Linux, a bait for clippers, and a website:

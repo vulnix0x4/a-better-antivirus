@@ -22,6 +22,7 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
+	"github.com/vulnix0x4/a-better-antivirus/internal/session"
 )
 
 var (
@@ -87,6 +88,10 @@ var textFormats = map[string]bool{
 	flagNoMonitor:                                         true, flagNoHistory: true, flagNoCloud: true,
 }
 
+// OLE's bookkeeping, next to what a program copied through it (the new
+// Notepad does): left out, and what it describes put back as plain formats.
+var oleFormats = map[string]bool{"DataObject": true, "Ole Private Data": true}
+
 // What keeps a bait (and the copy put back afterwards) out of Win+V history,
 // off other devices, and out of well-behaved clipboard managers.
 const (
@@ -100,6 +105,17 @@ const (
 type Skipped string
 
 func (s Skipped) Error() string { return "no bait this time: " + string(s) }
+
+// TestResult is how a bait put out on request (`aba clipboard test`) went,
+// when no clipper was caught.
+type TestResult struct {
+	Time time.Time `json:"time"`
+	// Result: "skipped" (no bait went out, see Skipped), "untouched" (nothing
+	// swapped it), "unproven" (swapped, by a program that couldn't be pinned
+	// down) or "error".
+	Result string `json:"result"`
+	Reason string `json:"reason,omitempty"`
+}
 
 // Finding is a clipper caught swapping a bait.
 type Finding struct {
@@ -140,6 +156,13 @@ type Guard struct {
 	// NewBait makes the address for each bait: Keys.Bait, for real addresses
 	// whose keys ABA holds. Nil: lookalikes (invalid addresses; see Lookalike).
 	NewBait func(Coin) string
+	// AsUser starts this program with args as the person logged on to the
+	// session, to save and put back their clipboard (`aba clipboard-keeper`,
+	// see RunKeeper). As SYSTEM, the Guard can read the plain text of what
+	// most programs copy but not the rest (a browser's HTML, say), and won't
+	// put out a bait over what it couldn't put back. Nil, or when it fails:
+	// the Guard does it itself.
+	AsUser func(args ...string) (*session.Helper, error)
 
 	onThread func() error // tests: put the thread on a private desktop
 
@@ -161,6 +184,7 @@ type Guard struct {
 
 type clipFormat struct {
 	id   uint32
+	name string // a registered format's name ("" for Windows' own)
 	data []byte
 }
 
@@ -343,7 +367,21 @@ func (g *Guard) finish() {
 // snapshot copies what's on the clipboard, if it can all be put back exactly.
 // It returns the clipboard's sequence number at the time.
 func (g *Guard) snapshot() ([]clipFormat, uint32, error) {
-	if !openClip(g.hwnd) {
+	if g.AsUser != nil {
+		saved, at, err := g.keeperSave()
+		var skipped Skipped
+		if err == nil || errors.As(err, &skipped) {
+			return saved, at, err
+		}
+		g.Logf("clipboard bait: saving the clipboard as the person: %v (trying as SYSTEM)", err)
+	}
+	return readClipboard(g.hwnd)
+}
+
+// readClipboard copies what's on the clipboard, opened with hwnd, if it can
+// all be put back exactly. It returns the clipboard's sequence number then.
+func readClipboard(hwnd uintptr) ([]clipFormat, uint32, error) {
+	if !openClip(hwnd) {
 		return nil, 0, Skipped("another program has the clipboard open")
 	}
 	defer closeClip()
@@ -351,7 +389,11 @@ func (g *Guard) snapshot() ([]clipFormat, uint32, error) {
 	var out []clipFormat
 	total := 0
 	for f := enumFormats(0); f != 0; f = enumFormats(f) {
-		name := formatName(f)
+		reg := formatName(f)
+		if oleFormats[reg] {
+			continue // OLE's own bookkeeping: see oleFormats
+		}
+		name := reg
 		if name == "" {
 			name = fmt.Sprintf("format %d", f)
 		}
@@ -370,7 +412,7 @@ func (g *Guard) snapshot() ([]clipFormat, uint32, error) {
 		if total += len(data); total > maxSavedBytes {
 			return nil, 0, Skipped("what's on the clipboard is very large")
 		}
-		out = append(out, clipFormat{f, data})
+		out = append(out, clipFormat{f, reg, data})
 	}
 	return out, at, nil
 }
@@ -378,23 +420,44 @@ func (g *Guard) snapshot() ([]clipFormat, uint32, error) {
 // restore puts the saved clipboard back, unless something new was copied in
 // the meantime: then that stays.
 func (g *Guard) restore() {
-	if !openClip(g.hwnd) {
+	if g.AsUser != nil {
+		err := g.keeperRestore()
+		if err == nil {
+			return
+		}
+		g.Logf("clipboard bait: putting the clipboard back as the person: %v (trying as SYSTEM)", err)
+	}
+	if !writeClipboard(g.hwnd, g.saved, g.isBait) {
 		g.Logf("clipboard bait: couldn't open the clipboard to put it back")
-		return
+	}
+}
+
+// writeClipboard puts saved back on the clipboard, opened with hwnd, unless
+// something new was copied in the meantime (isBait tells a bait from that).
+// It reports false if the clipboard couldn't be opened.
+func writeClipboard(hwnd uintptr, saved []clipFormat, isBait func(string) bool) bool {
+	if !openClip(hwnd) {
+		return false
 	}
 	defer closeClip()
 	now := readText()
 	wiped := now == "" && countFormats() == 0
-	if !g.isBait(now) && !Looks(now) && !wiped {
-		return // not ours, nor a clipper's swap: someone copied something since
+	if !isBait(now) && !Looks(now) && !wiped {
+		return true // not ours, nor a clipper's swap: someone copied something since
 	}
 	pEmptyClipboard.Call()
 	flags := map[uint32]bool{}
-	for _, f := range g.saved {
-		setFormat(f.id, f.data)
-		flags[f.id] = true
+	for _, f := range saved {
+		id := f.id
+		if f.name != "" {
+			id = registerFormat(f.name) // the same number everywhere, but don't count on it
+		}
+		if id != 0 {
+			setFormat(id, f.data)
+			flags[id] = true
+		}
 	}
-	if len(g.saved) > 0 {
+	if len(saved) > 0 {
 		// It's already in Win+V history and synced: don't add it again.
 		for _, name := range []string{flagNoMonitor, flagNoHistory, flagNoCloud} {
 			if id := registerFormat(name); id != 0 && !flags[id] {
@@ -402,6 +465,7 @@ func (g *Guard) restore() {
 			}
 		}
 	}
+	return true
 }
 
 func (g *Guard) isBait(s string) bool {
@@ -569,6 +633,15 @@ func appendPID(xs []uint32, p uint32) []uint32 {
 	return append(xs, p)
 }
 
+// inputNote says when the mouse or keyboard was last used, for the log when
+// that stopped a cycle.
+func (g *Guard) inputNote() string {
+	now, _, _ := pGetTickCount.Call()
+	last := g.LastInput()
+	return fmt.Sprintf("the mouse or keyboard was used %d ms ago (%d ms after this bait began)",
+		uint32(now)-last, last-g.input)
+}
+
 // pauseTest proves pid is the clipper: paused, it leaves a fresh bait alone;
 // let go, it swaps it. Proven, it's paused again and held until Finish.
 //
@@ -589,6 +662,7 @@ func (g *Guard) pauseTest(pid uint32) (proven, interrupted bool) {
 	o := g.watch(bait, at, g.Confirm)
 	procinfo.Resume(pid)
 	if o.interrupted {
+		g.Logf("clipboard bait: stopped proving pid %d (while paused): %s", pid, g.inputNote())
 		return false, true
 	}
 	if o.swapped {
@@ -597,6 +671,7 @@ func (g *Guard) pauseTest(pid uint32) (proven, interrupted bool) {
 	}
 	o = g.watch(bait, at, g.Confirm)
 	if o.interrupted {
+		g.Logf("clipboard bait: stopped proving pid %d (let go): %s", pid, g.inputNote())
 		return false, true
 	}
 	if !o.swapped || !(Looks(o.text) || o.text == "") {
