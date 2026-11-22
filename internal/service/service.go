@@ -118,6 +118,7 @@ func (s *server) reload() error {
 		}
 	}
 	s.guard(guarded)
+	s.clipboardBait(cfg.ClipboardBait)
 	s.baitsChanged(st)
 	return nil
 }
@@ -190,6 +191,7 @@ func (s *server) run(ctx context.Context, ctl <-chan svcctl.Signal) error {
 		case <-ctx.Done():
 			s.saveProgress()
 			s.stopWatching()
+			s.clipboardBait(false) // the guards put the clipboard back as they go
 			// Let go of every hold properly (what's frozen stays suspended): a
 			// hold that's simply dropped kills its process.
 			procinfo.DropHolds(time.Now().Add(time.Hour), func(string) bool { return false })
@@ -203,6 +205,13 @@ func (s *server) run(ctx context.Context, ctl <-chan svcctl.Signal) error {
 			fmt.Fprint(h, oa.PID)
 			queues[h.Sum32()%workers] <- oa
 		case c := <-ctl:
+			// `aba clipboard test` asks for a bait now, the same way. That's
+			// all it asks for: the health check opens every bait to look at it,
+			// which takes instant freeze off each for a moment.
+			if tr := s.PendingTest(); tr != nil && tr.Clipboard && c == svcctl.CheckNow {
+				s.safe("clipboard test", s.clipboardBaitNow)
+				continue
+			}
 			if c == svcctl.Reload {
 				if err := s.reload(); err != nil {
 					s.log.Printf("reload: %v", err)
@@ -217,6 +226,12 @@ func (s *server) run(ctx context.Context, ctl <-chan svcctl.Signal) error {
 		case <-beat.C:
 			s.saveProgress()
 			s.safe("holds", s.reconcileHolds)
+			s.safe("clipboard bait", func() { // people log on and off
+				s.mu.Lock()
+				on := s.cfg != nil && s.cfg.ClipboardBait
+				s.mu.Unlock()
+				s.clipboardBait(on)
+			})
 			s.publish()
 		case <-dialRefresh.C:
 			s.refreshDial(ctx)
@@ -369,6 +384,8 @@ func (s *server) Hold(pids []uint32) {
 			s.log.Printf("hold pid %d: %v", p, err)
 		}
 	}
+	// A frozen program that owns the clipboard makes every copy wait for it.
+	go s.safe("clipboard", func() { s.freeClipboard(pids) })
 }
 
 func (s *server) SuspendMore(root uint32, already []uint32) []uint32 {

@@ -265,11 +265,23 @@ func Resume(pid uint32) error {
 	if !Frozen(pid) {
 		return nil
 	}
+	if !known {
+		origin = ""
+	}
+	if err := moveBack(pid, origin); err != nil {
+		return fmt.Errorf("unfreeze pid %d: %w", pid, err)
+	}
+	return nil
+}
+
+// moveBack puts pid in the control group origin ("/user.slice/…"; the top of
+// the tree when that isn't known).
+func moveBack(pid uint32, origin string) error {
 	root, err := cgroupRoot()
 	if err != nil {
 		return err
 	}
-	if !known || origin == "" || !strings.HasPrefix(origin, "/") {
+	if origin == "" || !strings.HasPrefix(origin, "/") {
 		origin = "/"
 	}
 	// Its own group may be gone by now (systemd removes a scope once the last
@@ -286,7 +298,7 @@ func Resume(pid uint32) error {
 			break
 		}
 	}
-	return fmt.Errorf("unfreeze pid %d: %w", pid, last)
+	return last
 }
 
 // Kill terminates a process (a frozen one too).

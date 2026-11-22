@@ -69,3 +69,6 @@ func quoteAll(args []string) []string {
 var toastRun = func(cmd *exec.Cmd) ([]byte, error) { return nil, cmd.Start() }
 
 var lastToastErr string
+
+// vouchLabel names what vouches for a program, in an alert's details.
+const vouchLabel = "Signature"

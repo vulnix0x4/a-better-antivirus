@@ -814,3 +814,13 @@ func (c *Classifier) byOrigin(image, name string, pid uint32, sig *provenance.Re
 func (c *Classifier) sweepsAllowed(image string, pid uint32) bool {
 	return image != "" && trace(image, pid).sweeps
 }
+
+// sameStart lets an operating system add to what a rule pinned to a command
+// line (or a folder) requires: that it was started the way it was when you
+// trusted it. Nothing more is asked here.
+func (c *Classifier) sameStart(r config.IgnoreRule, pid uint32) bool { return true }
+
+// SweepTrustable reports whether a reader that went through several apps'
+// data may be trusted permanently by its exact command line (a scheduled
+// backup). Not here: see trust.Rule.
+func SweepTrustable(image string) bool { return false }

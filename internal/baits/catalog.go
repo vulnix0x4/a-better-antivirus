@@ -60,6 +60,10 @@ type Spec struct {
 	// app is there, the opposite of a decoy.
 	Inside func(u config.UserInfo) string
 	Host   func(u config.UserInfo) []string
+	// Profiles is the file in Inside where the app lists the profiles it
+	// uses: "Local State" for the Chromium family (when empty), "profiles.ini"
+	// for Firefox. It existing shows the app has been used.
+	Profiles string
 	// Synced (optional) says, in one sentence, that the folder the bait is
 	// planted in is kept in sync with a cloud (on macOS: Desktop and
 	// Documents in iCloud Drive), so the decoy will be uploaded and show up
@@ -205,6 +209,17 @@ func ProfileFolder(u config.UserInfo, id string) string {
 // get to soon: well past the number of profiles it has ever created.
 func FreeProfile(s Spec, u config.UserInfo) string {
 	ud := s.Inside(u)
+	if s.profilesFile() == firefoxIndex {
+		// A Firefox profile folder: eight random letters and digits, then what
+		// Firefox names a second default profile.
+		used := firefoxProfiles(ud)
+		for try := 0; try < 60; try++ {
+			name := randAlnum(8, "abcdefghijklmnopqrstuvwxyz0123456789") + ".default-release-1"
+			if _, err := os.Stat(j(ud, name)); err != nil && !used[name] {
+				return name
+			}
+		}
+	}
 	ls, _ := readLocalState(ud)
 	base := ls.Profile.Created + 8
 	if base < 12 {
@@ -228,12 +243,71 @@ func Adopted(s Spec, u config.UserInfo) bool {
 	if s.Inside == nil {
 		return false
 	}
+	if s.profilesFile() == firefoxIndex {
+		return firefoxProfiles(s.Inside(u))[firefoxFolder(u, s.ID)]
+	}
 	ls, ok := readLocalState(s.Inside(u))
 	if !ok {
 		return false
 	}
 	_, used := ls.Profile.InfoCache[ProfileFolder(u, s.ID)]
 	return used
+}
+
+const firefoxIndex = "profiles.ini"
+
+func (s Spec) profilesFile() string {
+	if s.Profiles != "" {
+		return s.Profiles
+	}
+	return "Local State"
+}
+
+// firefoxProfiles lists the profile folders a Firefox data folder's
+// profiles.ini names: the only ones Firefox opens.
+func firefoxProfiles(root string) map[string]bool {
+	out := map[string]bool{}
+	b, err := os.ReadFile(j(root, firefoxIndex))
+	if err != nil {
+		return out
+	}
+	for _, line := range strings.Split(strings.ReplaceAll(string(b), "\r\n", "\n"), "\n") {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(line), "Path="); ok {
+			out[filepath.Base(filepath.FromSlash(v))] = true
+		}
+	}
+	return out
+}
+
+// firefoxFolder is the folder name of an embedded Firefox profile bait.
+func firefoxFolder(u config.UserInfo, id string) string {
+	if f := u.Embedded[id]; f != "" {
+		return f
+	}
+	return varyChars(u, id, "w7d2kq9p", 8, "abcdefghijklmnopqrstuvwxyz0123456789") + ".default-release-1"
+}
+
+// embeddedFirefox is a fake profile inside a real Firefox: a folder next to
+// the real profiles that profiles.ini doesn't list, so Firefox never opens
+// it, and stealers that take every profile folder do.
+func embeddedFirefox(id, browser, signer string, root func(u config.UserInfo) string, hosts func(u config.UserInfo) []string) Spec {
+	return Spec{
+		ID: id, Name: "extra profile inside your " + browser, Category: "Browsers", Kind: KindDecoy, Default: true, Since: 3,
+		Description: "A fake profile next to your real ones. Stealers take every profile; " + browser + " never opens this one.",
+		OwnerExes:   []string{"firefox", "firefox-bin", "firefox-esr", "firefox.exe"}, Signer: signer,
+		Inside: root, Host: hosts, Profiles: firefoxIndex,
+		Files: func(u config.UserInfo) []FileSpec {
+			d := j(root(u), firefoxFolder(u, id))
+			return []FileSpec{
+				{Path: j(d, "logins.json"), Audit: true, Gen: genFirefoxLogins},
+				{Path: j(d, "key4.db"), Audit: true, Gen: genKey4},
+				{Path: j(d, "cookies.sqlite"), Audit: true, Gen: genMozCookies},
+				{Path: j(d, "times.json"), Gen: func(*Gen) []byte {
+					return []byte(fmt.Sprintf(`{"created":%d,"firstUse":null}`, past(400).UnixMilli()))
+				}},
+			}
+		},
+	}
 }
 
 func embeddedProfile(id, browser, exe, signer string, userData func(u config.UserInfo) string, appDirs func(u config.UserInfo) []string) Spec {
@@ -294,7 +368,7 @@ func Plan(u config.UserInfo, alreadyOurs map[string]bool) []Availability {
 		}
 		if s.Inside != nil {
 			// Needs the real browser: its program, and data it has actually used.
-			_, errData := os.Stat(j(s.Inside(u), "Local State"))
+			_, errData := os.Stat(j(s.Inside(u), s.profilesFile()))
 			if firstExisting(s.Host(u)) == "" || errData != nil {
 				a.Available, a.Reason = false, "you don't use it"
 			}

@@ -3,6 +3,7 @@ package ui
 import (
 	"errors"
 	"fmt"
+	"github.com/vulnix0x4/a-better-antivirus/internal/platform"
 	"net/mail"
 	"net/url"
 	"strconv"
@@ -220,7 +221,7 @@ func newWizard(in WizardInput) *wizard {
 	var modeSel *huh.Select[string]
 	if ex == nil {
 		intro = huh.NewNote().Title("Let's set up your tripwires").Description(noteText(
-			"ABA plants fake passwords, wallets and app data around your PC. Nothing legitimate ever reads them, so when something does, ABA freezes it, cuts its internet and tells you, before your real data leaves.\n\n" +
+			"ABA plants fake passwords, wallets and app data around your " + platform.PC + ". Nothing legitimate ever reads them, so when something does, ABA freezes it, cuts its internet and tells you, before your real data leaves.\n\n" +
 				Dim.Render("Protecting ") + Plain.Render(in.User.Name) + Dim.Render("  ·  "+in.User.Profile)))
 		modeSel = huh.NewSelect[string]().Title("How would you like to set it up?").Options(
 			huh.NewOption("Recommended  "+Fainter.Render(fmt.Sprintf("%d baits · Balanced response · a few quick questions", len(o.Baits))), modeRecommended),
@@ -274,7 +275,7 @@ func newWizard(in WizardInput) *wizard {
 
 		huh.NewGroup(
 			huh.NewSelect[string]().Title("Get alerts on your phone too?").
-				Description("They reach you when you're away, and still get out while the PC is isolated.").
+				Description("They reach you when you're away, and still get out while the "+platform.PC+" is isolated.").
 				Options(
 					huh.NewOption("Not now", ""),
 					huh.NewOption("ntfy      "+Fainter.Render("free app, no account: the easiest"), "ntfy"),
@@ -322,7 +323,7 @@ func newWizard(in WizardInput) *wizard {
 
 		huh.NewGroup(
 			huh.NewConfirm().Title("Add canary tokens?").
-				Description("ABA hides fake AWS keys and a tracking link inside your baits, made with the free canarytokens.org service. If a stealer gets away with your files and USES them later, you get an email, even if this PC never got the chance to warn you.\n"+
+				Description("ABA hides fake AWS keys and a tracking link inside your baits, made with the free canarytokens.org service. If a stealer gets away with your files and USES them later, you get an email, even if this "+platform.PC+" never got the chance to warn you.\n"+
 					Fainter.Render("Your email address is shared with canarytokens.org.")).
 				Affirmative("Yes").Negative("No").Value(&canaryOn),
 		).WithHideFunc(func() bool { return !custom() }),
@@ -421,9 +422,9 @@ func presetDetail(id string) string {
 	case "alert":
 		return "Tell you, and nothing else. ABA never touches a process or the network."
 	case "balanced":
-		return "A critical reader (an unsigned program from Temp or Downloads, a script host, anything going through several apps' data) is frozen and cut off from the internet; the rest of your PC stays online. Merely suspicious readers just alert you."
+		return "A critical reader (an unsigned program from Temp or Downloads, a script host, anything going through several apps' data) is frozen and cut off from the internet; the rest of your " + platform.PC + " stays online. Merely suspicious readers just alert you."
 	case "strict":
-		return "Critical readers are frozen and the whole PC is cut off from the network until you say so. Suspicious readers are frozen too: expect to confirm a few of your own apps at first."
+		return "Critical readers are frozen and the whole " + platform.PC + " is cut off from the network until you say so. Suspicious readers are frozen too: expect to confirm a few of your own apps at first."
 	case "custom":
 		return "Choose what happens for suspicious and for critical readers yourself."
 	}
@@ -471,7 +472,7 @@ func presetShort(id string) string {
 	case "balanced":
 		return "critical readers frozen and cut off"
 	case "strict":
-		return "critical: PC isolated · suspicious: frozen"
+		return "critical: " + platform.PC + " isolated · suspicious: frozen"
 	}
 	return "your own choice of actions"
 }

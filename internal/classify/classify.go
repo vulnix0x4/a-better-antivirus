@@ -264,6 +264,9 @@ func (c *Classifier) ruleMatches(r config.IgnoreRule, image string, pid uint32, 
 			return false
 		}
 	}
+	if (r.CommandLine != "" || r.Dir != "") && !c.sameStart(r, pid) {
+		return false
+	}
 	return true
 }
 
@@ -287,9 +290,18 @@ func (c *Classifier) UserWritable(image string) bool {
 	return c.Env.locate(image, 1) == locUserWritable
 }
 
-// SameCommandLine compares command lines, ignoring case and outer spaces.
+// SameCommandLine compares command lines, ignoring outer spaces, and case
+// where the operating system's file names do (on Linux a command naming
+// /home/u/Notes isn't the one naming /home/u/notes).
 func SameCommandLine(a, b string) bool {
-	return a != "" && strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b))
+	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
+	if a == "" {
+		return false
+	}
+	if paths.FoldsCase() {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
 }
 
 func contains(xs []string, x string) bool {

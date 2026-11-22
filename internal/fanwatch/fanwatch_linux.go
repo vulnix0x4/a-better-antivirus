@@ -49,7 +49,32 @@ type Event struct {
 	Held  bool // the opener is stopped inside its open until OnOpen returns
 }
 
-type fileID struct{ dev, ino uint64 }
+// fileID tells files apart. The inode number alone doesn't: a file system
+// gives the number of a file just deleted to the next one made, often the
+// very file put back in a bait's place. When it was made (its birth time,
+// where the file system keeps one) settles it.
+type fileID struct {
+	dev, ino uint64
+	born     int64
+}
+
+// idOf identifies the file fd is open on, or (fd AT_FDCWD) the one at path
+// without following a link at its end.
+func idOf(fd int, path string) (fileID, uint32, bool) {
+	flags := unix.AT_SYMLINK_NOFOLLOW
+	if path == "" {
+		flags |= unix.AT_EMPTY_PATH
+	}
+	var x unix.Statx_t
+	if unix.Statx(fd, path, flags, unix.STATX_TYPE|unix.STATX_INO|unix.STATX_BTIME, &x) != nil {
+		return fileID{}, 0, false
+	}
+	id := fileID{dev: unix.Mkdev(x.Dev_major, x.Dev_minor), ino: x.Ino}
+	if x.Mask&unix.STATX_BTIME != 0 {
+		id.born = x.Btime.Sec*1e9 + int64(x.Btime.Nsec)
+	}
+	return id, uint32(x.Mode) & unix.S_IFMT, true
+}
 
 // Watcher holds the marks and reads the events.
 type Watcher struct {
@@ -125,16 +150,16 @@ func identify(path string) (fd int, id fileID, err error) {
 	if err != nil {
 		return -1, id, err
 	}
-	var st unix.Stat_t
-	if err := unix.Fstat(fd, &st); err != nil {
+	id, mode, ok := idOf(fd, "")
+	if !ok {
 		unix.Close(fd)
-		return -1, id, err
+		return -1, id, fmt.Errorf("%s: can't tell which file it is", path)
 	}
-	if st.Mode&unix.S_IFMT != unix.S_IFREG {
+	if mode != unix.S_IFREG {
 		unix.Close(fd)
 		return -1, id, fmt.Errorf("%s isn't an ordinary file", path)
 	}
-	return fd, fileID{uint64(st.Dev), uint64(st.Ino)}, nil
+	return fd, id, nil
 }
 
 // Watch marks the file that is at path now as the bait path. Marking it
@@ -150,9 +175,8 @@ func (w *Watcher) Watch(path string) error {
 	if w.closed {
 		return errors.New("the watcher is closed")
 	}
-	if cur, ok := w.byPath[path]; ok && cur == id && w.byID[id] == path {
-		return nil
-	}
+	// (Marked again even when it looks marked already: adding a mark that's
+	// there changes nothing, and one that went with a deleted file comes back.)
 	if err := unix.FanotifyMark(w.fd, unix.FAN_MARK_ADD, w.mask(), unix.AT_FDCWD, "/proc/self/fd/"+strconv.Itoa(fd)); err != nil {
 		return fmt.Errorf("watch %s: %w", path, err)
 	}
@@ -170,13 +194,13 @@ func (w *Watcher) Watch(path string) error {
 
 // Watched reports whether the file at path now is marked as that bait.
 func (w *Watcher) Watched(path string) bool {
-	var st unix.Stat_t
-	if unix.Lstat(path, &st) != nil {
+	id, _, ok := idOf(unix.AT_FDCWD, path)
+	if !ok {
 		return false
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.byID[fileID{uint64(st.Dev), uint64(st.Ino)}] == path
+	return w.byID[id] == path
 }
 
 // Sync makes files the set of baits: marks what isn't marked (including a
@@ -328,9 +352,9 @@ func (w *Watcher) answer(fd int32, mask uint64, deny bool) {
 func (w *Watcher) event(fd, pid int32, mask uint64, own bool) {
 	var st unix.Stat_t
 	bait := ""
-	if unix.Fstat(int(fd), &st) == nil {
+	if id, _, ok := idOf(int(fd), ""); ok && unix.Fstat(int(fd), &st) == nil {
 		w.mu.Lock()
-		bait = w.byID[fileID{uint64(st.Dev), uint64(st.Ino)}]
+		bait = w.byID[id]
 		real := w.real[bait]
 		w.mu.Unlock()
 		if bait != "" && !own && pid > 0 && w.OnOpen != nil {

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,12 +19,14 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/alerts"
 	"github.com/vulnix0x4/a-better-antivirus/internal/baits"
 	"github.com/vulnix0x4/a-better-antivirus/internal/classify"
+	"github.com/vulnix0x4/a-better-antivirus/internal/clipbait"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/doctor"
 	"github.com/vulnix0x4/a-better-antivirus/internal/engine"
 	"github.com/vulnix0x4/a-better-antivirus/internal/install"
 	"github.com/vulnix0x4/a-better-antivirus/internal/notify"
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
+	"github.com/vulnix0x4/a-better-antivirus/internal/platform"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
 	"github.com/vulnix0x4/a-better-antivirus/internal/respond"
 	"github.com/vulnix0x4/a-better-antivirus/internal/svcctl"
@@ -352,7 +355,7 @@ func runTest() error {
 	fmt.Println(ui.Banner("safe test"))
 	fmt.Println()
 	fmt.Println(" " + ui.Plain.Render("A harmless copy of ABA in your Temp folder is about to read ") + ui.Bold.Render(baitName) + ui.Plain.Render(","))
-	fmt.Println(" " + ui.Plain.Render("exactly the way a stealer would. Nothing leaves your PC and your network isn't touched."))
+	fmt.Println(" " + ui.Plain.Render(words.testNetwork))
 	fmt.Println()
 	fmt.Println(" " + ui.Good.Render(ui.IconArr) + ui.Dim.Render(" Running the fake stealer…"))
 
@@ -583,9 +586,9 @@ func learnCmd() *cobra.Command {
 			for i, s := range sugg {
 				label := fmt.Sprintf("%-9s %3d× %s", s.tier, s.count, ui.TruncateMiddle(s.rule.Path, 70))
 				if s.rule.Signer != "" {
-					label += ui.Dim.Render("  signed: " + s.rule.Signer)
+					label += ui.Dim.Render(words.signed + s.rule.Signer)
 				} else {
-					label += ui.Bad.Render("  UNSIGNED")
+					label += ui.Bad.Render(words.unsigned)
 				}
 				label += ui.Fainter.Render("  (" + trust.Describe(s.rule, names) + ")")
 				opts = append(opts, huh.NewOption(label, i).Selected(s.tier == config.TierInfo && s.rule.Signer != ""))
@@ -598,7 +601,7 @@ func learnCmd() *cobra.Command {
 			}
 			var pick []int
 			if err := huh.NewMultiSelect[int]().Title("Ignore which programs from now on?").
-				Description("Only ignore software you recognise. Unsigned programs are almost never safe to ignore.").
+				Description(words.learnWarning).
 				Options(opts...).Value(&pick).WithTheme(theme()).Run(); err != nil || len(pick) == 0 {
 				fmt.Println(ui.Dim.Render("No changes."))
 				return nil
@@ -633,7 +636,7 @@ func ignoreCmd() *cobra.Command {
 				return err
 			}
 			if len(cfg.Ignore) == 0 {
-				fmt.Println(ui.Dim.Render("No ignore rules (Defender and Windows Search are always ignored)."))
+				fmt.Println(ui.Dim.Render(words.noRules))
 				return nil
 			}
 			names := baitNames()
@@ -647,7 +650,7 @@ func ignoreCmd() *cobra.Command {
 	var tricks bool
 	add := &cobra.Command{
 		Use: "add <path-pattern>", Short: "Ignore a program (globs: * within a folder, ** across folders)",
-		Example: `  aba ignore add "C:\Program Files\Backblaze\bztransmit64.exe" --signer Backblaze`,
+		Example: words.ignoreExample,
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireAdmin(); err != nil {
@@ -698,7 +701,7 @@ func tricksRuleProblem(pattern, signer string, tricks bool) string {
 		return ""
 	}
 	if (&classify.Classifier{Env: classify.DefaultEnv()}).UserWritable(pattern) {
-		return "--allow-tricks needs --signer for a program outside Program Files and Windows: anything could be put at that path later"
+		return words.tricks
 	}
 	return ""
 }
@@ -743,7 +746,7 @@ func baitCmd() *cobra.Command {
 		},
 	})
 	c.AddCommand(&cobra.Command{
-		Use: "catalog", Short: "Every bait ABA knows and whether it fits this PC",
+		Use: "catalog", Short: words.catalogShort,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if svcState, _ := svcctl.Status(); svcState != svcctl.NotInstalled {
 				if err := requireAdmin(); err != nil { // which ones are planted is admin-only
@@ -853,7 +856,7 @@ func baitCmd() *cobra.Command {
 		},
 	})
 	c.AddCommand(&cobra.Command{
-		Use: "rename", Short: "Give the baits new file names, this PC's own",
+		Use: "rename", Short: words.renameShort,
 		Long: "ABA is open source, so the names it gives baits are no secret: every install picks its own from what file\n" +
 			"grabbers look for. This picks again: baits whose name changes are removed and planted under the new one.\n" +
 			"Baits you added yourself, and fake profiles inside your browsers, stay where they are.",
@@ -898,6 +901,14 @@ func baitCmd() *cobra.Command {
 					return exitf("no bait %q", args[0])
 				}
 			}
+			var planted []config.BaitFile // the files ABA made for it, to check afterwards
+			if st, _ := config.LoadState(); st != nil && st.Baits[args[0]] != nil {
+				for _, f := range st.Baits[args[0]].Files {
+					if f.Created {
+						planted = append(planted, f)
+					}
+				}
+			}
 			cfg.Baits = keep
 			if err := config.SaveConfig(cfg); err != nil {
 				return err
@@ -912,6 +923,20 @@ func baitCmd() *cobra.Command {
 				return err
 			}
 			fmt.Println(ui.Good.Render(ui.IconOK) + " removed " + args[0])
+			// ABA only deletes a file it made if it's still exactly as it left it
+			// (else a real app may have moved in): say so when one stays.
+			for _, f := range planted {
+				fi, err := os.Stat(f.Path)
+				if err != nil {
+					continue
+				}
+				why := "it's still there"
+				if fi.Size() != f.Size || !fi.ModTime().Equal(f.ModTime) {
+					why = fmt.Sprintf("it changed after ABA made it, so it may be something else's now (%d bytes, written %s; ABA's was %d bytes, written %s)",
+						fi.Size(), fi.ModTime().UTC().Format(time.RFC3339Nano), f.Size, f.ModTime.UTC().Format(time.RFC3339Nano))
+				}
+				fmt.Println(" " + ui.Warn.Render("!") + " " + ui.Plain.Render("left "+f.Path+" in place: "+why+". Delete it yourself if it's not yours."))
+			}
 			return nil
 		},
 	})
@@ -1018,10 +1043,10 @@ func notifyCmd() *cobra.Command {
 func demoAlert() *alerts.Alert {
 	a := &alerts.Alert{
 		ID: "DEMO", Time: time.Now(), Kind: alerts.KindRead, Tier: config.TierCritical,
-		Title:   "Possible stealer: FreeRobux.exe read your bait",
-		Summary: `DEMO: unsigned program running from a user-writable folder (C:\Users\you\Downloads): typical of stealers`,
-		Baits:   []alerts.BaitHit{{Name: "passwords.txt on the Desktop", Path: `C:\Users\you\Desktop\passwords.txt`, Access: "read", Time: time.Now()}},
-		Process: &alerts.Process{PID: 4242, Image: `C:\Users\you\Downloads\FreeRobux.exe`},
+		Title:   words.demoTitle,
+		Summary: words.demoSummary,
+		Baits:   []alerts.BaitHit{{Name: "passwords.txt on the Desktop", Path: words.demoBait, Access: "read", Time: time.Now()}},
+		Process: &alerts.Process{PID: 4242, Image: words.demoImage},
 	}
 	a.AddAction(config.ActionFreeze, nil, "1 process(es) frozen")
 	a.AddAction(config.ActionBlockProgram, nil, "")
@@ -1034,10 +1059,8 @@ func instantCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "instant [on|off]",
 		Short: "Freeze readers the moment they open a bait",
-		Long: "Instant freeze holds every bait with a Windows oplock. When a program opens one, Windows\n" +
-			"pauses it inside the open; ABA works out who it is and, if it's suspicious, freezes it\n" +
-			"before it reads anything. The normal detection keeps running as a backup.",
-		Args: cobra.MaximumNArgs(1),
+		Long:  words.instantLong,
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireAdmin(); err != nil {
 				return err
@@ -1070,6 +1093,113 @@ func instantCmd() *cobra.Command {
 		},
 	}
 	return c
+}
+
+// ---- clipboard bait ----
+
+func clipboardCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "clipboard [on|off|test]",
+		Short: "Catch clippers with a fake wallet address on the clipboard",
+		Long: "Clippers are malware that swap a crypto wallet address you copied for the attacker's, so\n" +
+			"the money you send goes to them. With this on, while nobody is using the PC, ABA now and\n" +
+			"then puts a bait wallet address on the clipboard for a few seconds and watches it. If a\n" +
+			"program swaps it, that program is a clipper: it's frozen, cut off and you're alerted.\n\n" +
+			"Your clipboard is put back right after. The bait never shows up in clipboard history.\n" +
+			"It is a real address that ABA made and holds the key to, so a clipper that checks\n" +
+			"addresses can't tell it apart, and nothing sent to it would be lost (`aba clipboard key`).\n" +
+			"Plain text on the clipboard is saved and put back; while it holds anything else (files,\n" +
+			"pictures), no bait.",
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if runtime.GOOS != "windows" {
+				return exitf("the clipboard bait is %s", platform.ErrUnsupported)
+			}
+			if err := requireAdmin(); err != nil {
+				return err
+			}
+			cfg, err := mustConfig()
+			if err != nil {
+				return err
+			}
+			if len(args) == 0 {
+				state := ui.Bad.Render("off")
+				if cfg.ClipboardBait {
+					state = ui.Good.Render("on")
+				}
+				fmt.Println("The clipboard bait is " + state + ".  " + ui.Hint("Change:", "aba clipboard on|off"))
+				return nil
+			}
+			switch strings.ToLower(args[0]) {
+			case "on":
+				cfg.ClipboardBait = true
+			case "off":
+				cfg.ClipboardBait = false
+			default:
+				return exitf("use `aba clipboard on` or `aba clipboard off`")
+			}
+			if err := config.SaveConfig(cfg); err != nil {
+				return err
+			}
+			fmt.Println(ui.Good.Render(ui.IconOK) + " Clipboard bait " + strings.ToLower(args[0]))
+			return install.Reload()
+		},
+	}
+	c.AddCommand(&cobra.Command{
+		Use:   "key <address>",
+		Short: "The private key of a bait address, should anything ever be sent to one",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireAdmin(); err != nil {
+				return err
+			}
+			return clipboardKey(args[0])
+		},
+	})
+	c.AddCommand(&cobra.Command{
+		Use:   "test",
+		Short: "Watch it catch a harmless fake clipper",
+		Long: "Starts a harmless fake clipper from your Temp folder and has ABA put a bait out right away,\n" +
+			"instead of waiting until nobody is using the PC. Don't touch the mouse or keyboard for a few\n" +
+			"seconds while it runs. Your clipboard is put back afterwards.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireAdmin(); err != nil {
+				return err
+			}
+			return runClipboardTest()
+		},
+	})
+	return c
+}
+
+// clipboardKey is `aba clipboard key <address>`.
+func clipboardKey(address string) error {
+	c, i, at, ok := clipbait.Lookup(paths.DataDir(), address)
+	if !ok {
+		return exitf("%s isn't an address ABA put out as a bait", address)
+	}
+	sec, err := config.LoadSecrets()
+	if err != nil {
+		return err
+	}
+	k := clipbait.KeysFromSeed(sec.ClipboardSeed, paths.DataDir(), func(string, ...any) {})
+	if k == nil || k.Address(c, i) != address {
+		return exitf("ABA put %s out, but its key can't be made again (was ABA reinstalled since?)", address)
+	}
+	how := map[clipbait.Coin]string{
+		clipbait.Bitcoin:       "a Bitcoin wallet: import it as a private key (WIF), legacy address",
+		clipbait.BitcoinSegwit: "a Bitcoin wallet: import it as a private key (WIF), native segwit (p2wpkh) address",
+		clipbait.Ethereum:      "an Ethereum wallet (MetaMask and the like): import it as a private key",
+		clipbait.Tron:          "a Tron wallet (TronLink and the like): import it as a private key",
+	}[c]
+	fmt.Println()
+	fmt.Println(" " + ui.Plain.Render("Bait address ") + ui.Bold.Render(address) + ui.Dim.Render(" ("+string(c)+", put out "+at.Local().Format("2 Jan 2006 15:04")+")"))
+	fmt.Println(" " + ui.Plain.Render("Private key  ") + ui.Code.Render(k.PrivateText(c, i)))
+	fmt.Println()
+	fmt.Println(" " + ui.Dim.Render("To get anything sent to it back, use it in "+how+"."))
+	fmt.Println(" " + ui.Dim.Render("Anyone with this key can take what's there: don't share it."))
+	return nil
 }
 
 // testReason is the verdict of the test alert in a few words.

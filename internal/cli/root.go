@@ -72,8 +72,9 @@ func newRoot() *cobra.Command {
 	}
 	add("main", statusCmd(), alertsCmd(), testCmd(), doctorCmd(), learnCmd())
 	add("respond", trustCmd(), killCmd(), resumeCmd(), releaseCmd())
-	add("setup", installCmd(), configureCmd(), updateCmd(), baitCmd(), ignoreCmd(), instantCmd(), phoneCmd(), uninstallCmd())
+	add("setup", installCmd(), configureCmd(), updateCmd(), baitCmd(), ignoreCmd(), instantCmd(), clipboardCmd(), phoneCmd(), uninstallCmd())
 	root.AddCommand(serviceCmd(), notifyCmd(), testReaderCmd())
+	root.AddCommand(clipGuardCmds()...)
 	return root
 }
 
@@ -99,7 +100,7 @@ func renderWelcome() string {
 	b.WriteString(" " + ui.Bold.Render("Not set up yet.") + ui.Dim.Render(" Here's what it does:") + "\n\n")
 	for _, l := range [][2]string{
 		{"Plants fake passwords, wallets and app data", "that nothing legitimate ever reads"},
-		{"Watches them with Windows' own file auditing", "no driver, no scanning, no slowdown"},
+		{words.welcomeWatch, words.welcomeNote},
 		{"Freezes whatever takes the bait", "and cuts its internet before your real data leaves"},
 	} {
 		b.WriteString("  " + ui.Good.Render(ui.IconArr) + " " + ui.Plain.Render(l[0]) + ui.Dim.Render(", "+l[1]) + "\n")

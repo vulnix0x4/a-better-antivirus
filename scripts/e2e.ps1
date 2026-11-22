@@ -253,6 +253,28 @@ Check (WaitFor { NtfyMessages | Where-Object title -match 'test alert' } 60) 'ph
 Step 'Built-in safe test'
 Aba test
 
+Step 'Clipboard bait: a fake clipper is caught, and the clipboard put back'
+$reloads = Reloads
+Aba clipboard on
+WaitReloaded $reloads
+Check (WaitFor { Select-String -Path "$data\service.log" -Pattern 'clipboard bait: guarding session' -Quiet } 90) 'a clipboard guard runs in the desktop session'
+$copied = $null
+# clip.exe hands the text over as it copies it. (Set-Clipboard only promises
+# it, to be handed over when asked, and this script is too busy to answer.)
+cmd /c 'echo text the test copied| clip'
+if ($LASTEXITCODE -eq 0) { $copied = 'text the test copied' } else { Write-Host '  (no clipboard here)' }
+Snap
+Aba clipboard test
+$clip = Fresh | Where-Object { $_.test -and $_.baits -and $_.baits[0].access -eq 'swap' } | Select-Object -Last 1
+Check $clip 'the fake clipper was caught swapping the fake wallet address'
+if ($copied) {
+    Check (WaitFor { "$(Get-Clipboard)".Trim() -eq $copied } 15) 'the clipboard was put back afterwards'
+}
+$reloads = Reloads
+Aba clipboard off
+WaitReloaded $reloads
+Start-Sleep -Seconds 3   # let the guard go, and everything settle, before the next fake stealer
+
 Step 'Real stealer: frozen, blocked, then killed'
 $s1 = Stealer 'stealer1' $desktopBait
 $a1 = AlertFor $s1.Id
@@ -487,6 +509,10 @@ $s4 = Stealer 'stealer4' $custom
 Check (AlertFor $s4.Id) 'reading the custom bait alerts'
 Aba release
 Stop-Process -Id $s4.Id -Force -ErrorAction SilentlyContinue
+# What ABA has on record about the file (it only deletes what's unchanged).
+$rec = (State).baits.$cid.files | Select-Object -First 1
+$fi = Get-Item $custom -ErrorAction SilentlyContinue
+Write-Host "  on record: created=$($rec.created) size=$($rec.size) modTime=$($rec.modTime); on disk: size=$($fi.Length) written=$($fi.LastWriteTimeUtc.ToString('o'))"
 Aba bait remove $cid
 # The file's name stays visible until every handle on it is closed. The service
 # lets go of its guard when it next re-reads its settings, which can take a few

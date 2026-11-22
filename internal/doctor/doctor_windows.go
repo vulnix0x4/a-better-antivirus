@@ -1,6 +1,8 @@
 package doctor
 
 import (
+	"path/filepath"
+
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/winsec"
 )
@@ -44,4 +46,15 @@ var syncTools = map[string]string{
 	"icloudckks.exe": "iCloud", "bztransmit.exe": "Backblaze", "bztransmit64.exe": "Backblaze",
 	"crashplanservice.exe": "CrashPlan", "reflectbin.exe": "Macrium Reflect", "veeam.endpoint.service.exe": "Veeam",
 	"syncthing.exe": "Syncthing", "megasync.exe": "MEGA", "everything.exe": "",
+}
+
+// What the baits check says about the tripwire on each file.
+const (
+	lostTripwire = "%d file(s) lost their audit rule"
+	verifyHint   = "; run as admin to verify audit rules"
+)
+
+// recentFolder is where the desktop keeps shortcuts to files you opened.
+func recentFolder(u config.UserInfo) string {
+	return filepath.Join(u.RoamingAppData, `Microsoft\Windows\Recent`)
 }

@@ -1,8 +1,11 @@
 package doctor
 
 import (
+	"fmt"
+
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/fanwatch"
+	"github.com/vulnix0x4/a-better-antivirus/internal/netguard"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
 )
 
@@ -26,6 +29,15 @@ func checkDetection(admin bool, st *config.State, add func(l Level, name, detail
 				}
 			}
 			add(l, h.Name, h.Detail+" (as of the service's last check)", "")
+		}
+	}
+	// Cutting a program off the network, and isolating the machine, need the
+	// kernel's firewall (see netguard).
+	if admin {
+		if ns, err := netguard.GetStatus(); err != nil {
+			add(Warning, "Network cut-off", err.Error(), "")
+		} else {
+			add(OK, "Network cut-off", fmt.Sprintf("ready (nftables table inet %s, %d rule(s) in place)", netguard.TableName, ns.Rules), "")
 		}
 	}
 	if !admin || seen {
@@ -57,3 +69,15 @@ var syncTools = map[string]string{
 	"insync": "Insync", "rclone": "rclone", "restic": "restic", "borg": "Borg", "duplicity": "Duplicity", "deja-dup-monitor": "Backups (Déjà Dup)",
 	"timeshift": "Timeshift", "backintime": "Back In Time", "kopia": "Kopia", "onedrive": "OneDrive",
 }
+
+// What the baits check says about the tripwire on each file: on Linux, the
+// kernel's watch, which lives in the service.
+const (
+	lostTripwire = "%d file(s) aren't watched"
+	verifyHint   = "; run with sudo to check they're watched"
+)
+
+// recentFolder: Linux desktops keep the files you opened in a list
+// (recently-used.xbel), not as shortcut files, so there's nothing of that
+// kind to check.
+func recentFolder(u config.UserInfo) string { return "" }

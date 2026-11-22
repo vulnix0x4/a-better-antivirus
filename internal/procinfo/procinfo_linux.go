@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -253,13 +254,44 @@ func Args(pid uint32) ([]string, error) {
 }
 
 // CommandLine returns the process command line, the way you'd type it.
+//
+// A short-lived reader (tar, cat) has often exited by the time its read is
+// judged in full, a moment after it was let through: what it was started
+// with is kept for a couple of minutes, from when it was last seen running.
 func CommandLine(pid uint32) (string, error) {
 	args, err := Args(pid)
 	if err != nil {
+		cmdMu.Lock()
+		c, ok := cmdSeen[pid]
+		cmdMu.Unlock()
+		if ok && time.Since(c.at) < 2*time.Minute && !Alive(pid, 0) {
+			return c.line, nil
+		}
 		return "", err
 	}
-	return JoinArgs(args), nil
+	line := JoinArgs(args)
+	cmdMu.Lock()
+	if len(cmdSeen) > 4096 {
+		for p, c := range cmdSeen {
+			if time.Since(c.at) > 2*time.Minute {
+				delete(cmdSeen, p)
+			}
+		}
+	}
+	cmdSeen[pid] = seenLine{line: line, at: time.Now()}
+	cmdMu.Unlock()
+	return line, nil
 }
+
+type seenLine struct {
+	line string
+	at   time.Time
+}
+
+var (
+	cmdMu   sync.Mutex
+	cmdSeen = map[uint32]seenLine{}
+)
 
 // JoinArgs writes arguments as one command line, quoting what needs it.
 func JoinArgs(args []string) string {
@@ -524,3 +556,6 @@ func InjectedCode(pid uint32) (detail string, found bool) {
 func SideLoaded(pid uint32, image string, signed func(path string) bool) (lib string, found bool) {
 	return "", false
 }
+
+// WorkingDir is the folder a process runs in.
+func WorkingDir(pid uint32) string { return Cwd(pid) }

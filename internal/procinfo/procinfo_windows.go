@@ -190,3 +190,7 @@ func IntegrityLevel(pid uint32) (uint32, error) {
 	}
 	return sid.SubAuthority(uint32(c) - 1), nil
 }
+
+// WorkingDir is the folder a process runs in, where the system shows it
+// ("" here: Windows keeps it inside the process).
+func WorkingDir(pid uint32) string { return "" }
