@@ -11,9 +11,9 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/svcctl"
 )
 
-// Dir holds downloaded updates and the rollback copy. It lives under
-// Program Files, so only administrators and SYSTEM can write to it.
-func Dir() string { return filepath.Join(paths.InstallDir(), "updates") }
+// Dir holds downloaded updates and the rollback copy, somewhere only
+// administrators and the service can write to (updatesDir, per system).
+func Dir() string { return updatesDir() }
 
 // Apply installs the verified exe at src as the CLI and the service binary,
 // then restarts the service. If the new service doesn't come up, the

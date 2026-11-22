@@ -1,0 +1,6 @@
+package update
+
+// sumsName is the signed checksum list of the files for this system. Linux's
+// files have a list of their own, next to SHA256SUMS.txt: that one is the
+// Windows files' list, and promises to hold nothing else (installer/verify.ps1).
+const sumsName = "SHA256SUMS-linux.txt"

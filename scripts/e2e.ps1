@@ -509,7 +509,13 @@ Aba bait remove $cid
 # The file's name stays visible until every handle on it is closed. The service
 # lets go of its guard when it next re-reads its settings, which can take a few
 # seconds when it is busy; `aba bait remove` itself only waits one.
-Check (WaitFor { -not (Test-Path $custom) } 15) 'custom bait removed'
+$gone = WaitFor { -not (Test-Path $custom) } 15
+if (-not $gone) {
+    # Still there: deleted but held open by something, or never deleted?
+    Write-Host (& $Ghost holders $custom | Out-String)
+    Write-Host "stealer4 (pid $($s4.Id)) still running: $([bool](Get-Process -Id $s4.Id -ErrorAction SilentlyContinue))"
+}
+Check $gone 'custom bait removed'
 
 Step 'Read-only commands'
 $before = @(Alerts).Count

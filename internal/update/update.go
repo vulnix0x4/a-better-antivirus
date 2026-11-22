@@ -139,10 +139,10 @@ func Download(ctx context.Context, r *Release, dir string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("release %s has no %s", r.Tag, name)
 	}
-	sumsA, ok1 := r.asset("SHA256SUMS.txt")
-	sigA, ok2 := r.asset("SHA256SUMS.txt.sig")
+	sumsA, ok1 := r.asset(sumsName)
+	sigA, ok2 := r.asset(sumsName + ".sig")
 	if !ok1 || !ok2 {
-		return "", fmt.Errorf("release %s is not signed (no SHA256SUMS.txt.sig)", r.Tag)
+		return "", fmt.Errorf("release %s is not signed (no %s.sig)", r.Tag, sumsName)
 	}
 	sums, err := get(ctx, sumsA.URL, maxSmall)
 	if err != nil {

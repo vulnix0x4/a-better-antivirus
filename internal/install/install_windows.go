@@ -231,3 +231,8 @@ func broadcastEnvChange() {
 	const hwndBroadcast, wmSettingChange, smtoAbortIfHung = 0xffff, 0x1A, 0x2
 	p.Call(hwndBroadcast, wmSettingChange, 0, uintptr(unsafe.Pointer(env)), smtoAbortIfHung, 3000, uintptr(unsafe.Pointer(&res)))
 }
+
+// permissionSteps run once the service is started: whatever the person at
+// the screen has to allow for it to protect (on macOS, Full Disk Access).
+// Nothing on Windows.
+func permissionSteps() []Step { return nil }
