@@ -35,6 +35,10 @@ func AlertsDir() string   { return filepath.Join(DataDir(), "alerts") }
 func LogFile() string     { return filepath.Join(DataDir(), "service.log") }
 func TestFile() string    { return filepath.Join(DataDir(), "pending-test.json") }
 
+// ClipboardTestFile is how a bait put out for `aba clipboard test` went, when
+// the guard caught nothing (clipbait.TestResult).
+func ClipboardTestFile() string { return filepath.Join(DataDir(), "clipboard-test.json") }
+
 // PublicDir is the one corner of the data folder anyone may read.
 func PublicDir() string        { return filepath.Join(DataDir(), "public") }
 func PublicStatusFile() string { return filepath.Join(PublicDir(), "status.json") }

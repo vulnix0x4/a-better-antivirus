@@ -175,6 +175,11 @@ func systemSide(args []string) bool {
 	case "clipbait-helper": // as SYSTEM, in the person's session
 		runSystemGuard(os.Stdout)
 		return true
+	case "clipboard-keeper": // see keeperGuard
+		if len(args) > 1 {
+			RunKeeper(args[1], os.Stdin, os.Stdout)
+		}
+		return true
 	}
 	return false
 }

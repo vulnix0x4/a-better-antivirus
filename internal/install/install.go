@@ -562,7 +562,7 @@ func UninstallSteps(purge bool) []Step {
 			if purge {
 				return "everything deleted", os.RemoveAll(paths.DataDir())
 			}
-			for _, f := range []string{paths.ConfigFile(), paths.StateFile(), paths.SecretsFile(), paths.TestFile(), paths.PublicStatusFile()} {
+			for _, f := range []string{paths.ConfigFile(), paths.StateFile(), paths.SecretsFile(), paths.TestFile(), paths.ClipboardTestFile(), paths.PublicStatusFile()} {
 				os.Remove(f)
 			}
 			msg := "kept alert history in " + paths.DataDir()

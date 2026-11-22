@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/detect"
 	"github.com/vulnix0x4/a-better-antivirus/internal/engine"
+	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
 	"github.com/vulnix0x4/a-better-antivirus/internal/session"
 )
@@ -77,8 +79,9 @@ func (s *server) listenClipGuard(h *session.Helper) {
 	sc.Buffer(make([]byte, 64<<10), 1<<20)
 	for sc.Scan() {
 		var msg struct {
-			Log     string            `json:"log"`
-			Finding *clipbait.Finding `json:"finding"`
+			Log     string               `json:"log"`
+			Finding *clipbait.Finding    `json:"finding"`
+			Test    *clipbait.TestResult `json:"test"`
 		}
 		if err := json.Unmarshal(sc.Bytes(), &msg); err != nil {
 			line := sc.Text()
@@ -90,6 +93,14 @@ func (s *server) listenClipGuard(h *session.Helper) {
 		}
 		if msg.Log != "" {
 			s.log.Printf("session %d: %s", h.Session, msg.Log)
+		}
+		if msg.Test != nil {
+			// For `aba clipboard test`, which is waiting for it.
+			if b, err := json.Marshal(msg.Test); err == nil {
+				if err := os.WriteFile(paths.ClipboardTestFile(), b, 0o644); err != nil {
+					s.log.Printf("clipboard bait: test: %v", err)
+				}
+			}
 		}
 		if f := msg.Finding; f != nil {
 			s.safe("clipper", func() { s.onClipper(f) })
@@ -105,6 +116,12 @@ func (s *server) onClipper(f *clipbait.Finding) {
 	sw := &detect.Swap{Coin: string(f.Coin), Bait: f.Bait, Replacement: f.Replacement, How: f.How, LatencyMS: f.Latency.Milliseconds(), Keyed: f.Keyed}
 	s.log.Printf("clipboard bait: %s bait %s swapped for %q in %v by pid %d (%s)", f.Coin, f.Bait, f.Replacement, f.Latency, f.PID, f.How)
 	if f.PID == 0 {
+		if tr := s.PendingTest(); tr != nil && tr.Clipboard {
+			// `aba clipboard test`'s own fake clipper, most likely: the test
+			// hears about it from the guard, and no alarm goes off.
+			s.log.Printf("clipboard bait: test: the swap wasn't pinned on a program (interrupted: %v)", f.Interrupted)
+			return
+		}
 		// Swapped for an address, so a clipper is running, but nothing could
 		// be pinned down (it was interrupted, or hides too well).
 		var who []string
