@@ -40,6 +40,21 @@ say "The files"
 SUMS="$DIST/SHA256SUMS-linux.txt"
 [ -f "$SUMS" ] || fail "$SUMS is missing"
 sed 's/^/      /' "$SUMS"
+# What the release publishes, under the names it publishes them by: GoReleaser
+# keeps a plain program in its build folder, and artifacts.json says where.
+REL="$WORK/release"; mkdir -p "$REL"
+cp "$SUMS" "$REL/"; [ -f "$SUMS.sig" ] && cp "$SUMS.sig" "$REL/"
+while read -r _ name; do
+  name=${name#\*}; src=""
+  if [ -f "$DIST/$name" ]; then src="$DIST/$name"
+  else
+    src=$(jq -r --arg n "$name" '[.[] | select(.name == $n and .path != null)][0].path // empty' "$DIST/artifacts.json")
+    [ -n "$src" ] && case "$src" in /*) ;; *) src="$HERE/$src" ;; esac
+  fi
+  [ -n "$src" ] && [ -f "$src" ] || fail "$name is in the checksum list, but not in $DIST"
+  cp "$src" "$REL/$name"
+done < "$SUMS"
+DIST=$REL; SUMS="$REL/SHA256SUMS-linux.txt"
 BIN=$(ls "$DIST"/aba_*_linux_amd64 2>/dev/null | head -n1)
 [ -n "$BIN" ] || fail "no aba_<tag>_linux_amd64 in $DIST"
 TAG=$(basename "$BIN"); TAG=${TAG#aba_}; TAG=${TAG%_linux_amd64}
