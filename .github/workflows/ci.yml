@@ -106,15 +106,6 @@ jobs:
         if: runner.os == 'Linux'
         run: bash scripts/e2e-linux.sh ./dist/aba ./dist/grabber
 
-      # The release build for macOS, as the release workflow makes it, but
-      # nothing published or signed.
-      - name: Release build (macOS)
-        if: runner.os == 'macOS'
-        uses: goreleaser/goreleaser-action@v7
-        with:
-          version: "~> v2"
-          args: release --snapshot --clean --skip=publish,sign --config .goreleaser-macos.yaml
-
       - name: Build for the end-to-end run (macOS)
         if: runner.os == 'macOS'
         run: |
@@ -129,6 +120,23 @@ jobs:
         if: runner.os == 'macOS'
         timeout-minutes: 15
         run: bash scripts/e2e-macos.sh ./dist/aba ./dist/grabber
+
+      # The release files as the release workflow makes them, unsigned (no
+      # certificates here), and the package installed, checked and removed.
+      - name: Release files and the package (macOS)
+        if: runner.os == 'macOS'
+        timeout-minutes: 10
+        run: |
+          bash scripts/release-macos.sh v0.0.0-ci dist-macos
+          sudo installer -pkg dist-macos/ABA-v0.0.0-ci.pkg -target /
+          APP="/Library/Application Support/File Access Monitor/File Access Monitor.app"
+          sudo cat "/Library/Application Support/File Access Monitor/install.log" | tail -25
+          test "$(ls "$APP/Contents/MacOS")" = famsvc
+          test "$(readlink /usr/local/bin/aba)" = "$APP/Contents/MacOS/famsvc"
+          launchctl print system/com.fileaccessmonitor.service | grep -E '^\s*(state|pid) ='
+          aba --version | grep -q v0.0.0-ci
+          sudo aba uninstall --purge
+          test ! -e "$APP"
 
       - name: Service log (after a failure, macOS)
         if: failure() && runner.os == 'macOS'
