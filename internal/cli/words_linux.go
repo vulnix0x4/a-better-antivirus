@@ -2,14 +2,15 @@ package cli
 
 // The CLI's words that describe how Linux does things.
 var words = struct {
-	watchedBy, welcomeWatch, testNothingLeaves, testNetwork        string
-	uninstallShort, uninstallDesc, uninstallDone                   string
-	signed, unsigned, learnWarning, noRules, ignoreExample, tricks string
-	catalogShort, renameShort, instantLong                         string
-	demoTitle, demoSummary, demoBait, demoImage                    string
+	watchedBy, welcomeWatch, welcomeNote, testNothingLeaves, testNetwork string
+	uninstallShort, uninstallDesc, uninstallDone                         string
+	signed, unsigned, learnWarning, noRules, ignoreExample, tricks       string
+	catalogShort, renameShort, instantLong                               string
+	demoTitle, demoSummary, demoBait, demoImage                          string
 }{
 	watchedBy:         "%d planted, watched by the kernel (fanotify)",
 	welcomeWatch:      "Has the kernel watch them (fanotify)",
+	welcomeNote:       "no driver, no scanning, no slowdown",
 	testNothingLeaves: "You'll watch it get frozen and see the alert. Nothing leaves this machine.",
 	testNetwork:       "exactly the way a stealer would. Nothing leaves this machine and your network isn't touched.",
 	uninstallShort:    "Remove it and every bait, and undo everything it changed",

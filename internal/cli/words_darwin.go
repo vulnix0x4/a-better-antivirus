@@ -1,34 +1,37 @@
 package cli
 
-// The CLI's words that describe how the system does things: on macOS, what it
-// has shown so far (the Windows wording); its port chooses its own.
+// The CLI's words that describe how macOS does things: a launchd service
+// that watches the baits through Apple's Endpoint Security (eslogger, which
+// needs Full Disk Access) and hears of an open a moment after it happened,
+// code signatures, root.
 var words = struct {
-	watchedBy, welcomeWatch, testNothingLeaves, testNetwork        string
-	uninstallShort, uninstallDesc, uninstallDone                   string
-	signed, unsigned, learnWarning, noRules, ignoreExample, tricks string
-	catalogShort, renameShort, instantLong                         string
-	demoTitle, demoSummary, demoBait, demoImage                    string
+	watchedBy, welcomeWatch, welcomeNote, testNothingLeaves, testNetwork string
+	uninstallShort, uninstallDesc, uninstallDone                         string
+	signed, unsigned, learnWarning, noRules, ignoreExample, tricks       string
+	catalogShort, renameShort, instantLong                               string
+	demoTitle, demoSummary, demoBait, demoImage                          string
 }{
-	watchedBy:         "%d planted, watched by Windows' own file auditing",
-	welcomeWatch:      "Watches them with Windows' own file auditing",
-	testNothingLeaves: "You'll watch it get frozen and see the alert popup. Nothing leaves your PC.",
-	testNetwork:       "exactly the way a stealer would. Nothing leaves your PC and your network isn't touched.",
-	uninstallShort:    "Remove it and every bait, restoring Windows",
-	uninstallDesc:     "Removes the service, every bait and any network blocks, and puts Windows' audit setting\nback the way it was.",
-	uninstallDone:     " Windows' settings are back to how they were.",
+	watchedBy:         "%d planted, watched through Apple's Endpoint Security (eslogger)",
+	welcomeWatch:      "Watches them through Apple's Endpoint Security",
+	welcomeNote:       "no kernel extension, no scanning of your files",
+	testNothingLeaves: "You'll watch it get frozen and see the alert. Nothing leaves your Mac.",
+	testNetwork:       "exactly the way a stealer would. Nothing leaves your Mac and your network isn't touched.",
+	uninstallShort:    "Remove it and every bait, and undo everything it changed",
+	uninstallDesc:     "Removes the service, every bait and ABA's network rules (pf), lets go of anything still frozen,\nand takes back its Full Disk Access.",
+	uninstallDone:     " Everything it changed is undone.",
 	signed:            "  signed: ",
-	unsigned:          "  UNSIGNED",
-	learnWarning:      "Only ignore software you recognise. Unsigned programs are almost never safe to ignore.",
-	noRules:           "No ignore rules (Defender and Windows Search are always ignored).",
-	ignoreExample:     `  aba ignore add "C:\Program Files\Backblaze\bztransmit64.exe" --signer Backblaze`,
-	tricks:            "--allow-tricks needs --signer for a program outside Program Files and Windows: anything could be put at that path later",
-	catalogShort:      "Every bait ABA knows and whether it fits this PC",
-	renameShort:       "Give the baits new file names, this PC's own",
-	instantLong: "Instant freeze holds every bait with a Windows oplock. When a program opens one, Windows\n" +
-		"pauses it inside the open; ABA works out who it is and, if it's suspicious, freezes it\n" +
-		"before it reads anything. The normal detection keeps running as a backup.",
-	demoTitle:   "Possible stealer: FreeRobux.exe read your bait",
-	demoSummary: `DEMO: unsigned program running from a user-writable folder (C:\Users\you\Downloads): typical of stealers`,
-	demoBait:    `C:\Users\you\Desktop\passwords.txt`,
-	demoImage:   `C:\Users\you\Downloads\FreeRobux.exe`,
+	unsigned:          "  NO VALID SIGNATURE",
+	learnWarning:      "Only ignore software you recognise. Programs without a valid signature are almost never safe to ignore.",
+	noRules:           "No ignore rules (Spotlight, Time Machine, XProtect and known antivirus scanners are always ignored).",
+	ignoreExample:     `  sudo aba ignore add "/Applications/Your Backup.app/**" --signer "Your Backup's developer"`,
+	tricks:            "--allow-tricks needs --signer for a program in a folder you can write to: anything could be put at that path later",
+	catalogShort:      "Every bait ABA knows and whether it fits this Mac",
+	renameShort:       "Give the baits new file names, this Mac's own",
+	instantLong: "On macOS ABA hears of a bait being opened from Apple's Endpoint Security (eslogger), a few\n" +
+		"milliseconds after the open, and freezes a suspicious opener right then. macOS doesn't let it\n" +
+		"hold a program inside its open yet, so this setting changes nothing here.",
+	demoTitle:   "Possible stealer: FreeRobux read your bait",
+	demoSummary: "DEMO: program with no valid signature (unsigned), running from /Users/you/Downloads: typical of stealers",
+	demoBait:    "/Users/you/Desktop/passwords.txt",
+	demoImage:   "/Users/you/Downloads/FreeRobux",
 }
