@@ -136,6 +136,29 @@ var Catalog = []Spec{
 			return []FileSpec{{Path: j(u.Documents, name), Audit: true, Text: true, Gen: lf(genSeedTxt)}}
 		},
 	},
+	{
+		ID: "desktop-passwords", Name: "password list on the Desktop", Category: "Files", Kind: KindFile, Default: true,
+		Description: "The first folder file grabbers look in. You'll see it every day: don't open it.",
+		Files: func(u config.UserInfo) []FileSpec {
+			return []FileSpec{{Path: j(u.Desktop, passwordsName(u, "desktop")), Audit: true, Text: true, Gen: lf(genPasswordsTxt)}}
+		},
+	},
+	{
+		ID: "backup-codes", Name: "2FA backup codes (Documents)", Category: "Files", Kind: KindFile, Default: true,
+		Description: "Backup codes bypass 2FA, so stealers grab them.",
+		Files: func(u config.UserInfo) []FileSpec {
+			name := vary(u, "codes", "google backup codes.txt", "2fa backup codes.txt", "backup-codes.txt", "google 2fa codes.txt")
+			return []FileSpec{{Path: j(u.Documents, name), Audit: true, Text: true, Gen: lf(genBackupCodes)}}
+		},
+	},
+	{
+		ID: "keepass", Name: "KeePass database (Documents)", Category: "Files", Kind: KindFile, Default: true,
+		Description: "Stealers collect *.kdbx files to crack offline. KeePassXC only opens the databases you open.",
+		Files: func(u config.UserInfo) []FileSpec {
+			name := vary(u, "kdbx", "Passwords.kdbx", "Database.kdbx", "keepass.kdbx", "Personal.kdbx", "passwords backup.kdbx")
+			return []FileSpec{{Path: j(u.Documents, name), Audit: true, Gen: genKdbx}}
+		},
+	},
 
 	// ---- Browsers you don't use ----
 	{
@@ -161,7 +184,83 @@ var Catalog = []Spec{
 		},
 	},
 
+	{
+		ID: "opera", Name: "Opera browser profile", Category: "Browsers", Kind: KindDecoy, Default: true,
+		Description: "Fake saved passwords + cookies.",
+		Root:        func(u config.UserInfo) string { return j(u.RoamingAppData, "opera") },
+		Markers: func(u config.UserInfo) []string {
+			return programs("opera", "opera-stable", "/usr/lib/x86_64-linux-gnu/opera/opera", "/usr/lib/aarch64-linux-gnu/opera/opera", "/var/lib/flatpak/app/com.opera.Opera")
+		},
+		OwnerExes: []string{"opera"}, Signer: "opera",
+		Files: func(u config.UserInfo) []FileSpec {
+			// Opera keeps its one profile right in its data folder.
+			d := j(u.RoamingAppData, "opera")
+			return []FileSpec{
+				{Path: j(d, "Local State"), Audit: true, Gen: genLocalState},
+				{Path: j(d, "Login Data"), Audit: true, Gen: genLoginData},
+				{Path: j(d, "Cookies"), Audit: true, Gen: genCookies},
+			}
+		},
+	},
+	{
+		ID: "yandex", Name: "Yandex browser profile", Category: "Browsers", Kind: KindDecoy, Default: true,
+		Description: "Yandex's password store is on every stealer's list.",
+		Root:        func(u config.UserInfo) string { return j(u.RoamingAppData, "yandex-browser") },
+		Markers: func(u config.UserInfo) []string {
+			return programs("yandex-browser", "yandex-browser-stable", "/opt/yandex/browser/yandex_browser", "/opt/yandex/browser/yandex-browser")
+		},
+		OwnerExes: []string{"yandex_browser", "yandex-browser"}, Signer: "yandex",
+		Files: func(u config.UserInfo) []FileSpec {
+			d := j(u.RoamingAppData, "yandex-browser")
+			return []FileSpec{
+				{Path: j(d, "Local State"), Audit: true, Gen: genLocalState},
+				{Path: j(d, "Default", "Ya Passman Data"), Audit: true, Gen: genLoginData},
+				{Path: j(d, "Default", "Cookies"), Audit: true, Gen: genCookies},
+				{Path: j(d, "Default", "Preferences"), Gen: genPreferences},
+			}
+		},
+	},
+	{
+		ID: "firefox", Name: "Firefox profile", Category: "Browsers", Kind: KindDecoy,
+		Description: "Fake logins.json + key4.db, for a machine without Firefox.",
+		Caveat:      "If you install Firefox later it may pick up this fake profile before ABA retires it.",
+		Root:        func(u config.UserInfo) string { return j(u.Profile, ".mozilla", "firefox") },
+		Markers:     func(u config.UserInfo) []string { return firefoxHosts(u) },
+		OwnerExes:   []string{"firefox", "firefox-bin", "firefox-esr"}, Signer: "firefox",
+		Files: func(u config.UserInfo) []FileSpec {
+			base := j(u.Profile, ".mozilla", "firefox")
+			prof := j(base, firefoxProfile(u))
+			return []FileSpec{
+				{Path: j(base, "profiles.ini"), Gen: func(*Gen) []byte {
+					return bytes.ReplaceAll(bytes.ReplaceAll(genProfilesIni(firefoxProfile(u)), []byte("Path=Profiles/"), []byte("Path=")), []byte("\r\n"), []byte("\n"))
+				}},
+				{Path: j(prof, "logins.json"), Audit: true, Gen: genFirefoxLogins},
+				{Path: j(prof, "key4.db"), Audit: true, Gen: genKey4},
+				{Path: j(prof, "cookies.sqlite"), Audit: true, Gen: genMozCookies},
+			}
+		},
+	},
+
 	// ---- Browsers you do use: a fake profile inside the real one ----
+	// Firefox: Ubuntu's comes as a snap, others as a package or a flatpak, each
+	// with its data in its own place.
+	embeddedFirefox("firefox-profile", "Firefox", "firefox",
+		func(u config.UserInfo) string { return j(u.Profile, ".mozilla", "firefox") },
+		func(u config.UserInfo) []string {
+			return []string{"/usr/lib/firefox/firefox", "/usr/lib64/firefox/firefox", "/usr/lib/firefox-esr/firefox-esr", "/opt/firefox/firefox"}
+		}),
+	embeddedFirefox("firefox-snap-profile", "Firefox (snap)", "firefox",
+		func(u config.UserInfo) string {
+			return j(u.Profile, "snap", "firefox", "common", ".mozilla", "firefox")
+		},
+		func(u config.UserInfo) []string { return []string{"/snap/firefox/current/usr/lib/firefox/firefox"} }),
+	embeddedFirefox("firefox-flatpak-profile", "Firefox (flatpak)", "org.mozilla.firefox",
+		func(u config.UserInfo) string {
+			return j(u.Profile, ".var", "app", "org.mozilla.firefox", ".mozilla", "firefox")
+		},
+		func(u config.UserInfo) []string {
+			return []string{"/var/lib/flatpak/app/org.mozilla.firefox/current/active/files/lib/firefox/firefox"}
+		}),
 	embeddedProfile("chrome-profile", "Chrome", "chrome", "google-chrome",
 		func(u config.UserInfo) string { return j(u.RoamingAppData, "google-chrome") },
 		func(u config.UserInfo) []string { return []string{"/opt/google/chrome"} }),
@@ -192,6 +291,106 @@ var Catalog = []Spec{
 				{Path: j(d, "config"), Gen: func(*Gen) []byte {
 					return []byte("{\n    \"auto_connect\": true,\n    \"check_updates\": false,\n    \"config_version\": 3,\n    \"decimal_point\": 8,\n    \"is_maximized\": false,\n    \"oneserver\": false\n}")
 				}},
+			}
+		},
+	},
+
+	{
+		ID: "metamask", Name: "MetaMask wallet (inside a fake browser)", Category: "Wallets", Kind: KindDecoy, Default: true,
+		RequiresAny: decoyBrowsers,
+		Description: "The most targeted wallet extension. Lives inside one of the fake browser profiles.",
+		Files: func(u config.UserInfo) []FileSpec {
+			d := j(BrowserUserData(u, u.DecoyBrowser), "Default", "Local Extension Settings", metamaskID)
+			return []FileSpec{
+				{Path: j(d, ldbName(u, "metamask", "000003.log", ".log")), Audit: true, Gen: genMetamaskLog},
+				{Path: j(d, "CURRENT"), Audit: true, Gen: func(*Gen) []byte { return []byte("MANIFEST-000001\n") }},
+				{Path: j(d, "LOCK"), Gen: func(*Gen) []byte { return nil }},
+				{Path: j(d, "MANIFEST-000001"), Gen: genLevelDBManifest},
+			}
+		},
+	},
+	{
+		ID: "exodus", Name: "Exodus wallet", Category: "Wallets", Kind: KindDecoy, Default: true,
+		Description: "Fake seed.seco + passphrase.json.",
+		Root:        func(u config.UserInfo) string { return j(u.RoamingAppData, "Exodus") },
+		Markers: func(u config.UserInfo) []string {
+			return programs("exodus", "/opt/exodus/Exodus", "/opt/Exodus/Exodus", "/var/lib/flatpak/app/io.exodus.Exodus")
+		},
+		OwnerExes: []string{"exodus"}, Signer: "exodus",
+		Files: func(u config.UserInfo) []FileSpec {
+			d := j(u.RoamingAppData, "Exodus", "exodus.wallet")
+			return []FileSpec{
+				{Path: j(d, "seed.seco"), Audit: true, Gen: genSeco},
+				{Path: j(d, "passphrase.json"), Audit: true, Gen: genExodusPassphrase},
+				{Path: j(d, "info.seco"), Audit: true, Gen: genSeco},
+			}
+		},
+	},
+	{
+		ID: "atomic", Name: "Atomic Wallet", Category: "Wallets", Kind: KindDecoy, Default: true,
+		Description: "Fake wallet storage.",
+		Root:        func(u config.UserInfo) string { return j(u.RoamingAppData, "atomic") },
+		Markers: func(u config.UserInfo) []string {
+			return programs("atomic", "/opt/Atomic Wallet/atomic", "/var/lib/flatpak/app/io.atomicwallet.AtomicWallet")
+		},
+		OwnerExes: []string{"atomic"}, Signer: "atomic",
+		Files: func(u config.UserInfo) []FileSpec {
+			d := j(u.RoamingAppData, "atomic", "Local Storage", "leveldb")
+			return []FileSpec{
+				{Path: j(d, ldbName(u, "atomic", "000003.log", ".log")), Audit: true, Gen: genAtomicLog},
+				{Path: j(d, "CURRENT"), Audit: true, Gen: func(*Gen) []byte { return []byte("MANIFEST-000001\n") }},
+			}
+		},
+	},
+
+	// ---- Messaging & gaming ----
+	{
+		ID: "telegram", Name: "Telegram Desktop session", Category: "Apps", Kind: KindDecoy, Default: true,
+		Description: "Stolen tdata = logged-in Telegram account.",
+		Root:        func(u config.UserInfo) string { return j(u.LocalAppData, "TelegramDesktop") },
+		Markers: func(u config.UserInfo) []string {
+			return programs("telegram-desktop", "Telegram", "/opt/telegram/Telegram", "/var/lib/flatpak/app/org.telegram.desktop")
+		},
+		OwnerExes: []string{"telegram-desktop", "telegram"}, Signer: "telegram",
+		Files: func(u config.UserInfo) []FileSpec {
+			d := j(u.LocalAppData, "TelegramDesktop", "tdata")
+			return []FileSpec{
+				{Path: j(d, "key_datas"), Audit: true, Gen: genTDF},
+				{Path: j(d, "D877F783D5D3EF8C", "maps"), Audit: true, Gen: genTDF},
+				{Path: j(d, "D877F783D5D3EF8Cs"), Audit: true, Gen: genTDF},
+			}
+		},
+	},
+	{
+		ID: "discord", Name: "Discord token store", Category: "Apps", Kind: KindDecoy, Default: true,
+		Description: "Token grabbers read Discord's Local Storage.",
+		Root:        func(u config.UserInfo) string { return j(u.RoamingAppData, "discord") },
+		Markers: func(u config.UserInfo) []string {
+			return programs("discord", "/usr/share/discord/Discord", "/opt/discord/Discord", "/opt/Discord/Discord", "/var/lib/flatpak/app/com.discordapp.Discord")
+		},
+		OwnerExes: []string{"discord"}, Signer: "discord",
+		Files: func(u config.UserInfo) []FileSpec {
+			d := j(u.RoamingAppData, "discord", "Local Storage", "leveldb")
+			return []FileSpec{
+				{Path: j(d, ldbName(u, "discord", "000005.ldb", ".ldb")), Audit: true, Gen: genDiscordLdb},
+				{Path: j(d, "CURRENT"), Audit: true, Gen: func(*Gen) []byte { return []byte("MANIFEST-000001\n") }},
+				{Path: j(d, "LOCK"), Gen: func(*Gen) []byte { return nil }},
+			}
+		},
+	},
+	{
+		ID: "filezilla", Name: "FileZilla saved servers", Category: "Apps", Kind: KindDecoy, Default: true,
+		Description: "Saved FTP/SFTP logins.",
+		Root:        func(u config.UserInfo) string { return j(u.RoamingAppData, "filezilla") },
+		Markers: func(u config.UserInfo) []string {
+			return programs("filezilla", "/var/lib/flatpak/app/org.filezillaproject.Filezilla")
+		},
+		OwnerExes: []string{"filezilla"}, Signer: "filezilla",
+		Files: func(u config.UserInfo) []FileSpec {
+			d := j(u.RoamingAppData, "filezilla")
+			return []FileSpec{
+				{Path: j(d, "sitemanager.xml"), Audit: true, Text: true, Gen: lf(genSiteManager)},
+				{Path: j(d, "recentservers.xml"), Audit: true, Text: true, Gen: lf(genRecentServers)},
 			}
 		},
 	},
@@ -242,4 +441,14 @@ var Catalog = []Spec{
 			}
 		},
 	},
+}
+
+// firefoxHosts are the places a Firefox installs to: the distribution's
+// package, Mozilla's tarball, the snap (Ubuntu's, with /usr/bin/firefox as the
+// way to it) and the flatpak. (Only where root installs: a folder of yours
+// appearing proves nothing, and retiring a decoy for it is what a stealer
+// would want.)
+func firefoxHosts(u config.UserInfo) []string {
+	return append(programs("firefox", "firefox-esr", "/usr/lib/firefox/firefox", "/usr/lib64/firefox/firefox", "/usr/lib/firefox-esr/firefox-esr", "/opt/firefox/firefox"),
+		"/snap/firefox/current/usr/lib/firefox/firefox", "/var/lib/flatpak/app/org.mozilla.firefox")
 }

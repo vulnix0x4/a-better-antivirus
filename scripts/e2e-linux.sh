@@ -118,7 +118,7 @@ trap 'cleanup_units' EXIT
 say "Before: nothing installed"
 [ -e "/etc/systemd/system/$UNIT" ] && fail "ABA is already installed on this machine: this test is for a throwaway one"
 command -v jq >/dev/null || fail "jq is needed"
-mkdir -p "$HOME/Documents" "$HOME/Downloads"
+mkdir -p "$HOME/Documents" "$HOME/Downloads" "$HOME/Desktop"
 "$ABA_BIN" --version || fail "the binary doesn't run"
 
 # A browser that's really used, if there is one to run: ABA should plant a
@@ -129,6 +129,15 @@ if command -v google-chrome >/dev/null; then
   [ -f "$HOME/.config/google-chrome/Local State" ] && CHROME=yes
 fi
 note "a used Chrome profile to plant inside: ${CHROME:-no}"
+# The same for Firefox (the runner has Mozilla's build): a profile it has
+# really used, listed in its profiles.ini.
+FIREFOX=""; FFBIN=$(command -v firefox || true)
+if [ -n "$FFBIN" ]; then
+  timeout 90 "$FFBIN" --headless --screenshot "$OUT/ff.png" about:blank >/dev/null 2>&1 || true
+  [ -f "$HOME/.mozilla/firefox/profiles.ini" ] && FIREFOX=yes
+  [ -f "$HOME/snap/firefox/common/.mozilla/firefox/profiles.ini" ] && FIREFOX=snap
+fi
+note "a used Firefox profile to plant inside: ${FIREFOX:-no} (${FFBIN:-no firefox} -> $(readlink -f "${FFBIN:-/nonexistent}" 2>/dev/null))"
 
 # =====================================================================
 say "Install"
@@ -162,7 +171,7 @@ ok "aba phone test reached the phone"
 
 say "Baits"
 sudo aba bait list | sed 's/^/      /'
-for id in home-passwords documents-passwords vivaldi brave electrum ssh-key git-credentials aws; do
+for id in home-passwords documents-passwords desktop-passwords backup-codes keepass vivaldi brave opera yandex metamask electrum exodus atomic telegram discord filezilla ssh-key git-credentials aws; do
   f=$(bait_file "$id"); [ -n "$f" ] && [ -f "$f" ] || fail "bait $id wasn't planted ($f)"
   [ "$(stat -c %U "$f")" = "$ME" ] || fail "bait $f belongs to $(stat -c %U "$f"), not $ME"
 done
@@ -178,6 +187,14 @@ else
 fi
 if [ -n "$CHROME" ]; then
   check "a fake profile inside the real Chrome" test -n "$(bait_file chrome-profile)"
+fi
+if [ -n "$FIREFOX" ]; then
+  FFBAIT=firefox-profile; [ "$FIREFOX" = snap ] && FFBAIT=firefox-snap-profile
+  check "a fake profile inside the real Firefox" test -n "$(bait_file $FFBAIT)"
+  note "$(bait_file $FFBAIT)"
+  ffdir=$(dirname "$(bait_file $FFBAIT)")
+  grep -q "$(basename "$ffdir")" "$(dirname "$ffdir")/profiles.ini" && fail "the fake Firefox profile is listed in profiles.ini: Firefox would open it"
+  ok "and Firefox's profiles.ini doesn't list it"
 fi
 check "the real AWS credentials file isn't faked" test ! -e "$HOME/.aws/credentials"
 mapfile -t BAIT_FILES < <(state | jq -r '.baits[].files[].path')
@@ -426,6 +443,16 @@ if [ -n "$CHROME" ]; then
   sleep 8
   n=$(alerts | jq '[.[] | select((.process.image // "") | test("chrome"))] | length')
   check "Chrome ran without touching its fake profile" test "$n" = 0
+  check "nothing else was alerted about meanwhile" test "$(alerts | jq length)" = "$count"
+fi
+
+if [ -n "$FIREFOX" ]; then
+  say "The real Firefox doesn't trip the fake profile inside it"
+  count=$(alerts | jq length)
+  launch firefox "$FFBIN" --headless --screenshot "$OUT/ff2.png" about:blank >/dev/null
+  sleep 15
+  n=$(alerts | jq '[.[] | select((.process.image // "") | test("firefox"))] | length')
+  check "Firefox ran without touching its fake profile" test "$n" = 0
   check "nothing else was alerted about meanwhile" test "$(alerts | jq length)" = "$count"
 fi
 
