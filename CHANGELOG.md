@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## v0.7.1
+
+The clipboard bait now works on real copies, and alerts say where a program came from.
 
 **Clipboard bait**
 
