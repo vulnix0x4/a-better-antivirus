@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"github.com/vulnix0x4/a-better-antivirus/internal/platform"
 	"strings"
 
 	"github.com/charmbracelet/huh"
@@ -144,7 +145,7 @@ func runInstall(reconfigure bool, f installFlags) error {
 	run := true
 	if err := huh.NewConfirm().Title("Want to see it catch something?").
 		Description("A harmless copy of ABA in your Temp folder reads a bait, the way a stealer would.\n" +
-			"You'll watch it get frozen and see the alert popup. Nothing leaves your PC.").
+			words.testNothingLeaves).
 		Affirmative("Run the safe test").Negative("Not now").Value(&run).WithTheme(theme()).Run(); err != nil || !run {
 		fmt.Println(ui.Hint("Any time:", "aba test"))
 		return nil
@@ -182,7 +183,7 @@ func renderDoneCard(cfg *config.Config, st *config.State, sec *config.Secrets, f
 		head = "All set. You're protected."
 	}
 	rows := [][2]string{
-		{"Baits", fmt.Sprintf("%d planted, watched by Windows' own file auditing", active)},
+		{"Baits", fmt.Sprintf(words.watchedBy, active)},
 		{"Response", cfg.PresetName() + ui.Fainter.Render("  ·  "+responseLine(cfg))},
 	}
 	if cfg.Learning(timeNow()) && cfg.LearningMatters() {
@@ -223,7 +224,7 @@ func responseLine(cfg *config.Config) string {
 	case len(acts) == 0:
 		return "alerts only, never acts"
 	case config.Has(acts, config.ActionIsolate):
-		return "critical: frozen, PC cut off the network"
+		return "critical: frozen, " + platform.PC + " cut off the network"
 	case config.Has(acts, config.ActionKill):
 		return "critical: killed"
 	case config.Has(acts, config.ActionFreeze) && config.Has(acts, config.ActionBlockProgram):
@@ -238,7 +239,7 @@ func uninstallCmd() *cobra.Command {
 	var purge, yes bool
 	c := &cobra.Command{
 		Use:   "uninstall",
-		Short: "Remove it and every bait, restoring Windows",
+		Short: words.uninstallShort,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireAdmin(); err != nil {
 				return err
@@ -248,7 +249,7 @@ func uninstallCmd() *cobra.Command {
 			fmt.Println()
 			if !yes && ui.IsTTY() {
 				ok := false
-				desc := "Removes the service, every bait and any network blocks, and puts Windows' audit setting\nback the way it was."
+				desc := words.uninstallDesc
 				if !purge {
 					desc += "\nYour alert history is kept (add --purge to delete it too)."
 				}
@@ -262,7 +263,7 @@ func uninstallCmd() *cobra.Command {
 			if err := ui.RunSteps("Removing A Better Antivirus", install.UninstallSteps(purge)); err != nil {
 				return err
 			}
-			fmt.Println("\n" + ui.Good.Render(ui.IconOK) + " " + ui.Bold.Render("A Better Antivirus is uninstalled.") + ui.Dim.Render(" Windows' settings are back to how they were."))
+			fmt.Println("\n" + ui.Good.Render(ui.IconOK) + " " + ui.Bold.Render("A Better Antivirus is uninstalled.") + ui.Dim.Render(words.uninstallDone))
 			return nil
 		},
 	}

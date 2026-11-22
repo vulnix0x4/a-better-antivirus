@@ -268,3 +268,8 @@ func RunElevated(exe string, args ...string) error {
 	}
 	return err
 }
+
+// vouchLabel names what vouches for a program, in an alert's details: on
+// Linux, a package ("Package: part of the git package", "Package: no package
+// owns it").
+const vouchLabel = "Package"

@@ -3,6 +3,7 @@ package ui
 import (
 	"errors"
 	"fmt"
+	"github.com/vulnix0x4/a-better-antivirus/internal/platform"
 	"strings"
 	"time"
 
@@ -62,7 +63,7 @@ func actionList(acts []config.Action) string {
 	}
 	words := map[config.Action]string{
 		config.ActionFreeze: "frozen", config.ActionBlockProgram: "internet cut", config.ActionKill: "killed",
-		config.ActionIsolate: "PC isolated", config.ActionDisableAdapters: "adapters off",
+		config.ActionIsolate: platform.Capital(platform.PC) + " isolated", config.ActionDisableAdapters: "adapters off",
 	}
 	var s []string
 	for _, a := range acts {
@@ -95,7 +96,7 @@ func RenderStatus(d StatusData) string {
 	if incident {
 		var lines []string
 		if st.Isolation != nil {
-			lines = append(lines, fmt.Sprintf("This PC is cut off from the network since %s (alert %s).", st.Isolation.Since.Format("Jan 2 15:04"), shortID(st.Isolation.AlertID)))
+			lines = append(lines, fmt.Sprintf("This "+platform.PC+" is cut off from the network since %s (alert %s).", st.Isolation.Since.Format("Jan 2 15:04"), shortID(st.Isolation.AlertID)))
 		}
 		if len(st.Frozen) > 0 {
 			lines = append(lines, plural(len(st.Frozen), "process", "processes")+" frozen.")
@@ -266,7 +267,7 @@ func AlertTable(list []*alerts.Alert, w int) string {
 		for _, r := range a.Actions {
 			if r.OK {
 				tags = append(tags, map[config.Action]string{config.ActionFreeze: "frozen", config.ActionBlockProgram: "internet cut",
-					config.ActionKill: "killed", config.ActionIsolate: "PC isolated", config.ActionDisableAdapters: "adapters off"}[r.Action])
+					config.ActionKill: "killed", config.ActionIsolate: platform.Capital(platform.PC) + " isolated", config.ActionDisableAdapters: "adapters off"}[r.Action])
 			}
 		}
 		status := ""
@@ -439,7 +440,7 @@ func AlertDetail(a *alerts.Alert) string {
 			rows = append(rows, [2]string{"aba resume " + id, "not sure: let it run again, without trusting it"})
 		}
 		if a.Did(config.ActionIsolate) {
-			rows = append(rows, [2]string{"aba release", "reconnect the PC when it's safe"})
+			rows = append(rows, [2]string{"aba release", "reconnect the " + platform.PC + " when it's safe"})
 		}
 		b.WriteString(Heading("What now") + "\n" + indent(Cmd(rows), 2) + "\n")
 	}

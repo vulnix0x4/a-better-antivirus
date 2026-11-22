@@ -80,7 +80,7 @@ func Rule(a *alerts.Alert) (rule config.IgnoreRule, why string) {
 			hash, _ = procinfo.FileSHA256(p.Image)
 		}
 		if hash == "" {
-			return config.IgnoreRule{}, "ABA couldn't fingerprint " + exe + " (it's unsigned, so it's only trusted by fingerprint)"
+			return config.IgnoreRule{}, "ABA couldn't fingerprint " + exe + " (" + fingerprintWhy + ")"
 		}
 		rule.Path, rule.SHA256 = p.Image, strings.ToLower(hash)
 	}
@@ -109,7 +109,7 @@ func Describe(r config.IgnoreRule, names map[string]string) string {
 	case r.SHA256 != "":
 		parts = append(parts, "only this exact file (fingerprint "+short(r.SHA256)+"…)")
 	case r.Signer != "":
-		parts = append(parts, "signed by "+r.Signer)
+		parts = append(parts, vouchedBy+r.Signer)
 	}
 	if len(r.Baits) == 0 {
 		parts = append(parts, "all baits")

@@ -15,6 +15,7 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/baits"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
+	"github.com/vulnix0x4/a-better-antivirus/internal/platform"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
 	"github.com/vulnix0x4/a-better-antivirus/internal/svcctl"
 )
@@ -99,21 +100,21 @@ func Run() []Result {
 		case missing > 0:
 			add(Warning, "Baits", fmt.Sprintf("%d file(s) missing (the service restores them every 5 minutes)", missing), "aba doctor --fix")
 		case noAudit > 0:
-			add(Warning, "Baits", fmt.Sprintf("%d file(s) lost their audit rule", noAudit), "aba doctor --fix")
+			add(Warning, "Baits", fmt.Sprintf(lostTripwire, noAudit), "aba doctor --fix")
 		default:
 			d := fmt.Sprintf("%d active", total)
 			if retired > 0 {
 				d += fmt.Sprintf(", %d retired (you installed the real app)", retired)
 			}
 			if !admin {
-				d += "; run as admin to verify audit rules"
+				d += verifyHint
 			}
 			add(OK, "Baits", d, "")
 		}
 
 		// Recent files.
 		idx := baits.Index(st)
-		recent := filepath.Join(cfg.User.RoamingAppData, `Microsoft\Windows\Recent`)
+		recent := recentFolder(cfg.User)
 		n := 0
 		if entries, err := os.ReadDir(recent); err == nil {
 			for _, e := range entries {
@@ -124,7 +125,9 @@ func Run() []Result {
 				}
 			}
 		}
-		if n > 0 {
+		if recent == "" {
+			// nothing of the kind on this system
+		} else if n > 0 {
 			add(Warning, "Recent files", fmt.Sprintf("%d shortcut(s) point at baits; apps like Copilot read these", n), "aba doctor --fix")
 		} else {
 			add(OK, "Recent files", "no shortcuts to baits", "")
@@ -132,7 +135,7 @@ func Run() []Result {
 
 		// Active responses.
 		if st.Isolation != nil {
-			add(Warning, "Network", "PC is isolated since "+st.Isolation.Since.Format("Jan 2 15:04"), "aba release")
+			add(Warning, "Network", platform.Capital(platform.PC)+" is isolated since "+st.Isolation.Since.Format("Jan 2 15:04"), "aba release")
 		}
 		if len(st.Frozen) > 0 {
 			add(Warning, "Frozen processes", fmt.Sprintf("%d still frozen", len(st.Frozen)), "aba alerts")

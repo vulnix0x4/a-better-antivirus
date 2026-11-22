@@ -76,7 +76,7 @@ func Steps(o Options) []Step {
 	}
 
 	steps := []Step{
-		{Name: "Checking this PC", Run: func() (string, error) {
+		{Name: "Checking this " + platform.PC, Run: func() (string, error) {
 			if !procinfo.SelfElevated() {
 				return "", errors.New("installing needs administrator rights")
 			}
@@ -198,8 +198,8 @@ func Steps(o Options) []Step {
 			defer cancel()
 			made := 0
 			want := []struct{ kind, memo, bait string }{
-				{"aws_keys", "A Better Antivirus: someone used the AWS keys from a decoy ~/.aws/credentials file. Treat that PC as compromised.", "aws"},
-				{"web", "A Better Antivirus: someone opened the link from a decoy passwords.txt. Treat that PC as compromised.", "passwords"},
+				{"aws_keys", "A Better Antivirus: someone used the AWS keys from a decoy ~/.aws/credentials file. Treat that " + platform.PC + " as compromised.", "aws"},
+				{"web", "A Better Antivirus: someone opened the link from a decoy passwords.txt. Treat that " + platform.PC + " as compromised.", "passwords"},
 			}
 			for _, w := range want {
 				if have[w.kind] {
@@ -258,7 +258,7 @@ func SendTest(p config.PhoneConfig) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	return notify.NewSender(p, notify.NewDialCache(cache)).Send(ctx, notify.Message{
-		Title: "A Better Antivirus is set up", Body: "Phone alerts work: if something takes the bait on your PC, you'll hear about it here.", Priority: 3})
+		Title: "A Better Antivirus is set up", Body: "Phone alerts work: if something takes the bait on your " + platform.PC + ", you'll hear about it here.", Priority: 3})
 }
 
 // ourBaits returns IDs of baits currently in state (so our own decoy folders
@@ -310,7 +310,7 @@ func AddCatalogBait(cfg *config.Config, id string) error {
 			continue
 		}
 		if !a.Available {
-			return fmt.Errorf("%s doesn't fit this PC: %s", spec.Name, a.Reason)
+			return fmt.Errorf("%s doesn't fit this "+platform.PC+": %s", spec.Name, a.Reason)
 		}
 	}
 	placeEmbedded(cfg, spec, planted)

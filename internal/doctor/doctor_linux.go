@@ -69,3 +69,15 @@ var syncTools = map[string]string{
 	"insync": "Insync", "rclone": "rclone", "restic": "restic", "borg": "Borg", "duplicity": "Duplicity", "deja-dup-monitor": "Backups (Déjà Dup)",
 	"timeshift": "Timeshift", "backintime": "Back In Time", "kopia": "Kopia", "onedrive": "OneDrive",
 }
+
+// What the baits check says about the tripwire on each file: on Linux, the
+// kernel's watch, which lives in the service.
+const (
+	lostTripwire = "%d file(s) aren't watched"
+	verifyHint   = "; run with sudo to check they're watched"
+)
+
+// recentFolder: Linux desktops keep the files you opened in a list
+// (recently-used.xbel), not as shortcut files, so there's nothing of that
+// kind to check.
+func recentFolder(u config.UserInfo) string { return "" }

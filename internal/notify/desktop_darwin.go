@@ -23,3 +23,6 @@ func RunElevated(exe string, args ...string) error {
 }
 
 var lastToastErr string
+
+// vouchLabel names what vouches for a program, in an alert's details.
+const vouchLabel = "Signature"

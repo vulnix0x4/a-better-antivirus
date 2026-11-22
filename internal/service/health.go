@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"github.com/vulnix0x4/a-better-antivirus/internal/platform"
 	"strings"
 	"time"
 
@@ -193,7 +194,7 @@ func (s *server) healthCheck(startup bool) {
 	if ns, err := netguard.GetStatus(); err != nil {
 		add("Network guard", false, err.Error())
 	} else if ns.Isolated {
-		add("Network guard", true, "PC is ISOLATED (run `aba release` when safe)")
+		add("Network guard", true, platform.Capital(platform.PC)+" is ISOLATED (run `aba release` when safe)")
 	} else {
 		add("Network guard", true, fmt.Sprintf("ready (%d active rules)", ns.Rules))
 	}

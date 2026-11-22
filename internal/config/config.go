@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/vulnix0x4/a-better-antivirus/internal/platform"
 	"os"
 	"path/filepath"
 	"sort"
@@ -61,7 +62,7 @@ func (a Action) Describe() string {
 	case ActionKill:
 		return "Kill the process tree"
 	case ActionIsolate:
-		return "Isolate the PC from the network (ABA alerts still get out)"
+		return "Isolate the " + platform.PC + " from the network (ABA alerts still get out)"
 	case ActionDisableAdapters:
 		return "Disable network adapters (blunt fallback)"
 	}
@@ -91,7 +92,7 @@ var Presets = []Preset{
 	},
 	{
 		ID: "strict", Name: "Strict",
-		Description: "Critical readers get frozen and the whole PC is isolated. Suspicious ones get frozen.",
+		Description: "Critical readers get frozen and the whole " + platform.PC + " is isolated. Suspicious ones get frozen.",
 		Responses: map[Tier][]Action{
 			TierWarn:     {ActionFreeze},
 			TierCritical: {ActionFreeze, ActionBlockProgram, ActionIsolate},
@@ -355,7 +356,7 @@ func (a Action) Verb() string {
 	case ActionKill:
 		return "kill it"
 	case ActionIsolate:
-		return "isolate this PC"
+		return "isolate this " + platform.PC
 	case ActionDisableAdapters:
 		return "turn off the network adapters"
 	}
@@ -377,7 +378,7 @@ func (a Action) Done(detail string) string {
 	case ActionKill:
 		return "Killed it"
 	case ActionIsolate:
-		return "Isolated this PC from the network (ABA's own alerts still get out)"
+		return "Isolated this " + platform.PC + " from the network (ABA's own alerts still get out)"
 	case ActionDisableAdapters:
 		if detail != "" {
 			return "Turned off network adapters: " + detail
