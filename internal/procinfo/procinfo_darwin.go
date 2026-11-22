@@ -33,10 +33,10 @@ import (
 func kinfo(pid uint32) (*unix.KinfoProc, error) {
 	k, err := unix.SysctlKinfoProc("kern.proc.pid", int(pid))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("process %d: %w", pid, err)
 	}
 	if k.Proc.P_pid != int32(pid) {
-		return nil, fmt.Errorf("no process %d", pid)
+		return nil, fmt.Errorf("no process %d (the kernel answered for %d)", pid, k.Proc.P_pid)
 	}
 	return k, nil
 }
@@ -84,7 +84,7 @@ func CreateTime(pid uint32) (int64, error) {
 		return 0, err
 	}
 	if k.Proc.P_stat == szomb {
-		return 0, errors.New("process has exited")
+		return 0, fmt.Errorf("process %d has exited", pid)
 	}
 	return startOf(k), nil
 }

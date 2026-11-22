@@ -322,7 +322,13 @@ func (s *server) UserSession(pid uint32) bool              { return procinfo.Use
 func (s *server) Elevated(pid uint32) bool                 { return procinfo.Elevated(pid) }
 func (s *server) CreateTime(pid uint32) int64              { t, _ := procinfo.CreateTime(pid); return t }
 func (s *server) Verify(p string) provenance.Result        { return provenance.Verify(p) }
-func (s *server) SuspendTree(pid uint32) ([]uint32, error) { return procinfo.SuspendTree(pid) }
+func (s *server) SuspendTree(pid uint32) ([]uint32, error) {
+	frozen, err := procinfo.SuspendTree(pid)
+	if err != nil {
+		s.log.Printf("freezing pid %d: %v (%d frozen)", pid, err, len(frozen))
+	}
+	return frozen, err
+}
 func (s *server) KillTree(pid uint32) error                { return procinfo.KillTree(pid) }
 func (s *server) Forensics(pid uint32, p *alerts.Process)  { engine.ProcessDetails(pid, p) }
 func (s *server) CommandLine(pid uint32) string            { c, _ := procinfo.CommandLine(pid); return c }
