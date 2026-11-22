@@ -129,7 +129,14 @@ function WaitFor([scriptblock]$cond, [int]$seconds = 20) {
     }
     return $null
 }
-function AlertFor([int]$procId, [int]$seconds = 20) { WaitFor { Alerts | Where-Object { $_.process.pid -eq $procId } | Select-Object -Last 1 } $seconds }
+# Windows hands out the ID of a program that has exited to the next one soon
+# after, so an alert from an earlier test program can carry the ID of the one
+# under test. Snap (called just before a test program starts) notes the alerts
+# so far; Fresh is the alerts made since, which are the only ones about it.
+$script:known = @{}
+function Snap { $script:known = @{}; foreach ($x in @(Alerts)) { $script:known[$x.id] = $true } }
+function Fresh { Alerts | Where-Object { -not $script:known.ContainsKey($_.id) } }
+function AlertFor([int]$procId, [int]$seconds = 20) { WaitFor { Fresh | Where-Object { $_.process.pid -eq $procId } | Select-Object -Last 1 } $seconds }
 function State { Get-Content "$data\state.json" -Raw | ConvertFrom-Json }
 # A command that changes settings tells the service to re-read them and returns
 # at once; the service takes them in a moment later (about a second here). A
@@ -156,6 +163,7 @@ function Stealer([string]$name, [string]$bait, [switch]$Again) {
         }
         [IO.File]::AppendAllText($exe, [guid]::NewGuid().ToString())
     }
+    Snap
     $procId = & $Medium $exe test-reader $bait
     if ($LASTEXITCODE -or -not $procId) { Fail "fake stealer $name didn't start" }
     $p = Get-Process -Id ([int]$procId) -ErrorAction SilentlyContinue
@@ -280,10 +288,11 @@ $sw = [Diagnostics.Stopwatch]::StartNew()
 # Bait names differ per install and can contain a space ("my passwords.txt").
 # Start-Process doesn't quote arguments, so an unquoted URL reached curl as two.
 $legitUrl = 'file:///' + (($desktopBait -replace '\\', '/') -replace ' ', '%20')
+Snap
 $c = Start-Process -FilePath $legit -ArgumentList '-sS', '-o', "`"$legitOut`"", "`"$legitUrl`"" -NoNewWindow -PassThru
 $null = $c.Handle
 if (-not $c.WaitForExit(20000)) {
-    $verdict = Alerts | Where-Object { $_.process.pid -eq $c.Id } | Select-Object -Last 1
+    $verdict = Fresh | Where-Object { $_.process.pid -eq $c.Id } | Select-Object -Last 1
     Fail "signed curl was still stuck after 20 s; ABA's verdict: $($verdict.tier) / $($verdict.process.signature | ConvertTo-Json -Compress) / $($verdict.summary)"
 }
 $sw.Stop()
@@ -345,9 +354,10 @@ Step 'A Windows program going through several apps'' data is stopped (how an inj
 # only "suspicious". Reading your files, Discord and a browser in a row is a sweep.
 $sweepBaits = @($desktopBait, $discordBait, ($st.baits.brave.files | Where-Object audit | Select-Object -First 1).path)
 $findExe = "$env:SystemRoot\System32\find.exe"
+Snap
 $fp = & $Medium -raw $findExe ("'$findExe' 'zz-not-there' " + (($sweepBaits | ForEach-Object { "'$_'" }) -join ' '))
 if ($LASTEXITCODE -or -not $fp) { Fail "find.exe didn't start" }
-$a6 = WaitFor { Alerts | Where-Object { $_.process.pid -eq [int]$fp -and $_.tier -eq 'critical' } | Select-Object -Last 1 } 20
+$a6 = WaitFor { Fresh | Where-Object { $_.process.pid -eq [int]$fp -and $_.tier -eq 'critical' } | Select-Object -Last 1 } 20
 Check ($a6) "find.exe sweeping 3 apps' baits is critical: $($a6.summary)"
 Check (@($a6.verdict.swept).Count -ge 3) "swept: $($a6.verdict.swept -join ', ')"
 if ((Get-Process -Id ([int]$fp) -ErrorAction SilentlyContinue).SessionId -gt 0) {
@@ -396,6 +406,7 @@ function Evader([string]$mode, [string]$bait) {
     # The reader before this one has only just let go of the bait (or been
     # killed): give the service a moment to put its guard back on it.
     Start-Sleep -Seconds 2
+    Snap
     $procId = & $Medium $tool $mode $bait
     if ($LASTEXITCODE -or -not $procId) { Fail "evasion helper ($mode) didn't start" }
     return [int]$procId
@@ -406,7 +417,7 @@ Check ($a0 -and $a0.tier -eq 'warn' -and -not (Did $a0 'freeze')) "read normally
 Stop-Process -Id $e0 -Force -ErrorAction SilentlyContinue
 foreach ($mode in 'ghost', 'map') {
     $e = Evader $mode $discordBait
-    $a = WaitFor { Alerts | Where-Object { $_.process.pid -eq $e -and $_.tier -eq 'critical' } | Select-Object -Last 1 } 20
+    $a = WaitFor { Fresh | Where-Object { $_.process.pid -eq $e -and $_.tier -eq 'critical' } | Select-Object -Last 1 } 20
     Check ($a) "${mode}: critical: $($a.summary)"
     Check ($a.verdict.evasion -eq $true) "${mode}: recognised as evasion"
     Check ((Did $a 'freeze') -and (WaitFor { IsSuspended $e } 5)) "${mode}: frozen"
@@ -419,7 +430,7 @@ foreach ($mode in 'ghost', 'map') {
 }
 foreach ($mode in 'link', 'linkgone') {
     $e = Evader $mode $discordBait
-    $a = WaitFor { Alerts | Where-Object { $_.process.pid -eq $e } | Select-Object -Last 1 } 20
+    $a = WaitFor { Fresh | Where-Object { $_.process.pid -eq $e } | Select-Object -Last 1 } 20
     if (-not $a -and $mode -eq 'linkgone') {
         # With the link deleted again there's no file left to identify: this one
         # relies on instant freeze having singled the reader out, which it

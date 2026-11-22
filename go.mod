@@ -18,7 +18,6 @@ require (
 )
 
 require (
-	github.com/BurntSushi/toml v0.4.1 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/catppuccin/go v0.3.0 // indirect
@@ -46,11 +45,11 @@ require (
 	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	go4.org/netipx v0.0.0-20220725152314-7e7bdc8411bf // indirect
-	golang.org/x/exp/typeparams v0.0.0-20220218215828-6cf2b201936e // indirect
-	golang.org/x/mod v0.17.0 // indirect
 	golang.org/x/net v0.33.0 // indirect
 	golang.org/x/sync v0.15.0 // indirect
 	golang.org/x/text v0.23.0 // indirect
-	golang.org/x/tools v0.21.1-0.20240508182429-e35e4ccd0d2d // indirect
-	honnef.co/go/tools v0.3.2 // indirect
 )
+
+// A copy of tailscale/wf with one fix: its allocator returned unaligned
+// memory, which crashed the service while a GC ran (see third_party/wf/malloc.go).
+replace github.com/tailscale/wf => ./third_party/wf

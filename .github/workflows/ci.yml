@@ -24,6 +24,12 @@ jobs:
       - name: Unit tests
         run: go test ./...
 
+      # Our patched copy of the WFP library is a module of its own, which
+      # ./... above doesn't reach.
+      - name: Unit tests (third_party/wf)
+        working-directory: third_party/wf
+        run: go test -count=1 ./...
+
       # GitHub's Windows runners are elevated, so we can test the real thing:
       # audit rules, the Security log and WFP filters.
       - name: Integration tests (admin)
