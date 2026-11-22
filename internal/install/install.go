@@ -18,6 +18,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -531,8 +532,17 @@ func UninstallSteps(purge bool) []Step {
 				}
 			}
 			err := config.UpdateState(func(st *config.State) error {
-				for id, bs := range st.Baits {
-					baits.Remove(bs)
+				// Baits that live inside another one (MetaMask inside a fake
+				// browser) first: a folder ABA made is only removed once it's
+				// empty, so the browser's goes after what's inside it.
+				ids := make([]string, 0, len(st.Baits))
+				for id := range st.Baits {
+					ids = append(ids, id)
+				}
+				inside := func(id string) bool { s, ok := baits.ByID(id); return ok && len(s.RequiresAny) > 0 }
+				sort.SliceStable(ids, func(i, j int) bool { return inside(ids[i]) && !inside(ids[j]) })
+				for _, id := range ids {
+					baits.Remove(st.Baits[id])
 					delete(st.Baits, id)
 					n++
 				}

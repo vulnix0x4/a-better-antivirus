@@ -207,8 +207,19 @@ func (d *Dirs) Run() {
 			if pid == self {
 				continue // ABA repairing or removing its own baits
 			}
-			dir, name, ok := d.parse(ev[metaLen:])
+			dir, name, h, ok := d.parse(ev[metaLen:])
 			if !ok {
+				continue
+			}
+			// A folder that was moved away keeps its mark: what happens in it
+			// now happens elsewhere, not at the path it was marked under.
+			if cur, err := dirHandle(dir); err != nil || cur != h {
+				d.mu.Lock()
+				if d.byDir[h] == dir {
+					delete(d.byDir, h)
+					delete(d.marked, dir)
+				}
+				d.mu.Unlock()
 				continue
 			}
 			d.changed(uint32(pid), filepath.Join(dir, name), mask)
@@ -218,12 +229,12 @@ func (d *Dirs) Run() {
 
 // parse reads the DFID_NAME record of an event: the folder's file handle and
 // the name in it.
-func (d *Dirs) parse(info []byte) (dir, name string, ok bool) {
+func (d *Dirs) parse(info []byte) (dir, name, handle string, ok bool) {
 	ne := binary.NativeEndian
 	for len(info) >= 4 {
 		typ, size := info[0], int(ne.Uint16(info[2:]))
 		if size < 4 || size > len(info) {
-			return "", "", false
+			return "", "", "", false
 		}
 		rec := info[:size]
 		info = info[size:]
@@ -232,12 +243,12 @@ func (d *Dirs) parse(info []byte) (dir, name string, ok bool) {
 		}
 		// header (4), fsid (8), handle_bytes (4), handle_type (4), handle, name\0
 		if len(rec) < 20 {
-			return "", "", false
+			return "", "", "", false
 		}
 		hb := int(ne.Uint32(rec[12:]))
 		ht := int32(ne.Uint32(rec[16:]))
 		if 20+hb > len(rec) {
-			return "", "", false
+			return "", "", "", false
 		}
 		h := handleKey(ht, rec[20:20+hb])
 		rest := rec[20+hb:]
@@ -247,9 +258,9 @@ func (d *Dirs) parse(info []byte) (dir, name string, ok bool) {
 		d.mu.Lock()
 		dir = d.byDir[h]
 		d.mu.Unlock()
-		return dir, string(rest), dir != "" && len(rest) > 0
+		return dir, string(rest), h, dir != "" && len(rest) > 0
 	}
-	return "", "", false
+	return "", "", "", false
 }
 
 func (d *Dirs) changed(pid uint32, path string, mask uint64) {

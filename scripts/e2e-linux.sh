@@ -472,6 +472,10 @@ kill -9 "$pid" 2>/dev/null
 echo "not the bait" > "$HOME/.e2e-swap"; mv "$HOME/.e2e-swap" "$PASSWORDS" || fail "couldn't rename a file over the bait"
 wait_until 50 bash -c "[ \$(sudo sh -c 'cat $DATA/alerts/*.json' | jq -s '[.[] | select(.kind==\"delete\")] | length') -ge 2 ]" || fail "a bait replaced by a rename over it wasn't reported"
 ok "replaced by a rename over it: reported"
+# What was renamed over it is somebody's file now, which ABA never deletes (not
+# even when it's uninstalled): take it away, and ABA plants its bait again.
+rm -f "$PASSWORDS"; wait_until 25 test -f "$PASSWORDS" || fail "the bait wasn't planted again after the file put in its place was deleted"
+grep -q "not the bait" "$PASSWORDS" && fail "the file put in the bait's place came back instead of the bait"
 VIV=$(bait_file vivaldi); mv "$HOME/.config/vivaldi" "$HOME/.config/vivaldi-moved" || fail "couldn't move the fake Vivaldi folder"
 wait_until 25 test -f "$VIV" || fail "a folder of baits renamed away wasn't put back"
 ok "a folder of baits renamed away: put back"
