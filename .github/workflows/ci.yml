@@ -107,6 +107,20 @@ jobs:
         if: runner.os == 'Linux'
         run: bash scripts/e2e-linux.sh ./dist/aba ./dist/grabber ./dist/notifyd
 
+      # The Linux files a release publishes (.goreleaser-linux.yaml), built the
+      # way the release workflow builds them, short of signing and publishing;
+      # then the checks it makes on them: the .deb installed, set up and
+      # removed, install.sh run against this local copy of the release.
+      - name: Build the Linux release files
+        if: runner.os == 'Linux'
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --snapshot --clean --skip=sign,publish --config .goreleaser-linux.yaml
+      - name: Check the packages and install.sh
+        if: runner.os == 'Linux'
+        run: bash scripts/packages-linux.sh dist-linux
+
       - name: Service log (after a failure)
         if: failure() && runner.os == 'Linux'
         run: |

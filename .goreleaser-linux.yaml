@@ -1,0 +1,72 @@
+# The Linux files of a release: the program for amd64 and arm64, as a plain
+# file (what `aba update` and install.sh download), a tarball, and .deb and
+# .rpm packages.
+#
+# They have a checksum list of their own, SHA256SUMS-linux.txt, signed with
+# the same release key: SHA256SUMS.txt is the Windows files' list and
+# promises to hold nothing else (see installer/verify.ps1). The release
+# workflow runs this after .goreleaser.yaml, on a Linux runner, adding these
+# files to the release it made.
+version: 2
+
+project_name: a-better-antivirus
+dist: dist-linux
+
+builds:
+  - id: aba-linux
+    main: ./cmd/aba
+    binary: aba
+    env: [CGO_ENABLED=0]
+    goos: [linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags: ["-s -w -X main.version={{.Tag}}"]
+
+archives:
+  - id: bin
+    formats: [binary]
+    name_template: "aba_{{ .Tag }}_linux_{{ .Arch }}"
+  - id: tarball
+    formats: [tar.gz]
+    name_template: "aba_{{ .Tag }}_linux_{{ .Arch }}"
+    files: [README.md, LICENSE, install.sh]
+    builds_info:
+      mode: 0755
+
+nfpms:
+  - id: packages
+    package_name: a-better-antivirus
+    file_name_template: "aba_{{ .Tag }}_linux_{{ .Arch }}"
+    vendor: A Better Antivirus
+    homepage: https://github.com/vulnix0x4/a-better-antivirus
+    maintainer: "A Better Antivirus <https://github.com/vulnix0x4/a-better-antivirus/issues>"
+    description: |-
+      Catch infostealers in the act. Plants fake passwords, wallets and app data
+      that only malware would ever read, and freezes whatever touches them.
+      Run `sudo aba install` to set it up.
+    license: MIT
+    section: admin
+    priority: optional
+    formats: [deb, rpm]
+    bindir: /usr/bin
+    scripts:
+      postinstall: packaging/linux/postinstall.sh
+      preremove: packaging/linux/preremove.sh
+
+checksum:
+  name_template: "SHA256SUMS-linux.txt"
+  algorithm: sha256
+
+signs:
+  - id: checksums
+    artifacts: checksum
+    cmd: go
+    args: ["run", "./scripts/sign", "${artifact}", "${signature}"]
+    signature: "${artifact}.sig"
+
+release:
+  # The release .goreleaser.yaml made: its text stays, these files are added.
+  mode: keep-existing
+
+changelog:
+  disable: true

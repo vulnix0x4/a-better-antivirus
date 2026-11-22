@@ -413,8 +413,8 @@ wait_reloaded "$r"
 sudo aba ignore list | grep -q "run in $HOME" || fail "the rule isn't pinned to the folder: $(sudo aba ignore list)"
 count=$(alerts | jq length)
 rm -f "$OUT/backup.tar"
-sudo systemd-run --quiet --wait --collect --uid "$MY_UID" --gid "$MY_GID" --setenv HOME="$HOME" --working-directory "$HOME" "${BACKUP[@]}" \
-  || fail "the trusted backup was stopped"
+timeout 60 sudo systemd-run --quiet --wait --collect --uid "$MY_UID" --gid "$MY_GID" --setenv HOME="$HOME" --working-directory "$HOME" "${BACKUP[@]}" \
+  || fail "the trusted backup was stopped: $(alerts | jq -c "last | {tier, reasons: .verdict.reasons, cmd: .process.commandLine, dir: .process.dir}"); rules: $(sudo aba ignore list)"
 test -s "$OUT/backup.tar" || fail "the trusted backup didn't write its archive"
 sleep 1
 check "the trusted backup ran without a new alert" test "$(alerts | jq length)" = "$count"
@@ -517,6 +517,23 @@ wait_until 50 reach2 || fail "after aba release the second phone still can't be 
 ok "aba release: the network is back"
 trap 'cleanup_units' EXIT
 sudo ip netns del "$NS" 2>/dev/null
+
+# =====================================================================
+say "Updating in place, and rolling back a version that doesn't start"
+# What `aba update` and the automatic updates do once a signed release is
+# downloaded and checked: stop the service, swap the program, start it, and
+# put the old one back if the new one doesn't come up.
+aba update --check 2>&1 | sed 's/^/      /'
+UPD=$PROG/updates
+sudo install -d -m 700 "$UPD" && sudo install -m 755 "$ABA_BIN" "$UPD/aba-vtest.exe" || fail "couldn't stage an update"
+sudo "$PROG/aba" update apply --file "$UPD/aba-vtest.exe" --from e2e || fail "aba update apply"
+check "the service runs the updated program" test "$(systemctl is-active "$UNIT")" = active
+printf '#!/bin/sh\nexit 1\n' | sudo tee "$UPD/aba-broken.exe" >/dev/null && sudo chmod 755 "$UPD/aba-broken.exe"
+sudo "$PROG/aba" update apply --file "$UPD/aba-broken.exe" --from e2e 2>&1 | sed 's/^/      /'
+wait_until 100 bash -c "systemctl is-active -q $UNIT" || fail "after a failed update the service isn't running"
+check "the program that didn't start was rolled back" cmp -s "$PROG/famsvc" "$ABA_BIN"
+check "and the CLI too" cmp -s "$PROG/aba" "$ABA_BIN"
+ok "a version that doesn't start was rolled back, and protection carried on"
 
 # =====================================================================
 say "Uninstall"
