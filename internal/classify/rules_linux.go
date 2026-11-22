@@ -29,6 +29,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -238,6 +239,7 @@ type procView struct {
 	Started  func(pid uint32) int64 // 0 once it's gone
 	Verify   func(path string) provenance.Result
 	RootOnly func(path string) bool
+	Environ  func(pid uint32) []string // NAME=value
 }
 
 var view = procView{
@@ -259,6 +261,13 @@ var view = procView{
 		return t
 	},
 	Verify: provenance.Verify,
+	Environ: func(pid uint32) []string {
+		b, err := os.ReadFile("/proc/" + strconv.Itoa(int(pid)) + "/environ")
+		if err != nil {
+			return nil
+		}
+		return strings.Split(strings.TrimRight(string(b), "\x00"), "\x00")
+	},
 	RootOnly: func(path string) bool {
 		ok, _ := provenance.RootOnly(path)
 		return ok

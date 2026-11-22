@@ -66,3 +66,7 @@ func Under(p, dir string) bool {
 
 // Key is the canonical form used to look paths up in maps.
 func Key(p string) string { return Clean(Long(p)) }
+
+// FoldsCase reports whether this operating system's file names ignore case
+// (so a command line naming them does too).
+func FoldsCase() bool { return foldCase }

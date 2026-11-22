@@ -144,6 +144,10 @@ type IgnoreRule struct {
 	// CommandLine pins a script host / runtime to one exact command line, so
 	// trusting `python.exe my_tool.py` doesn't trust every Python script.
 	CommandLine string `json:"commandLine,omitempty"`
+	// Dir pins such a command to the folder it runs in (Linux, for a backup
+	// trusted with every bait: `tar czf b.tgz .` packs whatever folder it's
+	// run in).
+	Dir string `json:"dir,omitempty"`
 	// Baits limits the rule to these bait IDs (empty: all baits). Trusting an
 	// app from an alert covers only what it was seen reading, so code injected
 	// into it that goes after other baits still gets caught.
@@ -173,7 +177,7 @@ func (r IgnoreRule) CoversBait(id string) bool {
 // cover different baits).
 func (r IgnoreRule) SameProgram(o IgnoreRule) bool {
 	return strings.EqualFold(r.Path, o.Path) && strings.EqualFold(r.Signer, o.Signer) &&
-		strings.EqualFold(r.SHA256, o.SHA256) && strings.EqualFold(r.CommandLine, o.CommandLine)
+		strings.EqualFold(r.SHA256, o.SHA256) && strings.EqualFold(r.CommandLine, o.CommandLine) && r.Dir == o.Dir
 }
 
 type Config struct {

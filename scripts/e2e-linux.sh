@@ -300,10 +300,11 @@ if [ ! -S "$BUS" ]; then
 fi
 launch desk /usr/bin/env DBUS_SESSION_BUS_ADDRESS="unix:path=$BUS" "$NOTIFYD" -out "$OUT/desk" -press "Kill it" >/dev/null || fail "couldn't start the stand-in desktop"
 wait_until 50 has_line '^READY' "$OUT/desk" || fail "the stand-in desktop didn't start: $(sudo journalctl -n 20 --no-pager 2>/dev/null | grep -i notifyd)"
-pid=$(launch popup "$HOME/Downloads/free-game" -out "$OUT/d1" "$PASSWORDS") || fail "couldn't start the fake stealer"
+cp "$GRABBER" "$HOME/Downloads/desk-game"; echo "desktop fingerprint" >> "$HOME/Downloads/desk-game"; chmod 755 "$HOME/Downloads/desk-game"
+pid=$(launch popup "$HOME/Downloads/desk-game" -out "$OUT/d1" "$PASSWORDS") || fail "couldn't start the fake stealer"
 id=$(expect_frozen "$pid" "$OUT/d1" "fake stealer") || exit 1
-wait_until 100 has_line '^NOTIFY .*free-game' "$OUT/desk" || fail "no desktop notification: $(cat "$OUT/desk"; sudo grep 'desktop notify' "$DATA/service.log" | tail -3)"
-line=$(grep '^NOTIFY .*free-game' "$OUT/desk" | tail -1)
+wait_until 100 has_line '^NOTIFY .*desk-game' "$OUT/desk" || fail "no desktop notification: $(cat "$OUT/desk"; sudo grep 'desktop notify' "$DATA/service.log" | tail -3)"
+line=$(grep '^NOTIFY .*desk-game' "$OUT/desk" | tail -1)
 note "$(cut -c1-160 <<<"$line")"
 grep -q "| Kill it, It's mine, Decide later$" <<<"$line" || fail "the notification doesn't offer Kill it / It's mine / Decide later: $line"
 ok "the notification asks, with Windows' three choices as buttons"
@@ -379,6 +380,34 @@ a=$(wait_alert ".process.pid == $pid and .tier == \"critical\"") || fail "a swee
 frozen "$pid" || fail "the sweeping program wasn't frozen"
 ok "frozen at the third app's data ($(field "$a" '.verdict.swept | join(", ")'))"
 sudo aba kill "$(field "$a" .id)" >/dev/null || fail "aba kill"
+
+say "A scheduled backup, trusted by its exact command"
+# tar of several apps' data, started by the system (as a timer would): a
+# sweep, frozen. Trusted from the alert, that exact command runs from then on;
+# the same words from a script nobody vouches for are still a stealer.
+BACKUP=(/usr/bin/tar cf "$OUT/backup.tar" "$(bait_file vivaldi)" "$(bait_file electrum)" "$(bait_file ssh-key)" "$(bait_file aws)")
+pid=$(launch backup "${BACKUP[@]}") || fail "couldn't start tar"
+a=$(wait_alert ".process.pid == $pid and .tier == \"critical\"") || fail "a backup-like sweep by tar wasn't caught"
+id=$(field "$a" .id)
+r=$(reloads)
+sudo aba trust "$id" > "$OUT/trust.txt" 2>&1 || { cat "$OUT/trust.txt"; fail "aba trust on the sweep"; }
+sed 's/^/      /' "$OUT/trust.txt"
+wait_reloaded "$r"
+sudo aba ignore list | grep -q "run in $HOME" || fail "the rule isn't pinned to the folder: $(sudo aba ignore list)"
+count=$(alerts | jq length)
+rm -f "$OUT/backup.tar"
+sudo systemd-run --quiet --wait --collect --uid "$MY_UID" --gid "$MY_GID" --setenv HOME="$HOME" --working-directory "$HOME" "${BACKUP[@]}" \
+  || fail "the trusted backup was stopped"
+test -s "$OUT/backup.tar" || fail "the trusted backup didn't write its archive"
+sleep 1
+check "the trusted backup ran without a new alert" test "$(alerts | jq length)" = "$count"
+printf '#!/bin/sh\n%s\nsleep 300\n' "$(printf '%q ' "${BACKUP[@]}")" > "$HOME/Downloads/replay.sh"; chmod +x "$HOME/Downloads/replay.sh"
+launch replay "$HOME/Downloads/replay.sh" >/dev/null || fail "couldn't start the replay"
+a=$(wait_alert '((.process.image // "") | test("/tar$")) and .tier == "critical" and (.verdict.reasons[0] | test("replay.sh"))') \
+  || fail "the backup's exact words, run by a script from Downloads, weren't caught"
+ok "the same words from a script nobody vouches for: frozen ($(field "$a" '.verdict.reasons[0]' | cut -c1-110))"
+sudo aba kill "$(field "$a" .id)" >/dev/null
+rm -f "$HOME/Downloads/replay.sh"
 
 say "A trick: reading a bait through a hard link"
 # (The link is made next to the -out file: in the home folder, on the bait's file system.)
@@ -472,5 +501,5 @@ if command -v nft >/dev/null; then sudo nft list table inet file_access_monitor 
 ok "nothing left behind"
 
 sudo rm -f /etc/polkit-1/rules.d/49-aba-e2e.rules
-rm -rf "$OUT" "$HOME/Downloads/free-game" "$HOME/Downloads/other-game" "$HOME/Downloads/net-game" "$HOME/Downloads"/e2e-l1*
+rm -rf "$OUT" "$HOME/Downloads/free-game" "$HOME/Downloads/other-game" "$HOME/Downloads/net-game" "$HOME/Downloads/desk-game" "$HOME/Downloads"/e2e-l1*
 printf '\n\033[32mAll end-to-end checks passed.\033[0m\n'

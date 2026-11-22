@@ -1196,6 +1196,7 @@ func ProcessDetails(pid uint32, p *alerts.Process) {
 		p.Exited = true
 	}
 	p.CommandLine, _ = procinfo.CommandLine(pid)
+	p.Dir = procinfo.WorkingDir(pid)
 	if snap, err := procinfo.Snapshot(); err == nil {
 		p.Parents = procinfo.ParentChain(snap, pid, 4)
 		p.TreePIDs = procinfo.Tree(snap, pid)

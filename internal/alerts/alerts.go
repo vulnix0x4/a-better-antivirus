@@ -44,6 +44,7 @@ type Process struct {
 	PID         uint32            `json:"pid"`
 	Image       string            `json:"image"`
 	CommandLine string            `json:"commandLine,omitempty"`
+	Dir         string            `json:"dir,omitempty"` // the folder it ran in, where the system shows that
 	User        string            `json:"user,omitempty"`
 	SHA256      string            `json:"sha256,omitempty"`
 	Signature   provenance.Result `json:"signature"`

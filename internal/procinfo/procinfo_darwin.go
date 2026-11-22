@@ -105,3 +105,6 @@ func InjectedCode(pid uint32) (detail string, found bool) { return "", false }
 func SideLoaded(pid uint32, image string, signed func(path string) bool) (lib string, found bool) {
 	return "", false
 }
+
+// WorkingDir is the folder a process runs in, where the system shows it.
+func WorkingDir(pid uint32) string { return "" }
