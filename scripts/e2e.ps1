@@ -500,7 +500,9 @@ if ($decoy) {
 
 Step 'Custom bait'
 $custom = Join-Path $env:USERPROFILE 'Documents\bank logins.txt'
+$reloads = Reloads
 Aba bait add $custom
+WaitReloaded $reloads # or the stealer below may read it before the service watches it
 Check (Test-Path $custom) 'custom bait created'
 $cid = ((State).baits.PSObject.Properties | Where-Object { $_.Value.files[0].path -eq $custom }).Name
 Check ($cid) "registered as $cid"
