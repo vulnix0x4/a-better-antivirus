@@ -272,7 +272,7 @@ for p in sys.argv[2:]:
     open(p, "rb").read()
 while True:
     open(sys.argv[1] + ".tick", "a").write(".\n"); time.sleep(0.1)'
-pid=$(launch /usr/bin/python3 -c "$SWEEP" "$OUT/sw""$(bait_file vivaldi)" "$(bait_file electrum)" "$(bait_file ssh-key)" "$EXODUS")
+pid=$(launch /usr/bin/python3 -c "$SWEEP" "$OUT/sw" "$(bait_file vivaldi)" "$(bait_file electrum)" "$(bait_file ssh-key)" "$EXODUS")
 echo "$pid" > "$OUT/sw.pid"
 a=$(wait_alert ".process.pid == $pid and .tier == \"critical\"") || fail "a sweep wasn't critical"
 note "$(field "$a" '.verdict.reasons[0]')"
