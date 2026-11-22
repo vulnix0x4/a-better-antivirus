@@ -508,6 +508,10 @@ $s4 = Stealer 'stealer4' $custom
 Check (AlertFor $s4.Id) 'reading the custom bait alerts'
 Aba release
 Stop-Process -Id $s4.Id -Force -ErrorAction SilentlyContinue
+# What ABA has on record about the file (it only deletes what's unchanged).
+$rec = (State).baits.$cid.files | Select-Object -First 1
+$fi = Get-Item $custom -ErrorAction SilentlyContinue
+Write-Host "  on record: created=$($rec.created) size=$($rec.size) modTime=$($rec.modTime); on disk: size=$($fi.Length) written=$($fi.LastWriteTimeUtc.ToString('o'))"
 Aba bait remove $cid
 # The file's name stays visible until every handle on it is closed. The service
 # lets go of its guard when it next re-reads its settings, which can take a few
