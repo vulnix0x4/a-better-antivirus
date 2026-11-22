@@ -118,7 +118,7 @@ jobs:
       # removed, install.sh run against this local copy of the release.
       - name: Build the Linux release files
         if: runner.os == 'Linux'
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@v7
         with:
           version: "~> v2"
           args: release --snapshot --clean --skip=sign,publish --config .goreleaser-linux.yaml
