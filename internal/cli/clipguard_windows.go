@@ -44,6 +44,25 @@ func clipGuardCmds() []*cobra.Command {
 			return runClipGuard(os.Stdin, os.Stdout, clipGuardTiming{})
 		},
 	}, {
+		// Run by the service in each session after freezing programs: see
+		// clipbait.FreeFromFrozen.
+		Use:    "clipboard-free <pid>...",
+		Hidden: true,
+		Args:   cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var pids []uint32
+			for _, a := range args {
+				if p, err := strconv.ParseUint(a, 10, 32); err == nil {
+					pids = append(pids, uint32(p))
+				}
+			}
+			did, err := clipbait.FreeFromFrozen(pids)
+			if did != "" {
+				fmt.Println(did)
+			}
+			return err
+		},
+	}, {
 		Use:    "test-clipper",
 		Hidden: true,
 		Args:   cobra.NoArgs,

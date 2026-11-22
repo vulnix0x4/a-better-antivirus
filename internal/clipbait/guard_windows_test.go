@@ -17,6 +17,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
 )
 
 var (
@@ -527,4 +529,50 @@ func TestBaitStaysOutOfHistory(t *testing.T) {
 		}
 	}
 	g.do(g.finish)
+}
+
+// A frozen program that owns the clipboard makes everyone's copying wait;
+// FreeFromFrozen takes the clipboard from it.
+func TestFreeFromFrozenOwner(t *testing.T) {
+	g := newGuard(t, &Guard{})
+	cs := start(t, "window")
+	g.do(func() { g.setBait(Bait(Bitcoin), 0) })
+	time.Sleep(500 * time.Millisecond) // the clipper swaps it, and owns the clipboard now
+	var owner uint32
+	g.do(func() { h, _, _ := pGetClipboardOwner.Call(); owner = hwndPid(h) })
+	if owner != cs[0].pid {
+		t.Fatalf("setup: the clipper (pid %d) should own the clipboard, not pid %d", cs[0].pid, owner)
+	}
+	procinfo.Suspend(cs[0].pid)
+	defer procinfo.Resume(cs[0].pid)
+
+	onThread := func() error {
+		if r, _, e := pSetThreadDesktop.Call(testDesk); r == 0 {
+			return e
+		}
+		return nil
+	}
+	did, err := freeFromFrozen([]uint32{999999}, onThread)
+	if did != "" || err != nil {
+		t.Fatalf("with the owner not among the frozen, nothing to do: %q, %v", did, err)
+	}
+	did, err = freeFromFrozen([]uint32{cs[0].pid}, onThread)
+	if err != nil || did == "" {
+		t.Fatalf("FreeFromFrozen: %q, %v", did, err)
+	}
+	t.Log(did)
+	s := g.get()
+	if Looks(s.text) {
+		t.Errorf("the address the frozen clipper left should be wiped: %q", s.text)
+	}
+	t0 := time.Now()
+	g.do(func() {
+		if openClip(g.hwnd) {
+			pEmptyClipboard.Call()
+			closeClip()
+		}
+	})
+	if d := time.Since(t0); d > time.Second {
+		t.Fatalf("copying still waited %v for the frozen program", d)
+	}
 }
