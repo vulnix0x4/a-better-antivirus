@@ -322,7 +322,7 @@ func (s *server) UserSession(pid uint32) bool              { return procinfo.Use
 func (s *server) Elevated(pid uint32) bool                 { return procinfo.Elevated(pid) }
 func (s *server) CreateTime(pid uint32) int64              { t, _ := procinfo.CreateTime(pid); return t }
 func (s *server) Verify(p string) provenance.Result        { return provenance.Verify(p) }
-func (s *server) SuspendTree(pid uint32) ([]uint32, error) { return procinfo.SuspendTree(pid) }
+func (s *server) SuspendTree(pid uint32) ([]uint32, error) { return s.suspendTree(pid) }
 func (s *server) KillTree(pid uint32) error                { return procinfo.KillTree(pid) }
 func (s *server) Forensics(pid uint32, p *alerts.Process)  { engine.ProcessDetails(pid, p) }
 func (s *server) CommandLine(pid uint32) string            { c, _ := procinfo.CommandLine(pid); return c }
@@ -332,6 +332,17 @@ func (s *server) Isolate() error                           { return netguard.Iso
 func (s *server) DisableAdapters() ([]string, error)       { return netguard.DisableAdapters() }
 func (s *server) Ancestors(pid uint32) []procinfo.Ancestor { return procinfo.Ancestors(pid, 6) }
 func (s *server) RunningImage(path string) []uint32        { return procinfo.RunningImage(path) }
+
+// suspendTree freezes pid and what it started, and says in the log why it
+// couldn't, if it couldn't.
+func (s *server) suspendTree(pid uint32) ([]uint32, error) {
+	frozen, err := procinfo.SuspendTree(pid)
+	if err != nil {
+		s.log.Printf("freezing pid %d: %v (%d frozen)", pid, err, len(frozen))
+	}
+	return frozen, err
+}
+
 func (s *server) UpdateState(fn func(*config.State) error) error {
 	return config.UpdateState(fn)
 }
@@ -495,18 +506,25 @@ func (s *server) decideOpen(path string, at time.Time, pid uint32) bool {
 var (
 	selfHashOnce sync.Once
 	selfHash     string
+	cliHash      string
 	hashCacheMu  sync.Mutex
 	hashCache    = map[string]string{}
 )
 
 // IsSelf reports whether image is a copy of ABA's own executable, by SHA-256.
 // (A path check isn't enough: the CLI may run from Downloads or a build folder.)
+// The installed CLI counts too: on macOS it isn't byte for byte the service's
+// program, because signing the app bundle changes the bundle's main program.
 func (s *server) IsSelf(image string) bool {
-	selfHashOnce.Do(func() { selfHash, _ = procinfo.FileSHA256(s.selfExe) })
-	if selfHash == "" || image == "" {
+	selfHashOnce.Do(func() {
+		selfHash, _ = procinfo.FileSHA256(s.selfExe)
+		cliHash, _ = procinfo.FileSHA256(s.cliExe)
+	})
+	if image == "" {
 		return false
 	}
-	return s.Hash(image) == selfHash
+	h := s.Hash(image)
+	return h != "" && (h == selfHash || h == cliHash)
 }
 
 // Hash returns a file's SHA-256, cached by path, size and modification time.

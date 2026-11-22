@@ -237,6 +237,7 @@ func Steps(o Options) []Step {
 		}},
 		Step{Name: "Adding aba to your PATH", Soft: true, Run: func() (string, error) { return "", AddToPath(paths.InstallDir()) }},
 	)
+	steps = append(steps, permissionSteps()...)
 	steps = append(steps, appSteps(o.Version)...)
 	if o.Phone.Enabled() && o.Phone != prevPhone {
 		steps = append(steps, Step{Name: "Sending a test to your phone", Soft: true, Run: func() (string, error) {

@@ -216,3 +216,8 @@ func removeAppSteps() []Step         { return nil }
 func RefreshApp(version string) error {
 	return platform.Unsupported("listing ABA as an installed program")
 }
+
+// permissionSteps run once the service is started: whatever the person at
+// the screen has to allow for it to protect (on macOS, Full Disk Access).
+// Nothing on Linux.
+func permissionSteps() []Step { return nil }
