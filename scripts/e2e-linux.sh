@@ -429,12 +429,20 @@ if [ -n "$CHROME" ]; then
   check "nothing else was alerted about meanwhile" test "$(alerts | jq length)" = "$count"
 fi
 
-say "A bait that disappears is put back"
-rm -f "$PASSWORDS"
-sudo aba doctor --fix >/dev/null || fail "aba doctor --fix"
-wait_until 150 test -f "$PASSWORDS" || fail "the deleted bait wasn't restored"
-a=$(wait_alert '.kind == "bait-missing"') || fail "no alert about the deleted bait"
-ok "restored, and reported ($(field "$a" .title))"
+say "A bait that disappears is put back at once, and whoever did it is named"
+pid=$(launch deleter "$HOME/Downloads/other-game" -delete -out "$OUT/del" "$PASSWORDS") || fail "couldn't start the deleter"
+wait_until 50 has_line '^DELETED' "$OUT/del" || fail "the deleter didn't delete the bait: $(cat "$OUT/del" 2>/dev/null)"
+wait_until 25 test -f "$PASSWORDS" || fail "the deleted bait wasn't put back within 5 s"
+a=$(wait_alert ".kind == \"delete\" and .process.pid == $pid") || fail "no alert naming who deleted the bait"
+ok "put back within moments, and the alert names $(field "$a" '.process.image') (pid $pid): $(field "$a" .title)"
+kill -9 "$pid" 2>/dev/null
+echo "not the bait" > "$HOME/.e2e-swap"; mv "$HOME/.e2e-swap" "$PASSWORDS" || fail "couldn't rename a file over the bait"
+wait_until 50 bash -c "[ \$(sudo sh -c 'cat $DATA/alerts/*.json' | jq -s '[.[] | select(.kind==\"delete\")] | length') -ge 2 ]" || fail "a bait replaced by a rename over it wasn't reported"
+ok "replaced by a rename over it: reported"
+VIV=$(bait_file vivaldi); mv "$HOME/.config/vivaldi" "$HOME/.config/vivaldi-moved" || fail "couldn't move the fake Vivaldi folder"
+wait_until 25 test -f "$VIV" || fail "a folder of baits renamed away wasn't put back"
+ok "a folder of baits renamed away: put back"
+rm -rf "$HOME/.config/vivaldi-moved"
 # The new file is a different file: it has to be watched too.
 pid=$(launch stealer "$HOME/Downloads/other-game" -out "$OUT/s5" "$PASSWORDS") || fail "couldn't start the fake stealer"
 id=$(expect_frozen "$pid" "$OUT/s5" "restored bait") || exit 1

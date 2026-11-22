@@ -38,6 +38,11 @@ func TestMain(m *testing.M) {
 		os.WriteFile(os.Getenv("ABA_MARKER"), []byte(out), 0o666)
 		time.Sleep(30 * time.Second)
 		os.Exit(0)
+	case "delete":
+		os.Remove(os.Getenv("ABA_PATH"))
+		os.WriteFile(os.Getenv("ABA_MARKER"), []byte("DELETED"), 0o666)
+		time.Sleep(30 * time.Second)
+		os.Exit(0)
 	case "connect":
 		// Try to reach ABA_ADDR every 100 ms; the marker says how the last try went.
 		for i := 0; ; i++ {

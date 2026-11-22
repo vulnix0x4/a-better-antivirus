@@ -12,6 +12,7 @@
 // made next to FILE instead of by its own name. With -connect it then tries to
 // reach HOST:PORT every 200 ms, the way an upload would start, and FILE.net
 // says how the latest try went: "NET OK n" or "NET FAIL n error".
+// With -delete it deletes the files instead ("DELETED path").
 //
 // With -serve it's the phone instead: a web server that takes what ABA would
 // post to ntfy and writes each message to FILE as "POST path | title | text",
@@ -40,6 +41,7 @@ func main() {
 	idle := flag.Bool("idle", false, "do nothing (the helper process)")
 	serve := flag.String("serve", "", "address to take phone alerts on, instead of grabbing")
 	connect := flag.String("connect", "", "address to keep trying to reach after grabbing")
+	del := flag.Bool("delete", false, "delete the files instead of reading them")
 	flag.Parse()
 	if *serve != "" && *out != "" {
 		err := http.ListenAndServe(*serve, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -79,6 +81,14 @@ func main() {
 	}
 	time.Sleep(time.Duration(*wait) * time.Millisecond)
 	for i, p := range flag.Args() {
+		if *del {
+			if err := os.Remove(p); err != nil {
+				note("ERR %s %v", p, err)
+			} else {
+				note("DELETED %s", p)
+			}
+			continue
+		}
 		name := p
 		if *link {
 			name = filepath.Join(filepath.Dir(*out), fmt.Sprintf("grabbed-%d-%d.tmp", os.Getpid(), i))

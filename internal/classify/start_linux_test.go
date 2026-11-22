@@ -26,6 +26,8 @@ func TestTrustedBackupCommand(t *testing.T) {
 	world(t, procs)
 	env := map[uint32][]string{}
 	view.Environ = func(pid uint32) []string { return env[pid] }
+	ro := view.RootOnly
+	view.RootOnly = func(p string) bool { return ro(p) || ro(p+"/") }
 
 	rule := config.IgnoreRule{Path: "/usr/bin/tar", Signer: "pkg", CommandLine: cmdline(backup), Dir: "/home/u"}
 	c := &Classifier{Ignore: []config.IgnoreRule{rule}, CommandLine: func(pid uint32) string { return cmdline(procs[pid].args) }}
@@ -33,8 +35,9 @@ func TestTrustedBackupCommand(t *testing.T) {
 		t.Helper()
 		traceCache = map[uint32]traced{}
 		img := procs[pid].image
-		v := c.Final(img, pid, Bait{ID: "vivaldi"}, view.Verify(img))
-		if v.ByRule != want || c.SweepExempt(img, pid, nil) != want {
+		sig := view.Verify(img)
+		v := c.Final(img, pid, Bait{ID: "vivaldi"}, sig)
+		if v.ByRule != want || c.SweepExempt(img, pid, &sig) != want {
 			t.Errorf("%s: trusted = %v, want %v (%v)", what, v.ByRule, want, v.Reasons)
 		}
 	}
