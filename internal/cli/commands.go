@@ -891,17 +891,28 @@ func baitCmd() *cobra.Command {
 				}
 			}
 			if len(keep) == len(cfg.Baits) {
-				return exitf("no bait %q", args[0])
+				// Not selected any more, but still planted: an earlier removal
+				// couldn't delete it (see plantBaits). Syncing tries again.
+				st, _ := config.LoadState()
+				if st == nil || st.Baits[args[0]] == nil {
+					return exitf("no bait %q", args[0])
+				}
 			}
 			cfg.Baits = keep
 			if err := config.SaveConfig(cfg); err != nil {
 				return err
 			}
-			if _, err := install.SyncBaits(cfg); err != nil {
+			_, err = install.SyncBaits(cfg)
+			// The service re-reads the baits either way: anything the sync did
+			// change, it has to know about.
+			if rerr := install.Reload(); err == nil {
+				err = rerr
+			}
+			if err != nil {
 				return err
 			}
 			fmt.Println(ui.Good.Render(ui.IconOK) + " removed " + args[0])
-			return install.Reload()
+			return nil
 		},
 	})
 	return c
