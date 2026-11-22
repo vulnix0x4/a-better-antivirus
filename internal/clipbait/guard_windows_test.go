@@ -43,18 +43,22 @@ func TestMain(m *testing.M) {
 		fake(role)
 		return
 	}
-	if err := privateStation(); err != nil {
+	if len(os.Args) > 1 && systemSide(os.Args[1:]) { // see system_windows_test.go
+		return
+	}
+	if err := privateStation(nil); err != nil {
 		noStation = err.Error()
 	}
 	os.Exit(m.Run())
 }
 
-// privateStation moves this process onto a window station of its own.
-func privateStation() error {
+// privateStation moves this process onto a window station of its own. sa,
+// if not nil, says who else may use it.
+func privateStation(sa *windows.SecurityAttributes) error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	// Unnamed: Windows names it. (Without admin rights, a name is refused.)
-	ws, _, e := pCreateWindowStationW.Call(0, 0, 0x37F /* WINSTA_ALL_ACCESS */, 0)
+	ws, _, e := pCreateWindowStationW.Call(0, 0, 0x37F /* WINSTA_ALL_ACCESS */, uintptr(unsafe.Pointer(sa)))
 	if ws == 0 {
 		return fmt.Errorf("CreateWindowStation: %v", e)
 	}
@@ -65,7 +69,7 @@ func privateStation() error {
 		return fmt.Errorf("SetProcessWindowStation: %v", e)
 	}
 	name, _ := windows.UTF16PtrFromString("clipbait")
-	d, _, e := pCreateDesktopW.Call(uintptr(unsafe.Pointer(name)), 0, 0, 0, 0x10000000 /* GENERIC_ALL */, 0)
+	d, _, e := pCreateDesktopW.Call(uintptr(unsafe.Pointer(name)), 0, 0, 0, 0x10000000 /* GENERIC_ALL */, uintptr(unsafe.Pointer(sa)))
 	if d == 0 {
 		return fmt.Errorf("CreateDesktop: %v", e)
 	}
