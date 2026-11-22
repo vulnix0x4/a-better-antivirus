@@ -35,6 +35,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/vulnix0x4/a-better-antivirus/internal/alerts"
 	"github.com/vulnix0x4/a-better-antivirus/internal/classify"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/detect"
@@ -191,7 +192,8 @@ func (s *server) startWatching(ctx context.Context) {
 	}
 	go s.es.Run()
 	go func() {
-		was := false
+		was, told := false, false
+		var blind time.Time
 		for i := 0; ; i++ {
 			running, since, err := s.es.Status()
 			now := running && time.Since(since) > time.Second
@@ -205,8 +207,24 @@ func (s *server) startWatching(ctx context.Context) {
 				}
 				was = now
 			}
-			if errors.Is(err, eswatch.ErrNoAccess) && i%100 == 20 {
-				s.log.Printf("waiting for Full Disk Access (System Settings > Privacy & Security > Full Disk Access: %s)", paths.ServiceDisplayName)
+			if errors.Is(err, eswatch.ErrNoAccess) {
+				if i%100 == 20 {
+					s.log.Printf("waiting for Full Disk Access (System Settings > Privacy & Security > Full Disk Access: %s)", paths.ServiceDisplayName)
+				}
+				if blind.IsZero() {
+					blind = time.Now()
+				}
+				// Two minutes without it: say so, once, on the desktop and the
+				// phone. Without Full Disk Access ABA sees nothing at all.
+				if !told && time.Since(blind) > 2*time.Minute {
+					told = true
+					go s.safe("access alert", func() {
+						s.eng.SystemAlert(alerts.KindAuditDisabled, config.TierCritical, "ABA can't see the baits: Full Disk Access is off",
+							"macOS isn't letting ABA watch files, so nothing that opens a bait is noticed. It happens after an update while ABA isn't signed by a registered developer yet (macOS takes the new version for another program), or when the switch was turned off. Open System Settings > Privacy & Security > Full Disk Access and switch on \""+paths.ServiceDisplayName+"\" (if it's on already, switch it off and on again). `sudo aba doctor --fix` opens the page.", nil)
+					})
+				}
+			} else if now {
+				blind, told = time.Time{}, false
 			}
 			select {
 			case <-ctx.Done():
