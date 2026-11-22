@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,6 +25,7 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/install"
 	"github.com/vulnix0x4/a-better-antivirus/internal/notify"
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
+	"github.com/vulnix0x4/a-better-antivirus/internal/platform"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
 	"github.com/vulnix0x4/a-better-antivirus/internal/respond"
 	"github.com/vulnix0x4/a-better-antivirus/internal/svcctl"
@@ -1069,6 +1071,71 @@ func instantCmd() *cobra.Command {
 			return install.Reload()
 		},
 	}
+	return c
+}
+
+// ---- clipboard bait ----
+
+func clipboardCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "clipboard [on|off|test]",
+		Short: "Catch clippers with a fake wallet address on the clipboard",
+		Long: "Clippers are malware that swap a crypto wallet address you copied for the attacker's, so\n" +
+			"the money you send goes to them. With this on, while nobody is using the PC, ABA now and\n" +
+			"then puts a fake wallet address on the clipboard for a few seconds and watches it. If a\n" +
+			"program swaps it, that program is a clipper: it's frozen, cut off and you're alerted.\n\n" +
+			"Your clipboard is put back right after. The fake address never shows up in clipboard\n" +
+			"history and has a wrong checksum, so no wallet would accept it. Plain text on the\n" +
+			"clipboard is saved and put back; while it holds anything else (files, pictures), no bait.",
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if runtime.GOOS != "windows" {
+				return exitf("the clipboard bait is %s", platform.ErrUnsupported)
+			}
+			if err := requireAdmin(); err != nil {
+				return err
+			}
+			cfg, err := mustConfig()
+			if err != nil {
+				return err
+			}
+			if len(args) == 0 {
+				state := ui.Bad.Render("off")
+				if cfg.ClipboardBait {
+					state = ui.Good.Render("on")
+				}
+				fmt.Println("The clipboard bait is " + state + ".  " + ui.Hint("Change:", "aba clipboard on|off"))
+				return nil
+			}
+			switch strings.ToLower(args[0]) {
+			case "on":
+				cfg.ClipboardBait = true
+			case "off":
+				cfg.ClipboardBait = false
+			default:
+				return exitf("use `aba clipboard on` or `aba clipboard off`")
+			}
+			if err := config.SaveConfig(cfg); err != nil {
+				return err
+			}
+			fmt.Println(ui.Good.Render(ui.IconOK) + " Clipboard bait " + strings.ToLower(args[0]))
+			return install.Reload()
+		},
+	}
+	c.AddCommand(&cobra.Command{
+		Use:   "test",
+		Short: "Watch it catch a harmless fake clipper",
+		Long: "Starts a harmless fake clipper from your Temp folder and has ABA put a bait out right away,\n" +
+			"instead of waiting until nobody is using the PC. Don't touch the mouse or keyboard for a few\n" +
+			"seconds while it runs. Your clipboard is put back afterwards.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireAdmin(); err != nil {
+				return err
+			}
+			return runClipboardTest()
+		},
+	})
 	return c
 }
 

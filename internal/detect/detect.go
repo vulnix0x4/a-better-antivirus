@@ -33,7 +33,20 @@ const (
 	OpRead Op = iota + 1
 	// OpDelete: deleted, or renamed away.
 	OpDelete
+	// OpSwap: replaced the wallet address ABA put on the clipboard with
+	// another one: a clipper (see package clipbait). Path is empty and Swap
+	// says what happened.
+	OpSwap
 )
+
+// Swap is what a clipper did to the clipboard bait.
+type Swap struct {
+	Coin        string // the kind of address the bait imitated
+	Bait        string // the fake address ABA put on the clipboard
+	Replacement string // what the program put there instead: the attacker's address ("" if it only wiped it)
+	How         string // how the program was pinned down
+	LatencyMS   int64  // how quickly it swapped
+}
 
 // Access is one program touching one bait.
 type Access struct {
@@ -60,4 +73,6 @@ type Access struct {
 	// Finder to copy). They're frozen with the program when it's frozen as a
 	// stealer, and left alone otherwise.
 	Helpers []uint32
+
+	Swap *Swap // OpSwap only
 }

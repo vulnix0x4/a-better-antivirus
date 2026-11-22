@@ -28,6 +28,14 @@ elevated shell:
 $env:ABA_INTEGRATION = "1"; go test -count=1 -v ./internal/integration/
 ```
 
+The clipboard bait's guard, started the way the service starts it (as SYSTEM, through a temporary
+service it removes again), against fake clippers inside a private window station, so your own clipboard
+is never touched:
+
+```
+$env:ABA_CLIPBAIT_SYSTEM = "1"; go test -count=1 -v -run TestSystemGuard ./internal/clipbait/
+```
+
 CI runs those plus `scripts/e2e.ps1`, a full end-to-end run on a throwaway Windows machine: install, fake
 stealers, freeze/block/kill, isolation with a phone alert sent while isolated, bait repair, uninstall. Please
 don't run the end-to-end script on your own PC: it isolates the network and plants baits. Use a VM.

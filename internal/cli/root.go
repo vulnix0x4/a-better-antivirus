@@ -72,8 +72,9 @@ func newRoot() *cobra.Command {
 	}
 	add("main", statusCmd(), alertsCmd(), testCmd(), doctorCmd(), learnCmd())
 	add("respond", trustCmd(), killCmd(), resumeCmd(), releaseCmd())
-	add("setup", installCmd(), configureCmd(), updateCmd(), baitCmd(), ignoreCmd(), instantCmd(), phoneCmd(), uninstallCmd())
+	add("setup", installCmd(), configureCmd(), updateCmd(), baitCmd(), ignoreCmd(), instantCmd(), clipboardCmd(), phoneCmd(), uninstallCmd())
 	root.AddCommand(serviceCmd(), notifyCmd(), testReaderCmd())
+	root.AddCommand(clipGuardCmds()...)
 	return root
 }
 

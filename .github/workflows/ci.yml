@@ -37,6 +37,14 @@ jobs:
           ABA_INTEGRATION: "1"
         run: go test -count=1 -v ./internal/integration/
 
+      # The clipboard bait's guard the way the service runs it: as SYSTEM in
+      # the desktop's session, against fake clippers running as whoever is
+      # logged on (inside a private window station: no real clipboard).
+      - name: Clipboard guard as SYSTEM (admin)
+        env:
+          ABA_CLIPBAIT_SYSTEM: "1"
+        run: go test -count=1 -v -run TestSystemGuard ./internal/clipbait/
+
       - name: Build
         run: |
           go build -ldflags "-s -w -X main.version=ci-${{ github.sha }}" -o dist/aba.exe ./cmd/aba

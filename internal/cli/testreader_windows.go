@@ -39,6 +39,12 @@ type testReader struct {
 // startTestReader writes a copy of this program (self) into Temp and starts
 // it as `test-reader <target>`.
 func startTestReader(self []byte, target string) (*testReader, error) {
+	return startTestCopy(self, "test-reader", target)
+}
+
+// startTestCopy writes a copy of this program (self) into Temp and starts it
+// with args: a harmless stand-in for malware, for the safe tests.
+func startTestCopy(self []byte, args ...string) (*testReader, error) {
 	name := make([]byte, 8)
 	if _, err := rand.Read(name); err != nil {
 		return nil, err
@@ -78,7 +84,10 @@ func startTestReader(self []byte, target string) (*testReader, error) {
 		return nil, fmt.Errorf("%s was changed by another program before it could be started: not running it", path)
 	}
 
-	cmdline := syscall.EscapeArg(path) + " test-reader " + syscall.EscapeArg(target)
+	cmdline := syscall.EscapeArg(path)
+	for _, a := range args {
+		cmdline += " " + syscall.EscapeArg(a)
+	}
 	// Without admin rights, the way a real stealer runs: with the desktop's
 	// own token where there is a desktop, else with this one's filtered down.
 	// If neither works (unusual token setup), as we are: the file is locked

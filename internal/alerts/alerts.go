@@ -30,13 +30,14 @@ const (
 	KindDecoyRetired  = "decoy-retired"  // the real app got installed; decoy removed
 	KindTamper        = "tamper"         // something tried to switch part of ABA off
 	KindTest          = "test"
+	KindClipper       = "clipper" // a program swapped the wallet address ABA put on the clipboard
 )
 
 type BaitHit struct {
 	ID     string    `json:"id"`
 	Name   string    `json:"name"`
 	Path   string    `json:"path"`
-	Access string    `json:"access"` // read | delete
+	Access string    `json:"access"` // read | delete | swap
 	Time   time.Time `json:"time"`
 }
 
