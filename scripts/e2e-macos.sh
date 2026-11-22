@@ -164,8 +164,12 @@ wait_until 50 has_line 'POST /aba-e2e | A Better Antivirus test alert' "$OUT/pho
 ok "aba phone test reached the phone"
 
 sudo aba bait list | sed 's/^/      /'
-state | jq -r '.baits[].files[].path' | grep -qE '/(Documents|Desktop)/' && fail "a bait was planted in Documents or on the Desktop by default"
-ok "no bait in Documents or on the Desktop by default"
+# This runner doesn't keep Desktop and Documents in iCloud, so nothing was
+# asked and those baits are planted like the rest.
+for id in desktop-passwords documents-passwords seed-phrase; do
+  f=$(bait_file "$id"); [ -n "$f" ] && [ -f "$f" ] || fail "bait $id wasn't planted ($f)"
+done
+ok "baits on the Desktop and in Documents too"
 check "the real AWS credentials file isn't faked" test ! -e "$HOME/.aws/credentials"
 PASSWORDS=$(bait_file home-passwords)
 EXODUS=$(bait_file exodus)

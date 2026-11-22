@@ -122,7 +122,9 @@ func newWizard(in WizardInput) *wizard {
 			o.Baits = append(o.Baits, a.Spec.ID)
 		}
 		note := Fainter.Render(Truncate(a.Spec.Description, noteW))
-		if a.Spec.Caveat != "" {
+		if a.Spec.Synced != nil && a.Spec.Synced(in.User) != "" {
+			note = Warn.Render("syncs") + Fainter.Render(" · "+Truncate(a.Spec.Synced(in.User), noteW-8))
+		} else if a.Spec.Caveat != "" {
 			note = Warn.Render("opt-in") + Fainter.Render(" · "+Truncate(a.Spec.Caveat, noteW-9))
 		}
 		opts = append(opts, huh.NewOption(fmt.Sprintf("%-*s  %s", nameW, a.Spec.Name, note), a.Spec.ID).Selected(pre))
@@ -131,6 +133,11 @@ func newWizard(in WizardInput) *wizard {
 	if len(skipped) > 0 {
 		baitsDesc += "\n" + Fainter.Render("Left out so fake data never gets in the way of your real apps: "+strings.Join(skipped, ", ")+".")
 	}
+
+	// Baits in folders that sync to a cloud: the recommended setup asks once
+	// whether to plant them there too (yes by default).
+	syncNote, syncIDs := baits.SyncNote(in.Plan, in.User, o.Baits)
+	plantSynced := true
 
 	// ---- response ----
 	var presetOpts []huh.Option[string]
@@ -231,6 +238,11 @@ func newWizard(in WizardInput) *wizard {
 
 	form := huh.NewForm(
 		huh.NewGroup(intro, modeSel),
+
+		huh.NewGroup(
+			huh.NewConfirm().Title("Plant decoys in the folders that sync to the cloud too?").Description(syncNote).
+				Affirmative("Yes, plant them").Negative("No, leave those folders out").Value(&plantSynced),
+		).WithHideFunc(func() bool { return mode != modeRecommended || syncNote == "" }),
 
 		huh.NewGroup(
 			huh.NewMultiSelect[string]().Title("Which baits should ABA plant?").Description(baitsDesc).
@@ -360,6 +372,9 @@ func newWizard(in WizardInput) *wizard {
 			for _, a := range critActs {
 				o.Responses[config.TierCritical] = append(o.Responses[config.TierCritical], config.Action(a))
 			}
+		}
+		if mode == modeRecommended && !plantSynced {
+			o.Baits = without(o.Baits, syncIDs)
 		}
 		if mode == modeRecommended || !warnResponds(o.Preset, warnActs) {
 			if learning != "keep" {
@@ -515,4 +530,19 @@ func randomWord() string {
 		b[i] = letters[int(randByte())%len(letters)]
 	}
 	return string(b)
+}
+
+// without returns xs minus the ones in drop.
+func without(xs, drop []string) []string {
+	skip := map[string]bool{}
+	for _, d := range drop {
+		skip[d] = true
+	}
+	var out []string
+	for _, x := range xs {
+		if !skip[x] {
+			out = append(out, x)
+		}
+	}
+	return out
 }
