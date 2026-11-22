@@ -187,11 +187,8 @@ func InstallOrUpdate(exe string) error {
 	if err := os.WriteFile(filepath.Join(contents, "Info.plist"), []byte(infoPlist()), 0o644); err != nil {
 		return err
 	}
-	if !provenance.Verify(exe).Valid {
-		bundle := filepath.Dir(contents)
-		if out, err := exec.Command("/usr/bin/codesign", "--force", "--sign", "-", "--identifier", paths.BundleID, bundle).CombinedOutput(); err != nil {
-			return fmt.Errorf("sign %s: %v (%s)", bundle, err, strings.TrimSpace(string(out)))
-		}
+	if err := sealBundle(); err != nil {
+		return err
 	}
 	if err := os.WriteFile(plistFile, []byte(plistText(exe)), 0o644); err != nil {
 		return err
@@ -200,12 +197,34 @@ func InstallOrUpdate(exe string) error {
 	return os.Chmod(plistFile, 0o644)
 }
 
+// sealBundle signs the app bundle ad hoc when its signature no longer
+// covers what's in it (after an update swapped its program files), unless
+// the program carries a real (Developer ID) signature of its own, which a
+// release that comes as a signed bundle keeps. macOS tells the service apart
+// from anything else by that signature.
+func sealBundle() error {
+	bundle := paths.AppBundle()
+	if exec.Command("/usr/bin/codesign", "--verify", "--strict", bundle).Run() == nil {
+		return nil
+	}
+	if provenance.Verify(paths.InstalledService()).Valid {
+		return fmt.Errorf("the signature of %s doesn't match its files", bundle)
+	}
+	if out, err := exec.Command("/usr/bin/codesign", "--force", "--sign", "-", "--identifier", paths.BundleID, bundle).CombinedOutput(); err != nil {
+		return fmt.Errorf("sign %s: %v (%s)", bundle, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // Start starts the service and waits until it's protecting: it writes
 // ReadyFile once the baits are watched (or once it has waited long enough
 // for Full Disk Access).
 func Start() error {
 	if st, _ := Status(); st == Running {
 		return nil
+	}
+	if err := sealBundle(); err != nil {
+		return err
 	}
 	if loaded, _, _ := job(); loaded {
 		if _, err := launchctl("kickstart", target); err != nil {

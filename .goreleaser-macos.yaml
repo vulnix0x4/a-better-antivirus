@@ -1,0 +1,56 @@
+# The macOS files of a release: the program for Apple silicon (arm64) and
+# Intel (amd64), as a plain file (what `aba update` downloads) and a tarball.
+#
+# They have a checksum list of their own, SHA256SUMS-macos.txt, signed with
+# the same release key: SHA256SUMS.txt is the Windows files' list and
+# promises to hold nothing else (see installer/verify.ps1). The release
+# workflow runs this after .goreleaser.yaml, on a macOS runner, adding these
+# files to the release it made.
+#
+# Not code-signed yet: that needs ABA's Developer ID certificates. Downloaded
+# with a browser, macOS would refuse to open them; `aba update` and a
+# download with curl don't mark them as downloaded, so they run. `aba install`
+# signs the app bundle it makes ad hoc.
+version: 2
+
+project_name: a-better-antivirus
+dist: dist-macos
+
+builds:
+  - id: aba-macos
+    main: ./cmd/aba
+    binary: aba
+    env: [CGO_ENABLED=0]
+    goos: [darwin]
+    goarch: [arm64, amd64]
+    flags: [-trimpath]
+    ldflags: ["-s -w -X main.version={{.Tag}}"]
+
+archives:
+  - id: bin
+    formats: [binary]
+    name_template: "aba_{{ .Tag }}_darwin_{{ .Arch }}"
+  - id: tarball
+    formats: [tar.gz]
+    name_template: "aba_{{ .Tag }}_darwin_{{ .Arch }}"
+    files: [README.md, LICENSE]
+    builds_info:
+      mode: 0755
+
+checksum:
+  name_template: "SHA256SUMS-macos.txt"
+  algorithm: sha256
+
+signs:
+  - id: checksums
+    artifacts: checksum
+    cmd: go
+    args: ["run", "./scripts/sign", "${artifact}", "${signature}"]
+    signature: "${artifact}.sig"
+
+release:
+  # The release .goreleaser.yaml made: its text stays, these files are added.
+  mode: keep-existing
+
+changelog:
+  disable: true

@@ -168,6 +168,31 @@ func TestStealerIsFrozenAndBlocked(t *testing.T) {
 	}
 }
 
+// A process the system ran to do a stealer's work (on macOS, Finder's helper
+// copying a file for it) is frozen with the stealer, and only then.
+func TestHelpersFrozenOnlyWithAStealer(t *testing.T) {
+	e, f := setup("balanced")
+	img := `C:\Users\bob\AppData\Local\Temp\x\stealer.exe`
+	f.images[300] = `C:\Windows\System32\helper.exe`
+	a := ev(100, img, desktopBait, 1)
+	a.Helpers = []uint32{300}
+	e.HandleAccess(a)
+	if al := only(f); al == nil || al.Tier != config.TierCritical || !hasPID(f.suspended, 300) {
+		t.Fatalf("the helper of a stealer wasn't frozen: suspended=%v alert=%+v", f.suspended, al)
+	}
+
+	e, f = setup("balanced")
+	signed := `C:\Users\bob\AppData\Local\Programs\Microsoft VS Code\Code.exe`
+	f.sigs[signed] = provenance.Result{Signed: true, Valid: true, Signer: "Microsoft Corporation"}
+	f.images[301] = `C:\Windows\System32\helper.exe`
+	a = ev(200, signed, desktopBait, 1)
+	a.Helpers = []uint32{301}
+	e.HandleAccess(a)
+	if hasPID(f.suspended, 301) {
+		t.Fatalf("the helper of an ordinary program was frozen: %v", f.suspended)
+	}
+}
+
 func TestSignedUserFolderAppIsUnfrozen(t *testing.T) {
 	e, f := setup("balanced")
 	img := `C:\Users\bob\AppData\Local\Programs\Microsoft VS Code\Code.exe`

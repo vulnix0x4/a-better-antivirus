@@ -706,6 +706,14 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 				}
 			}
 		}
+		for _, h := range oa.Helpers { // doing its work for it (Finder copying for a script)
+			if hasPID(frozen, h) {
+				continue
+			}
+			if img, err := e.Ops.ImagePath(h); err == nil && e.touchable(h, img) {
+				grow(h, img)
+			}
+		}
 		for _, m := range teammates { // the others in a split-up sweep
 			if hasPID(frozen, m.pid) || e.Ops.CreateTime(m.pid) != m.createTime || !e.touchable(m.pid, m.image) || e.isFrozen(m.pid, m.createTime) {
 				continue

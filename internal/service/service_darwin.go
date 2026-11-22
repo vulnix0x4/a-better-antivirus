@@ -11,7 +11,8 @@ package service
 //
 //   - A copy Finder makes for a script is opened by Finder's helper, not by
 //     the script. Finder's log says who has been driving it (see eswatch),
-//     and the access goes to that program instead.
+//     and the access goes to that program instead, with the helper as its
+//     helper: frozen with it if it's judged a stealer, so the copy stops.
 //   - A short-lived reader (cat, a shell running one line) is often gone by
 //     the time eslogger's report arrives, and so the engine couldn't freeze
 //     what started it. Then the access goes to the nearest program in its
@@ -34,6 +35,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/vulnix0x4/a-better-antivirus/internal/alerts"
 	"github.com/vulnix0x4/a-better-antivirus/internal/classify"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/detect"
@@ -190,7 +192,8 @@ func (s *server) startWatching(ctx context.Context) {
 	}
 	go s.es.Run()
 	go func() {
-		was := false
+		was, told := false, false
+		var blind time.Time
 		for i := 0; ; i++ {
 			running, since, err := s.es.Status()
 			now := running && time.Since(since) > time.Second
@@ -204,8 +207,24 @@ func (s *server) startWatching(ctx context.Context) {
 				}
 				was = now
 			}
-			if errors.Is(err, eswatch.ErrNoAccess) && i%100 == 20 {
-				s.log.Printf("waiting for Full Disk Access (System Settings > Privacy & Security > Full Disk Access: %s)", paths.ServiceDisplayName)
+			if errors.Is(err, eswatch.ErrNoAccess) {
+				if i%100 == 20 {
+					s.log.Printf("waiting for Full Disk Access (System Settings > Privacy & Security > Full Disk Access: %s)", paths.ServiceDisplayName)
+				}
+				if blind.IsZero() {
+					blind = time.Now()
+				}
+				// Two minutes without it: say so, once, on the desktop and the
+				// phone. Without Full Disk Access ABA sees nothing at all.
+				if !told && time.Since(blind) > 2*time.Minute {
+					told = true
+					go s.safe("access alert", func() {
+						s.eng.SystemAlert(alerts.KindAuditDisabled, config.TierCritical, "ABA can't see the baits: Full Disk Access is off",
+							"macOS isn't letting ABA watch files, so nothing that opens a bait is noticed. It happens after an update while ABA isn't signed by a registered developer yet (macOS takes the new version for another program), or when the switch was turned off. Open System Settings > Privacy & Security > Full Disk Access and switch on \""+paths.ServiceDisplayName+"\" (if it's on already, switch it off and on again). `sudo aba doctor --fix` opens the page.", nil)
+					})
+				}
+			} else if now {
+				blind, told = time.Time{}, false
 			}
 			select {
 			case <-ctx.Done():
@@ -282,9 +301,14 @@ func (s *server) onEvent(ev eswatch.Event) {
 		s.es.AddAlias(ev.Alias, ev.Path)
 		s.eng.NoteEvasion(pid, fmt.Sprintf(aliasWhy, ev.Alias))
 	}
+	var helpers []uint32
 	if eswatch.IsFinderCopier(ev.Proc) {
 		if p, img, why := s.finderSender(); p != 0 {
 			s.log.Printf("bait %s was copied by Finder's helper (pid %d) for %s (pid %d), %s", ev.Path, pid, img, p, why)
+			// The helper is frozen with the program that asked for the copy,
+			// if that one is judged a stealer: then the copy stops where it
+			// is. Copies you make yourself are never touched.
+			helpers = []uint32{pid}
 			pid, image = p, img
 		}
 	} else if !procinfo.Alive(pid, 0) {
@@ -300,7 +324,7 @@ func (s *server) onEvent(ev eswatch.Event) {
 	if ev.Op == eswatch.Delete {
 		op = detect.OpDelete
 	}
-	a := &detect.Access{Time: ev.At, Op: op, Path: ev.Path, Alias: ev.Alias, PID: pid, Image: image}
+	a := &detect.Access{Time: ev.At, Op: op, Path: ev.Path, Alias: ev.Alias, PID: pid, Image: image, Helpers: helpers}
 	if ev.Op == eswatch.Link {
 		a.Alias = ev.Alias
 	}
