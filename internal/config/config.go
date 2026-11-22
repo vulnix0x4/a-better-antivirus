@@ -191,6 +191,11 @@ type Config struct {
 	AutoUpdate    bool              `json:"autoUpdate"`    // install signed releases automatically (config v2+)
 	InstalledAt   time.Time         `json:"installedAt"`
 	Extra         map[string]any    `json:"extra,omitempty"`
+
+	// ClipboardBait puts a fake wallet address on the clipboard now and then,
+	// while nobody is using the PC, to catch clippers (package clipbait).
+	// Off unless switched on: it touches the clipboard.
+	ClipboardBait bool `json:"clipboardBait,omitempty"`
 }
 
 // CurrentConfigVersion 2 added AutoUpdate. Configs written by v1 have no

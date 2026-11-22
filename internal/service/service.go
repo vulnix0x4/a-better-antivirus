@@ -118,6 +118,7 @@ func (s *server) reload() error {
 		}
 	}
 	s.guard(guarded)
+	s.clipboardBait(cfg.ClipboardBait)
 	s.baitsChanged(st)
 	return nil
 }
@@ -190,6 +191,7 @@ func (s *server) run(ctx context.Context, ctl <-chan svcctl.Signal) error {
 		case <-ctx.Done():
 			s.saveProgress()
 			s.stopWatching()
+			s.clipboardBait(false) // the guards put the clipboard back as they go
 			// Let go of every hold properly (what's frozen stays suspended): a
 			// hold that's simply dropped kills its process.
 			procinfo.DropHolds(time.Now().Add(time.Hour), func(string) bool { return false })
@@ -217,6 +219,12 @@ func (s *server) run(ctx context.Context, ctl <-chan svcctl.Signal) error {
 		case <-beat.C:
 			s.saveProgress()
 			s.safe("holds", s.reconcileHolds)
+			s.safe("clipboard bait", func() { // people log on and off
+				s.mu.Lock()
+				on := s.cfg != nil && s.cfg.ClipboardBait
+				s.mu.Unlock()
+				s.clipboardBait(on)
+			})
 			s.publish()
 		case <-dialRefresh.C:
 			s.refreshDial(ctx)

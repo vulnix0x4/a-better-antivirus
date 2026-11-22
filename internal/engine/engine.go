@@ -463,6 +463,9 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	}
 	received := time.Now()
 	baitID, ok := e.IsBait(oa.Path)
+	if oa.Op == detect.OpSwap && oa.Swap != nil {
+		baitID, ok = ClipboardBait, true
+	}
 	if !ok || oa.PID == e.SelfPID {
 		return
 	}
@@ -471,6 +474,8 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	case detect.OpRead:
 	case detect.OpDelete:
 		access = "delete"
+	case detect.OpSwap:
+		access = "swap"
 	default:
 		return
 	}
@@ -494,10 +499,16 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	e.mu.Lock()
 	cfg, cls, name := e.cfg, e.classifier, e.baitNames[baitID]
 	hit := alerts.BaitHit{ID: baitID, Name: name, Path: oa.Path, Access: access, Time: oa.Time}
+	if access == "swap" {
+		hit.Name, hit.Path = clipboardBaitName, "the clipboard"
+	}
 	if inc := e.incidents[oa.PID]; !instant && inc != nil && len(swept) >= sweepApps && inc.alert.Tier != config.TierCritical {
 		// It started out looking harmless and has now read several apps' data:
 		// handle it again as a sweep, with the full response.
 		delete(e.incidents, oa.PID)
+	}
+	if inc := e.incidents[oa.PID]; access == "swap" && inc != nil && inc.alert.Tier != config.TierCritical {
+		delete(e.incidents, oa.PID) // same: now it's a caught clipper
 	}
 	// Aggregate repeat hits into the open alert, except for instant catches: a
 	// new freeze always gets its own alert and its own record in state (the
@@ -565,6 +576,9 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	if isSweep && !cls.SweepExempt(image, oa.PID, nil) {
 		pre = e.sweepVerdict(pre, swept)
 	}
+	if access == "swap" {
+		pre = swapVerdict(oa.Swap) // whatever it is: nothing legitimate does that
+	}
 	// One of your rules covers it: done, unless it used a trick to dodge
 	// detection (decided further down). Only a rule an administrator made for
 	// exactly that covers a trick (`aba ignore add --allow-tricks`), and none
@@ -607,6 +621,9 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	v := cls.Final(image, oa.PID, ref, sig)
 	if isSweep && !cls.SweepExempt(image, oa.PID, &sig) {
 		v = e.sweepVerdict(v, swept)
+	}
+	if access == "swap" {
+		v = swapVerdict(oa.Swap)
 	}
 	// A Windows program reading app data is how injected stealers look: check
 	// whether it's running code that isn't from any file on disk. (Trust rules
@@ -725,6 +742,9 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	a.Instant = instant && len(frozen) > 0
 	if access == "delete" {
 		a.Kind = alerts.KindDelete
+	}
+	if access == "swap" {
+		a.Kind = alerts.KindClipper
 	}
 	if test {
 		a.Kind = alerts.KindTest
@@ -1137,6 +1157,8 @@ func (e *Engine) describe(a *alerts.Alert, v classify.Verdict) {
 		what = "opened"
 	}
 	switch {
+	case a.Kind == alerts.KindClipper:
+		a.Title = "Clipper caught: " + exe + " swapped a wallet address on your clipboard"
 	case a.Test && a.Instant:
 		a.Title = "Test detection: " + exe + " was frozen the moment it opened a bait"
 	case a.Test:
@@ -1156,6 +1178,31 @@ func (e *Engine) describe(a *alerts.Alert, v classify.Verdict) {
 	if a.Instant {
 		a.Summary = "Caught the moment it opened the bait (instant freeze). " + a.Summary
 	}
+}
+
+// ClipboardBait is the bait ID of the fake wallet address ABA puts on the
+// clipboard (package clipbait). It's not a file, so it's never in the index.
+const ClipboardBait = "clipboard"
+
+const clipboardBaitName = "Clipboard (a fake wallet address)"
+
+// swapVerdict: a program replaced ABA's fake wallet address with another
+// address. Nothing legitimate does that, whatever it is and whoever signed
+// it, so it's critical; no rule makes it otherwise.
+func swapVerdict(sw *detect.Swap) classify.Verdict {
+	why := "it replaced the wallet address ABA put on the clipboard with a different one: that's a clipper, malware that makes whatever you paste into your wallet send the money to the attacker"
+	if sw.Replacement == "" {
+		why = "it wiped the wallet address ABA put on the clipboard the moment it appeared, and did it again each time: a clipper that tried to swap in its own address"
+	}
+	reasons := []string{why}
+	if sw.How != "" {
+		reasons = append(reasons, "how ABA knows it was this program: "+sw.How)
+	}
+	if sw.Replacement != "" {
+		reasons = append(reasons, "the address it swapped in (the attacker's): "+sw.Replacement)
+	}
+	reasons = append(reasons, "the fake address: "+sw.Bait+" (it's invalid on purpose: no wallet accepts it)")
+	return classify.Verdict{Tier: config.TierCritical, Reasons: reasons}
 }
 
 func appendUnique(xs []string, add ...string) []string {
