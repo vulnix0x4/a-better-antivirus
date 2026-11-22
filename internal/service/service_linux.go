@@ -348,9 +348,9 @@ func (s *server) watchEscapes(ctx context.Context) {
 var ttyName = regexp.MustCompile(`^/dev/(pts/\d+|tty\d+)$`)
 
 // tellTerminal writes a line to the terminal a just-frozen program runs in.
-// Linux has no alert popups yet, and a command that silently stops in the
-// middle of someone's terminal explains nothing. (It doesn't say which file:
-// that's for `aba alerts`, as root.)
+// A server has no desktop to show an alert on, and a command that silently
+// stops in the middle of someone's terminal explains nothing. (It doesn't say
+// which file: that's for `aba alerts`, as root.)
 func tellTerminal(pid uint32) {
 	for fd := 0; fd <= 2; fd++ {
 		p, err := os.Readlink(fmt.Sprintf("/proc/%d/fd/%d", pid, fd))

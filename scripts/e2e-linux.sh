@@ -4,7 +4,7 @@
 # release, a sweep, a hard-link trick, bait repair, uninstall, and a check
 # that nothing is left behind.
 #
-#   scripts/e2e-linux.sh <aba binary> <grabber binary>
+#   scripts/e2e-linux.sh <aba binary> <grabber binary> <notifyd binary>
 #
 # Run it as an ordinary user with passwordless sudo on a THROWAWAY machine (CI
 # does, on GitHub's ubuntu-latest): it installs a root service, plants baits
@@ -18,6 +18,7 @@ set -uo pipefail
 
 ABA_BIN=$(readlink -f "${1:?usage: e2e-linux.sh <aba> <grabber>}")
 GRABBER=$(readlink -f "${2:?usage: e2e-linux.sh <aba> <grabber>}")
+NOTIFYD=$(readlink -f "${3:?usage: e2e-linux.sh <aba> <grabber> <notifyd>}")
 DATA=/var/lib/file-access-monitor
 PROG=/usr/local/lib/file-access-monitor
 UNIT=file-access-monitor.service
@@ -281,6 +282,42 @@ check "a trusted program reads that bait without a new alert" test "$(alerts | j
 kill -9 "$pid" 2>/dev/null
 sudo aba ignore list | sed 's/^/      /'
 
+say "A desktop notification, with the choices as buttons"
+if [ -x /usr/bin/pkexec ] && [ -d /etc/polkit-1/rules.d ]; then
+  # The runner has nobody to type a password: polkit lets this user through.
+  printf 'polkit.addRule(function(action, subject) {
+  if (action.id == "org.freedesktop.policykit.exec" && subject.user == "%s") return polkit.Result.YES;
+});
+' "$ME" | sudo tee /etc/polkit-1/rules.d/49-aba-e2e.rules >/dev/null
+fi
+# A stand-in desktop: the user's session bus, and a notification service on it
+# that presses "Kill it" the way a person would.
+BUS=/run/user/$MY_UID/bus
+if [ ! -S "$BUS" ]; then
+  launch bus /usr/bin/dbus-daemon --session --nofork --address="unix:path=$BUS" >/dev/null || fail "couldn't start a session bus"
+  wait_until 50 test -S "$BUS" || fail "no session bus at $BUS"
+  note "started a session bus at $BUS"
+fi
+launch desk /usr/bin/env DBUS_SESSION_BUS_ADDRESS="unix:path=$BUS" "$NOTIFYD" -out "$OUT/desk" -press "Kill it" >/dev/null || fail "couldn't start the stand-in desktop"
+wait_until 50 has_line '^READY' "$OUT/desk" || fail "the stand-in desktop didn't start: $(sudo journalctl -n 20 --no-pager 2>/dev/null | grep -i notifyd)"
+pid=$(launch popup "$HOME/Downloads/free-game" -out "$OUT/d1" "$PASSWORDS") || fail "couldn't start the fake stealer"
+id=$(expect_frozen "$pid" "$OUT/d1" "fake stealer") || exit 1
+wait_until 100 has_line '^NOTIFY .*free-game' "$OUT/desk" || fail "no desktop notification: $(cat "$OUT/desk"; sudo grep 'desktop notify' "$DATA/service.log" | tail -3)"
+line=$(grep '^NOTIFY .*free-game' "$OUT/desk" | tail -1)
+note "$(cut -c1-160 <<<"$line")"
+grep -q "| Kill it, It's mine, Decide later$" <<<"$line" || fail "the notification doesn't offer Kill it / It's mine / Decide later: $line"
+ok "the notification asks, with Windows' three choices as buttons"
+wait_until 50 has_line '^PRESSED' "$OUT/desk" || fail "the stand-in desktop didn't press the button"
+if [ -x /usr/bin/pkexec ] && [ -d /etc/polkit-1/rules.d ]; then
+  wait_until 100 gone "$pid" || fail "pressing Kill it didn't end it: $(tail -3 "$OUT/desk"; sudo journalctl -n 30 --no-pager | grep -i -E 'pkexec|polkit|aba' | tail -8)"
+  ok "pressing Kill it asked for administrator rights (pkexec) and ended the stealer"
+else
+  wait_until 100 has_line 'needs administrator rights' "$OUT/desk" || fail "no word on how to answer without pkexec"
+  ok "without pkexec, a notification says what to type instead"
+  sudo aba kill "$id" >/dev/null
+fi
+sudo systemctl stop 'aba-e2e-desk-*' 'aba-e2e-popup-*' 2>/dev/null  # the stand-in would press Kill it on every alert from here on
+
 say "aba release"
 cp "$GRABBER" "$HOME/Downloads/other-game"; echo "different file, different fingerprint" >> "$HOME/Downloads/other-game"; chmod 755 "$HOME/Downloads/other-game"
 p1=$(launch other "$HOME/Downloads/other-game" -out "$OUT/r1" "$PASSWORDS") || fail "couldn't start the fake stealer"
@@ -434,5 +471,6 @@ check "folders that were yours before are still there" test -d "$HOME/Documents"
 if command -v nft >/dev/null; then sudo nft list table inet file_access_monitor >/dev/null 2>&1 && fail "ABA's firewall table is still there after uninstall"; fi
 ok "nothing left behind"
 
+sudo rm -f /etc/polkit-1/rules.d/49-aba-e2e.rules
 rm -rf "$OUT" "$HOME/Downloads/free-game" "$HOME/Downloads/other-game" "$HOME/Downloads/net-game" "$HOME/Downloads"/e2e-l1*
 printf '\n\033[32mAll end-to-end checks passed.\033[0m\n'

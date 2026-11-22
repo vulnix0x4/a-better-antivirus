@@ -95,6 +95,9 @@ jobs:
         run: |
           go build -ldflags "-s -w -X main.version=ci-${{ github.sha }}" -o dist/aba ./cmd/aba
           go build -o dist/grabber ./scripts/grabber
+          go build -o dist/notifyd ./scripts/notifyd
+          # pkexec, for answering a desktop notification with administrator rights.
+          command -v pkexec >/dev/null || sudo apt-get install -y -qq pkexec >/dev/null || true
 
       # Every feature on a throwaway machine: install as a systemd service,
       # fake stealers frozen inside their open, kill, legitimate readers let
@@ -102,7 +105,7 @@ jobs:
       # repair, uninstall, and nothing left behind.
       - name: End-to-end
         if: runner.os == 'Linux'
-        run: bash scripts/e2e-linux.sh ./dist/aba ./dist/grabber
+        run: bash scripts/e2e-linux.sh ./dist/aba ./dist/grabber ./dist/notifyd
 
       - name: Service log (after a failure)
         if: failure() && runner.os == 'Linux'
