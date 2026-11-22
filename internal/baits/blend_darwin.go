@@ -126,27 +126,34 @@ func asOwner(path string, fn func()) error {
 		fn()
 		return nil
 	}
-	runtime.LockOSThread()
-	const none = ^uintptr(0) // KAUTH_UID_NONE / KAUTH_GID_NONE: back to the process's own
-	restore := func() bool {
-		_, _, e := syscall.RawSyscall(unix.SYS_SETTID, none, none, 0)
-		return e == 0 && unix.Geteuid() == 0
-	}
-	if _, _, e := syscall.RawSyscall(unix.SYS_SETTID, uintptr(uid), uintptr(gid), 0); e != 0 {
-		runtime.UnlockOSThread()
-		return fmt.Errorf("couldn't act as the owner of %s (%v), so nothing was changed there", path, e)
-	}
-	defer func() {
-		if restore() {
+	// On a goroutine of its own, locked to its thread: if the thread can't be
+	// given back root's rights afterwards, the goroutine ends still locked and
+	// Go throws the thread away instead of running anything else on it.
+	errc := make(chan error, 1)
+	go func() {
+		runtime.LockOSThread()
+		// KAUTH_UID_NONE / KAUTH_GID_NONE (~0 - 100): back to the process's own.
+		const none = uintptr(^uint32(0) - 100)
+		if _, _, e := syscall.RawSyscall(unix.SYS_SETTID, uintptr(uid), uintptr(gid), 0); e != 0 {
 			runtime.UnlockOSThread()
+			errc <- fmt.Errorf("couldn't act as the owner of %s (%v), so nothing was changed there", path, e)
+			return
 		}
-		// If it couldn't be undone, the thread stays locked: Go ends a locked
-		// thread with its goroutine instead of reusing it.
+		restored := false
+		defer func() {
+			if restored {
+				runtime.UnlockOSThread()
+			}
+		}()
+		// The thread's rights are what getuid answers with: check they took.
+		if unix.Geteuid() != int(uid) {
+			errc <- errors.New("couldn't act as the owner of " + path + ": the kernel kept root's rights")
+		} else {
+			fn()
+			errc <- nil
+		}
+		_, _, e := syscall.RawSyscall(unix.SYS_SETTID, none, none, 0)
+		restored = e == 0 && unix.Geteuid() == 0
 	}()
-	// The thread's rights are what getuid answers with: check they took.
-	if unix.Geteuid() != int(uid) {
-		return errors.New("couldn't act as the owner of " + path + ": the kernel kept root's rights")
-	}
-	fn()
-	return nil
+	return <-errc
 }
