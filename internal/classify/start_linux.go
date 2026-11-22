@@ -26,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 )
@@ -93,21 +94,15 @@ func startDiffers(r config.IgnoreRule, pid uint32) string {
 	if pid == 0 {
 		return "no process"
 	}
-	if cwd := view.Cwd(pid); r.Dir != "" && cwd != r.Dir {
+	cwd, env, links, ok := startOf(pid)
+	if !ok || len(links) == 0 {
+		return "it has exited, and wasn't seen while it ran"
+	}
+	if r.Dir != "" && cwd != r.Dir {
 		return "it runs in " + cwd + ", not " + r.Dir
 	}
-	if view.Environ != nil {
-		if name := changesBehaviour(view.Environ(pid)); name != "" {
-			return "its environment sets " + name
-		}
-	}
-	image := view.Image(pid)
-	if image == "" {
-		return "it has exited"
-	}
-	links := chain(pid, image)
-	if len(links) == 0 {
-		return "it has exited"
+	if name := changesBehaviour(env); name != "" {
+		return "its environment sets " + name
 	}
 	if links[0].foreign != "" {
 		return "it runs code from " + links[0].foreign
@@ -126,4 +121,23 @@ func startDiffers(r config.IgnoreRule, pid uint32) string {
 		}
 	}
 	return ""
+}
+
+// startOf is how pid was started: looked at now while it runs, or as it was
+// seen while it was held in its open (Remember), for a reader that has
+// exited by the time its read is judged in full.
+func startOf(pid uint32) (cwd string, env []string, links []link, ok bool) {
+	if image := view.Image(pid); image != "" && view.Started(pid) != 0 {
+		if view.Environ != nil {
+			env = view.Environ(pid)
+		}
+		return view.Cwd(pid), env, chain(pid, image), true
+	}
+	traceMu.Lock()
+	t, hit := traceCache[pid]
+	traceMu.Unlock()
+	if hit && t.links != nil && t.started != 0 && time.Since(t.at) < 2*time.Minute {
+		return t.cwd, t.env, t.links, true
+	}
+	return "", nil, nil, false
 }
