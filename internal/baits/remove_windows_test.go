@@ -3,6 +3,7 @@ package baits
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -71,5 +72,21 @@ func TestRemoveThatFailsKeepsWhatIsLeft(t *testing.T) {
 	}
 	if _, err := os.Lstat(gone.Path); !os.IsNotExist(err) {
 		t.Fatalf("%s should have been deleted (%v)", gone.Path, err)
+	}
+}
+
+// Kept says which files a removal leaves in place, and why.
+func TestKeptNamesChangedAndForeignFiles(t *testing.T) {
+	dir := t.TempDir()
+	same := plant(t, filepath.Join(dir, "same.txt"))
+	changed := plant(t, filepath.Join(dir, "changed.txt"))
+	theirs := plant(t, filepath.Join(dir, "theirs.txt"))
+	theirs.Created = false
+	if err := os.WriteFile(changed.Path, []byte("rewritten by an app"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	kept := Kept(&config.BaitState{Files: []config.BaitFile{same, changed, theirs}})
+	if len(kept) != 2 || !strings.HasPrefix(kept[0], changed.Path+" (it changed since") || !strings.HasPrefix(kept[1], theirs.Path+" (it isn't one ABA made") {
+		t.Fatalf("Kept = %q", kept)
 	}
 }

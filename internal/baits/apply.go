@@ -282,7 +282,8 @@ func Check(bs *config.BaitState) []Problem {
 			}
 		}
 		if f.Size != 0 && (fi.Size() != f.Size || !fi.ModTime().Equal(f.ModTime)) {
-			out = append(out, Problem{File: f.Path, Kind: "modified", Detail: "contents changed"})
+			out = append(out, Problem{File: f.Path, Kind: "modified", Detail: fmt.Sprintf("contents changed: %d bytes, written %s; planted %d bytes, written %s",
+				fi.Size(), fi.ModTime().UTC().Format(time.RFC3339Nano), f.Size, f.ModTime.UTC().Format(time.RFC3339Nano))})
 		}
 	}
 	return out
@@ -426,6 +427,29 @@ func remove(bs *config.BaitState) error {
 		}
 	}
 	return firstErr
+}
+
+// Kept lists the files of bs that Remove leaves in place, each with the
+// reason: ones ABA didn't create, and ones that changed since it planted them.
+func Kept(bs *config.BaitState) []string {
+	if bs == nil {
+		return nil
+	}
+	var out []string
+	for _, f := range bs.Files {
+		fi, err := os.Stat(f.Path)
+		if err != nil {
+			continue
+		}
+		switch {
+		case !f.Created:
+			out = append(out, f.Path+" (it isn't one ABA made, or something wrote to it since: it's yours now)")
+		case !unchanged(f):
+			out = append(out, fmt.Sprintf("%s (it changed since ABA planted it: %d bytes, written %s; ABA planted %d bytes, written %s)",
+				f.Path, fi.Size(), fi.ModTime().UTC().Format(time.RFC3339Nano), f.Size, f.ModTime.UTC().Format(time.RFC3339Nano)))
+		}
+	}
+	return out
 }
 
 // removeFile deletes path, giving a program that has it open a few seconds to

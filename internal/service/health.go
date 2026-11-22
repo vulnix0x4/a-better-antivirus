@@ -117,6 +117,10 @@ func (s *server) healthCheck(startup bool) {
 						kind, title = alerts.KindAuditRemoved, "A bait lost its tripwire: "+bs.Name
 					}
 				}
+				if p.Kind == "modified" {
+					// From now on it's treated as yours: never deleted with the bait.
+					s.log.Printf("bait %s: %s %s; it counts as yours from now on", id, p.File, p.Detail)
+				}
 				hits = append(hits, alerts.BaitHit{ID: id, Name: bs.Name, Path: p.File, Access: p.Kind, Time: time.Now()})
 			}
 			if known {

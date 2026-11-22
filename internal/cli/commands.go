@@ -901,6 +901,12 @@ func baitCmd() *cobra.Command {
 					return exitf("no bait %q", args[0])
 				}
 			}
+			// Files the removal leaves alone (yours, or changed since): say so,
+			// instead of "removed" with the file still there.
+			var kept []string
+			if st, _ := config.LoadState(); st != nil {
+				kept = baits.Kept(st.Baits[args[0]])
+			}
 			cfg.Baits = keep
 			if err := config.SaveConfig(cfg); err != nil {
 				return err
@@ -915,6 +921,9 @@ func baitCmd() *cobra.Command {
 				return err
 			}
 			fmt.Println(ui.Good.Render(ui.IconOK) + " removed " + args[0])
+			for _, k := range kept {
+				fmt.Println("  kept " + k)
+			}
 			return nil
 		},
 	})
