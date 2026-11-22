@@ -204,7 +204,7 @@ func newWizard(in WizardInput) *wizard {
 	canaryEmail := sec.Canary.Email
 	cleanRecent := o.CleanRecent
 	// Configs from before auto-update existed haven't chosen yet: suggest on.
-	updateUnasked := ex != nil && ex.Version < config.CurrentConfigVersion
+	updateUnasked := ex != nil && ex.Version < 2
 	autoUpdate := ex == nil || updateUnasked || ex.AutoUpdate
 	confirm := true
 

@@ -180,3 +180,60 @@ func TestMovedTellsWhichBaitsToReplant(t *testing.T) {
 		}
 	}
 }
+
+// On Windows, Firefox lists its profiles in profiles.ini but keeps them one
+// folder down, in Profiles: the fake one goes there, next to the real ones.
+func TestFirefoxProfileInsideOnWindows(t *testing.T) {
+	u := testUser(t)
+	u.Embedded = map[string]string{}
+	s, ok := ByID("firefox-profile")
+	if !ok {
+		t.Fatal("no firefox-profile bait")
+	}
+	if a := planOf(u, nil)["firefox-profile"]; a.Available {
+		t.Fatal("no Firefox here: nothing to plant a profile into")
+	}
+	exe := filepath.Join(pf(), "Mozilla Firefox", "firefox.exe")
+	os.MkdirAll(filepath.Dir(exe), 0o755)
+	os.WriteFile(exe, nil, 0o644)
+	root := filepath.Join(u.RoamingAppData, "Mozilla", "Firefox")
+	os.MkdirAll(filepath.Join(root, "Profiles", "abcd1234.default-release"), 0o755)
+	os.WriteFile(filepath.Join(root, "profiles.ini"), []byte("[Profile0]\r\nName=default-release\r\nIsRelative=1\r\nPath=Profiles/abcd1234.default-release\r\nDefault=1\r\n"), 0o644)
+	if a := planOf(u, nil)["firefox-profile"]; !a.Available {
+		t.Fatalf("Firefox is installed and used: %+v", a)
+	}
+	name := FreeProfile(s, u)
+	if !strings.HasSuffix(name, ".default-release-1") {
+		t.Fatalf("FreeProfile = %q", name)
+	}
+	u.Embedded[s.ID] = name
+	for _, f := range s.Files(u) {
+		if filepath.Dir(f.Path) != filepath.Join(root, "Profiles", name) {
+			t.Fatalf("%s isn't in %s", f.Path, filepath.Join(root, "Profiles", name))
+		}
+	}
+	if Adopted(s, u) {
+		t.Fatal("adopted before profiles.ini lists it")
+	}
+	f, _ := os.OpenFile(filepath.Join(root, "profiles.ini"), os.O_APPEND|os.O_WRONLY, 0)
+	f.WriteString("\r\n[Profile1]\r\nName=work\r\nIsRelative=1\r\nPath=Profiles/" + name + "\r\n")
+	f.Close()
+	if !Adopted(s, u) {
+		t.Fatal("profiles.ini lists it, but it isn't seen as adopted")
+	}
+}
+
+func TestGitCredentialsDecoy(t *testing.T) {
+	u := testUser(t)
+	if a := planOf(u, nil)["git-credentials"]; !a.Available {
+		t.Fatalf("no git store here: %+v", a)
+	}
+	os.WriteFile(filepath.Join(u.Profile, ".git-credentials"), []byte("https://me:tok@github.com\n"), 0o600)
+	if a := planOf(u, nil)["git-credentials"]; a.Available {
+		t.Fatal("offered over the real git store")
+	}
+	b := genGitCredentials(NewGen())
+	if !regexp.MustCompile(`^https://[^:]+:glpat-\w{20}@gitlab\.`).Match(b) {
+		t.Fatalf("content: %q", b)
+	}
+}

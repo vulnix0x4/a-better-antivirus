@@ -342,6 +342,18 @@ func AlertDetail(a *alerts.Alert) string {
 		if p.SHA256 != "" {
 			rows = append(rows, [2]string{"SHA-256", p.SHA256})
 		}
+		if o := p.Origin; o != nil {
+			rows = append(rows, [2]string{"Downloaded", Truncate(o.Where(), Width()-14)})
+			if o.URL != "" && o.Referrer != "" {
+				rows = append(rows, [2]string{"  from page", Truncate(o.Referrer, Width()-14)})
+			}
+			if o.Via != "" && o.URL != "" {
+				rows = append(rows, [2]string{"  by", o.Via})
+			}
+			if !strings.EqualFold(o.File, p.Image) {
+				rows = append(rows, [2]string{"  marked on", Truncate(o.File, Width()-14)})
+			}
+		}
 		for i, par := range p.Parents {
 			label := "Parent"
 			if i > 0 {

@@ -207,7 +207,9 @@ type Config struct {
 // opinion on updates, so they load with AutoUpdate=false and setup asks.
 // Version 3 added baits inside real browsers (see baits.Spec.Since): setup
 // offers those to installs that were configured before they existed.
-const CurrentConfigVersion = 3
+// Version 4 added the Firefox profile bait on Windows and macOS, and saved git
+// passwords on Windows.
+const CurrentConfigVersion = 4
 
 func Default() *Config {
 	p, _ := PresetByID("balanced")

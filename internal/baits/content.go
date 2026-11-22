@@ -90,6 +90,14 @@ func (g *Gen) password() string {
 	}
 }
 
+// genGitCredentials is git's plain-text credential store: one URL per line,
+// with the user name and password (here, tokens) in it.
+func genGitCredentials(g *Gen) []byte {
+	host := strings.ToLower(g.Last) + "-consulting"
+	return []byte(fmt.Sprintf("https://%s:glpat-%s@gitlab.%s.internal\nhttps://deploy:%s@git.%s.internal\n",
+		g.User, randAlnum(20, alnum), host, randAlnum(40, "0123456789abcdef"), host))
+}
+
 func genPasswordsTxt(g *Gen) []byte {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# keep this private!!\n\n")

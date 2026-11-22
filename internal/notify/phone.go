@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/smtp"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,10 +30,34 @@ type Message struct {
 	Priority int // 1 (low) .. 5 (urgent)
 }
 
-// FromAlert builds the phone message for an alert.
+// machineName is this computer's name, as alerts show it (a var for tests).
+var machineName = func() string {
+	h, _ := os.Hostname()
+	return cleanName(h)
+}
+
+// cleanName keeps the characters computer names are made of, so a name can
+// go in a mail subject or a header as it is.
+func cleanName(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// FromAlert builds the phone message for an alert. It names the computer,
+// for whoever gets alerts from more than one (a laptop and a desktop, a
+// parent's PC).
 func FromAlert(a *alerts.Alert) Message {
 	m := Message{Title: a.Title, Priority: 3}
 	var b strings.Builder
+	host := machineName()
+	if host != "" {
+		m.Title += " (" + host + ")"
+	}
 	if a.Summary != "" {
 		b.WriteString(a.Summary + "\n")
 	}
@@ -45,6 +70,9 @@ func FromAlert(a *alerts.Alert) Message {
 			fmt.Fprintf(&b, "Path: %s\n", a.Process.Image)
 		}
 		fmt.Fprintf(&b, "Signature: %s\n", a.Process.Signature)
+		if o := a.Process.Origin; o != nil {
+			fmt.Fprintln(&b, o.Line(a.Process.Image))
+		}
 	}
 	for _, r := range a.Actions {
 		mark := "✓"
