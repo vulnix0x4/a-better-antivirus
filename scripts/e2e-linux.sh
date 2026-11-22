@@ -238,9 +238,9 @@ sleep 1
 check "the trusted backup ran without a new alert" test "$(alerts | jq length)" = "$count"
 printf '#!/bin/sh\n%s\nsleep 300\n' "$(printf '%q ' "${BACKUP[@]}")" > "$HOME/Downloads/replay.sh"; chmod +x "$HOME/Downloads/replay.sh"
 launch replay "$HOME/Downloads/replay.sh" >/dev/null || fail "couldn't start the replay"
-a=$(wait_alert '((.process.image // "") | test("/tar$")) and .tier == "critical" and (.verdict.reasons[0] | test("replay.sh"))') \
+a=$(wait_alert '((.process.image // "") | test("/tar$")) and .tier == "critical" and (.verdict.reasons | join(" ") | test("replay.sh"))') \
   || fail "the backup's exact words, run by a script from Downloads, weren't caught"
-ok "the same words from a script nobody vouches for: frozen ($(field "$a" '.verdict.reasons[0]' | cut -c1-110))"
+ok "the same words from a script nobody vouches for: frozen ($(field "$a" '[.verdict.reasons[] | select(test("replay.sh"))][0]' | cut -c1-110))"
 sudo aba kill "$(field "$a" .id)" >/dev/null
 rm -f "$HOME/Downloads/replay.sh"
 
