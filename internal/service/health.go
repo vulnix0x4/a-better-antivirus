@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"github.com/vulnix0x4/a-better-antivirus/internal/platform"
 	"strings"
@@ -12,6 +13,9 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/netguard"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
 )
+
+// errStale ends a state update that has nothing to write (see healthCheck).
+var errStale = errors.New("nothing to save")
 
 // healthCheck keeps the tripwire armed: auditing on, baits present with their
 // audit rules, decoys retired when the real app appears, Recent files clean.
@@ -101,6 +105,41 @@ func (s *server) healthCheck(startup bool) {
 			}
 			probs := baits.Check(bs)
 			bs.LastCheck = time.Now()
+			if len(probs) > 0 {
+				// Something's wrong: put it right, but only if it's still on record
+				// as it was when this check took its snapshot. A bait removed (or
+				// planted anew) since isn't this check's to put back: doing that
+				// left a decoy on disk that nothing knew about. Decided under the
+				// state lock, which `aba bait remove` holds while it deletes.
+				var rerr error
+				stale := false
+				err := config.UpdateState(func(cur *config.State) error {
+					c := cur.Baits[id]
+					if c == nil || !c.CreatedAt.Equal(bs.CreatedAt) {
+						stale = true
+						return errStale
+					}
+					c.LastCheck = bs.LastCheck
+					if probs = baits.Check(c); len(probs) == 0 || !known {
+						st.Baits[id], bs = c, c // put right meanwhile, or nothing to repair it from
+						return errStale
+					}
+					rerr = baits.Repair(c, spec, cfg.User, g, probs)
+					st.Baits[id], bs = c, c // what's saved with the rest below
+					return nil
+				})
+				switch {
+				case stale:
+					total--
+					continue
+				case err != nil && !errors.Is(err, errStale):
+					bs.Status, bs.StatusNote = "error", err.Error()
+					continue
+				case rerr != nil:
+					bs.Status, bs.StatusNote = "error", rerr.Error()
+					continue
+				}
+			}
 			if len(probs) == 0 {
 				bs.Status, bs.StatusNote = "ok", ""
 				ok++
@@ -118,12 +157,6 @@ func (s *server) healthCheck(startup bool) {
 					}
 				}
 				hits = append(hits, alerts.BaitHit{ID: id, Name: bs.Name, Path: p.File, Access: p.Kind, Time: time.Now()})
-			}
-			if known {
-				if err := baits.Repair(bs, spec, cfg.User, g, probs); err != nil {
-					bs.Status, bs.StatusNote = "error", err.Error()
-					continue
-				}
 			}
 			bs.Status, bs.StatusNote = "ok", "repaired "+time.Now().Format("Jan 2 15:04")
 			ok++
