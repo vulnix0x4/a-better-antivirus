@@ -163,7 +163,7 @@ if pkgutil --payload-files "$WORK/component.pkg" | grep -q '/\._'; then
   # some programs write with com.apple.provenance): the package would put ._
   # files inside the app. Never published like that.
   echo "the package holds ._ files (extended attributes on the build files)"
-  [ -n "$SIGNED" ] || [ -n "${CI:-}" ] && exit 1
+  [ "$UPLOAD" = --upload ] || [ -n "${CI:-}" ] && exit 1
 fi
 PKG="$OUT/ABA-$TAG.pkg"
 if [ -n "$SIGNED" ]; then
