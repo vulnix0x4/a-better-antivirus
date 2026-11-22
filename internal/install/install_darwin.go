@@ -70,8 +70,20 @@ func lookupUser(nameOrID string) (*user.User, error) {
 
 func consoleUser() (uint32, bool) { return svcctl.ConsoleUser() }
 
-// cleanupSteps: no earlier generations of ABA on macOS to clear away.
-func cleanupSteps() []Step { return nil }
+// cleanupSteps clear away what the first version left: a second copy of the
+// program ("aba") inside the app bundle.
+func cleanupSteps() []Step {
+	return []Step{{Name: "Tidying the app", Soft: true, Run: func() (string, error) {
+		old := filepath.Join(paths.InstallDir(), paths.CommandName)
+		if _, err := os.Lstat(old); err != nil {
+			return "", nil
+		}
+		if err := os.Remove(old); err != nil {
+			return "", err
+		}
+		return "removed an old second copy of the program", nil
+	}}}
+}
 
 // detectionSteps check that this Mac can run what ABA watches baits with.
 // Nothing has to be switched on in the system (Full Disk Access is asked for
@@ -107,7 +119,7 @@ func restoreSteps() []Step {
 // service has already asked for it once, which is what put "File Access
 // Monitor" in the list; switching it on takes effect at once.
 func permissionSteps() []Step {
-	return []Step{{Name: "Full Disk Access: switch on \"" + paths.ServiceDisplayName + "\" in the window that opens", Run: func() (string, error) {
+	return []Step{{Name: "Full Disk Access: switch on \"" + paths.ServiceDisplayName + "\" in the window that opens", Soft: true, Run: func() (string, error) {
 		if svcctl.Watching() {
 			return "already on", nil
 		}
@@ -115,6 +127,11 @@ func permissionSteps() []Step {
 		deadline := time.Now().Add(5 * time.Minute)
 		if !opened {
 			deadline = time.Now().Add(20 * time.Second)
+		}
+		// From the .pkg installer: the window is open, and the alert that
+		// follows says it again if it stays off. The installer doesn't wait.
+		if os.Getenv("ABA_NO_WAIT") == "1" {
+			deadline = time.Now().Add(3 * time.Second)
 		}
 		for time.Now().Before(deadline) {
 			if svcctl.Watching() {
@@ -129,17 +146,27 @@ func permissionSteps() []Step {
 
 // The command people type is a link in /usr/local/bin, which is on
 // everyone's PATH, to the installed program.
-const pathLink = "/usr/local/bin/" + paths.CLIExe
+const pathLink = "/usr/local/bin/" + paths.CommandName
 
+// ours: the link goes to ABA's program (or to where the first version put a
+// second copy of it, "aba" next to the service's).
 func ours(dir string) bool {
+	target, err := os.Readlink(pathLink)
+	return err == nil && (target == filepath.Join(dir, paths.CLIExe) || target == filepath.Join(dir, paths.CommandName))
+}
+
+func current(dir string) bool {
 	target, err := os.Readlink(pathLink)
 	return err == nil && target == filepath.Join(dir, paths.CLIExe)
 }
 
 // AddToPath makes `aba` in dir something people can type in a terminal.
 func AddToPath(dir string) error {
-	if ours(dir) {
+	if current(dir) {
 		return nil
+	}
+	if ours(dir) {
+		os.Remove(pathLink) // the first version's link, to a copy that's gone
 	}
 	if _, err := os.Lstat(pathLink); err == nil {
 		return fmt.Errorf("%s already exists and isn't ABA's: run %s directly, or remove it", pathLink, filepath.Join(dir, paths.CLIExe))

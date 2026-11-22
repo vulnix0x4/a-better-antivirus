@@ -38,33 +38,6 @@ jobs:
         shell: pwsh
         run: ./installer/verify.ps1
 
-  # The macOS files (.goreleaser-macos.yaml), added to the release the job
-  # above made, with their own signed checksum list. Then a check of what was
-  # just built: the list matches the files, and the program runs.
-  macos:
-    needs: release
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-      - uses: goreleaser/goreleaser-action@v7
-        with:
-          version: "~> v2"
-          args: release --clean --config .goreleaser-macos.yaml
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ABA_SIGNING_KEY: ${{ secrets.ABA_SIGNING_KEY }}
-      - name: Check the macOS files
-        run: |
-          cd dist-macos
-          shasum -a 256 -c SHA256SUMS-macos.txt
-          test -s SHA256SUMS-macos.txt.sig
-          ./aba_*_darwin_arm64 --version
-
   # The Linux files (.goreleaser-linux.yaml), added to the release the job
   # above made, with their own signed checksum list. Then the same checks the
   # CI run makes, on the files that were just published: the .deb installed,
@@ -88,3 +61,31 @@ jobs:
           ABA_SIGNING_KEY: ${{ secrets.ABA_SIGNING_KEY }}
       - name: Check the packages and install.sh against the release
         run: bash scripts/packages-linux.sh dist-linux
+
+  # The macOS files (scripts/release-macos.sh), added to the release the
+  # job above made, with their own signed checksum list. Signed with ABA's
+  # Developer ID certificates and notarized by Apple when the "release"
+  # environment has them; unsigned (and without the .pkg) until then.
+  macos:
+    needs: release
+    runs-on: macos-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Build, sign, notarize and upload the macOS files
+        run: bash scripts/release-macos.sh "${GITHUB_REF_NAME}" dist-macos --upload
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ABA_SIGNING_KEY: ${{ secrets.ABA_SIGNING_KEY }}
+          MACOS_APP_CERT: ${{ secrets.MACOS_APP_CERT }}
+          MACOS_APP_CERT_PASSWORD: ${{ secrets.MACOS_APP_CERT_PASSWORD }}
+          MACOS_INSTALLER_CERT: ${{ secrets.MACOS_INSTALLER_CERT }}
+          MACOS_INSTALLER_CERT_PASSWORD: ${{ secrets.MACOS_INSTALLER_CERT_PASSWORD }}
+          NOTARY_KEY: ${{ secrets.NOTARY_KEY }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
