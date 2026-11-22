@@ -15,10 +15,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -38,6 +40,20 @@ const (
 // the baits (or has given up waiting to: see service_darwin.go). Start waits
 // for it.
 func ReadyFile() string { return filepath.Join(paths.DataDir(), "ready") }
+
+// WatchingFile exists while the running service is watching the baits (it
+// has Full Disk Access and eslogger runs). It holds the service's PID.
+func WatchingFile() string { return filepath.Join(paths.DataDir(), "watching") }
+
+// Watching reports whether the running service is watching the baits.
+func Watching() bool {
+	b, err := os.ReadFile(WatchingFile())
+	if err != nil {
+		return false
+	}
+	_, _, pid := job()
+	return pid > 0 && strings.TrimSpace(string(b)) == strconv.Itoa(pid)
+}
 
 func launchctl(args ...string) (string, error) {
 	out, err := exec.Command("/bin/launchctl", args...).CombinedOutput()
@@ -264,4 +280,35 @@ func Send(sig Signal) error {
 		return errors.New("the service isn't running")
 	}
 	return unix.Kill(pid, s)
+}
+
+// ConsoleUser is the person logged in at the screen: the owner of
+// /dev/console.
+func ConsoleUser() (uint32, bool) {
+	fi, err := os.Stat("/dev/console")
+	if err != nil {
+		return 0, false
+	}
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		return 0, false
+	}
+	return st.Uid, true
+}
+
+// fdaPane is System Settings > Privacy & Security > Full Disk Access.
+const fdaPane = "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles"
+
+// OpenFullDiskAccess opens the Full Disk Access settings for the person at
+// the screen (not as root: System Settings belongs to them).
+func OpenFullDiskAccess() error {
+	uid, ok := ConsoleUser()
+	if !ok || uid == 0 {
+		return errors.New("nobody is logged in at the screen")
+	}
+	u, err := user.LookupId(strconv.FormatUint(uint64(uid), 10))
+	if err != nil {
+		return err
+	}
+	return exec.Command("/bin/launchctl", "asuser", u.Uid, "/usr/bin/sudo", "-u", u.Username, "/usr/bin/open", fdaPane).Run()
 }

@@ -93,6 +93,7 @@ type Watcher struct {
 
 	mu      sync.Mutex
 	files   []string
+	aliases map[string][2]string // another name for a bait (a hard link), in lower case -> as written, the bait
 	needles [][]byte
 	cmd     *exec.Cmd
 	running bool
@@ -116,23 +117,51 @@ var ErrNoAccess = errors.New("macOS won't let ABA watch files until File Access 
 
 // Sync sets which files are baits.
 func (w *Watcher) Sync(files []string) {
-	ns := needles(files)
 	w.mu.Lock()
 	w.files = append([]string(nil), files...)
-	w.needles = ns
+	w.rebuild()
 	w.mu.Unlock()
 }
 
-// Watching reports whether path is one of the baits.
-func (w *Watcher) Watching(path string) bool {
+// AddAlias watches another name a bait was given (a hard link made to it), so
+// that reading it by that name is reported as reading the bait.
+func (w *Watcher) AddAlias(alias, bait string) {
+	w.mu.Lock()
+	if w.aliases == nil {
+		w.aliases = map[string][2]string{}
+	}
+	w.aliases[strings.ToLower(alias)] = [2]string{alias, bait}
+	w.rebuild()
+	w.mu.Unlock()
+}
+
+func (w *Watcher) rebuild() {
+	all := append([]string(nil), w.files...)
+	for _, a := range w.aliases {
+		all = append(all, a[0])
+	}
+	w.needles = needlesFold(all)
+}
+
+// bait says which bait path is, by its own name or another one.
+func (w *Watcher) bait(path string) (bait, alias string, ok bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	for _, f := range w.files {
 		if strings.EqualFold(f, path) {
-			return true
+			return f, "", true
 		}
 	}
-	return false
+	if a, found := w.aliases[strings.ToLower(path)]; found {
+		return a[1], path, true
+	}
+	return "", "", false
+}
+
+// Watching reports whether path is one of the baits.
+func (w *Watcher) Watching(path string) bool {
+	_, _, ok := w.bait(path)
+	return ok
 }
 
 // Counts reports how many bait files are watched right now, and how many
@@ -347,7 +376,7 @@ func (w *Watcher) line(line []byte) {
 	if e.Process.AuditToken.Pid == self {
 		return // ABA's own service planting and checking baits
 	}
-	for _, ev := range e.touches(got, w.Watching) {
+	for _, ev := range e.touches(got, w.bait) {
 		w.Matched.Add(1)
 		if w.OnEvent != nil {
 			w.OnEvent(ev)
@@ -429,7 +458,7 @@ func (e *rawEvent) exec() (Exec, bool) {
 }
 
 // touches lists the baits this event is about.
-func (e *rawEvent) touches(got time.Time, isBait func(string) bool) []Event {
+func (e *rawEvent) touches(got time.Time, baitOf func(string) (string, string, bool)) []Event {
 	at, err := time.Parse(time.RFC3339Nano, e.Time)
 	if err != nil {
 		at = got
@@ -437,11 +466,18 @@ func (e *rawEvent) touches(got time.Time, isBait func(string) bool) []Event {
 	base := Event{At: at, Got: got, Proc: e.Process.facts()}
 	var out []Event
 	add := func(op Op, path, alias string) {
-		if path == "" || !isBait(path) {
+		if path == "" {
 			return
 		}
+		bait, via, ok := baitOf(path)
+		if !ok {
+			return
+		}
+		if via != "" && op != Link {
+			alias = via // read through a hard link it made earlier
+		}
 		ev := base
-		ev.Op, ev.Path, ev.Alias = op, path, alias
+		ev.Op, ev.Path, ev.Alias = op, bait, alias
 		out = append(out, ev)
 	}
 	for kind, raw := range e.Event {
@@ -511,6 +547,19 @@ func join(dir, name string) string {
 		return ""
 	}
 	return strings.TrimSuffix(dir, "/") + "/" + name
+}
+
+// needlesFold is needles for the paths as written and in lower case (an
+// alias is kept in lower case).
+func needlesFold(paths []string) [][]byte {
+	var all []string
+	for _, p := range paths {
+		all = append(all, p)
+		if l := strings.ToLower(p); l != p {
+			all = append(all, l)
+		}
+	}
+	return needles(all)
 }
 
 // needles turns bait paths into the byte strings to look for in a raw line,

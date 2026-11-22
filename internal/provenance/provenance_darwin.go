@@ -113,13 +113,32 @@ func Verify(path string) Result {
 	return r
 }
 
-// Note records what the kernel said about the program at path when it ran:
-// it validated Apple's own code (a "platform binary") as it mapped it. That
-// spares a codesign run for each of the system's tools a stealer's script
-// goes through. Only Apple's code is taken this way: everything else is
-// looked at in full when it matters.
-func Note(path string, platform, valid bool) {
-	if !platform || !valid || path == "" {
+// Kernel code-signing flags, as Endpoint Security reports them.
+const (
+	csValid = 0x1 // CS_VALID: the code matches its signature
+	csAdhoc = 0x2 // CS_ADHOC: signed by nobody
+)
+
+// Note records what the kernel said about the program at path when it ran
+// (Endpoint Security reports it with every event). The kernel checked the
+// signature as it mapped the code, so two answers can be taken from it
+// straight away, sparing a codesign run while a stealer is reading: Apple's
+// own code ("platform binaries", such as every tool a script goes through),
+// and code that nobody signed (ad hoc, or not matching its signature). A
+// developer's signature is still looked at in full, for the developer's name.
+func Note(path string, csFlags uint32, platform bool) {
+	if path == "" {
+		return
+	}
+	var r Result
+	switch {
+	case platform && csFlags&csValid != 0:
+		r = Result{Signed: true, Valid: true, Signer: AppleSigner}
+	case csFlags&csAdhoc != 0:
+		r = Result{Error: "ad-hoc signature (no developer)"}
+	case csFlags&csValid == 0:
+		r = Result{Error: "no valid signature"}
+	default:
 		return
 	}
 	key, ok := fileKey(path)
@@ -131,7 +150,7 @@ func Note(path string, platform, valid bool) {
 	if c, hit := cache[path]; hit && c.key == key {
 		return
 	}
-	cache[path] = cached{key: key, r: Result{Signed: true, Valid: true, Signer: AppleSigner}, at: time.Now()}
+	cache[path] = cached{key: key, r: r, at: time.Now()}
 }
 
 // codesignInfo is what `codesign -dv` says about a file.

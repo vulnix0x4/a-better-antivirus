@@ -76,3 +76,15 @@ func TestFinderLogLine(t *testing.T) {
 		t.Errorf("%+v", s)
 	}
 }
+
+func TestAlias(t *testing.T) {
+	w := New()
+	w.Sync([]string{"/Users/a/Documents/passwords.txt"})
+	w.AddAlias("/tmp/P", "/Users/a/Documents/passwords.txt")
+	var evs []Event
+	w.OnEvent = func(e Event) { evs = append(evs, e) }
+	w.read(strings.NewReader(`{"process":{"audit_token":{"euid":501,"pid":801},"executable":{"path":"/bin/cat"}},"event_type":10,"time":"2026-11-21T12:09:22Z","event":{"open":{"fflag":1,"file":{"path":"/tmp/P"}}}}` + "\n"))
+	if len(evs) != 1 || evs[0].Path != "/Users/a/Documents/passwords.txt" || evs[0].Alias != "/tmp/P" || evs[0].Op != Read {
+		t.Fatalf("%+v", evs)
+	}
+}
