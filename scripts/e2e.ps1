@@ -253,6 +253,24 @@ Check (WaitFor { NtfyMessages | Where-Object title -match 'test alert' } 60) 'ph
 Step 'Built-in safe test'
 Aba test
 
+Step 'Clipboard bait: a fake clipper is caught, and the clipboard put back'
+$reloads = Reloads
+Aba clipboard on
+WaitReloaded $reloads
+Check (WaitFor { Select-String -Path "$data\service.log" -Pattern 'clipboard bait: guarding session' -Quiet } 90) 'a clipboard guard runs in the desktop session'
+$copied = $null
+try { Set-Clipboard -Value 'text the test copied'; $copied = 'text the test copied' } catch { Write-Host "  (no clipboard here: $_)" }
+Snap
+Aba clipboard test
+$clip = Fresh | Where-Object { $_.test -and $_.baits -and $_.baits[0].access -eq 'swap' } | Select-Object -Last 1
+Check $clip 'the fake clipper was caught swapping the fake wallet address'
+if ($copied) {
+    Check (WaitFor { (Get-Clipboard) -eq $copied } 15) 'the clipboard was put back afterwards'
+}
+$reloads = Reloads
+Aba clipboard off
+WaitReloaded $reloads
+
 Step 'Real stealer: frozen, blocked, then killed'
 $s1 = Stealer 'stealer1' $desktopBait
 $a1 = AlertFor $s1.Id

@@ -81,6 +81,9 @@ type TestRequest struct {
 	PID   uint32    `json:"pid"`
 	Nonce string    `json:"nonce"`
 	Since time.Time `json:"since"`
+	// Clipboard: `aba clipboard test`. The reader is a fake clipper, and the
+	// clipboard guards put a bait out now instead of waiting for a quiet moment.
+	Clipboard bool `json:"clipboard,omitempty"`
 }
 
 // Engine is safe for concurrent use.
@@ -1157,6 +1160,8 @@ func (e *Engine) describe(a *alerts.Alert, v classify.Verdict) {
 		what = "opened"
 	}
 	switch {
+	case a.Test && len(a.Baits) > 0 && a.Baits[0].Access == "swap":
+		a.Title = "Test detection: " + exe + " was caught swapping a wallet address on the clipboard"
 	case a.Kind == alerts.KindClipper:
 		a.Title = "Clipper caught: " + exe + " swapped a wallet address on your clipboard"
 	case a.Test && a.Instant:

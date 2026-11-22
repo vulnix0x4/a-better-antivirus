@@ -1066,8 +1066,8 @@ func instantCmd() *cobra.Command {
 // ---- clipboard bait ----
 
 func clipboardCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "clipboard [on|off]",
+	c := &cobra.Command{
+		Use:   "clipboard [on|off|test]",
 		Short: "Catch clippers with a fake wallet address on the clipboard",
 		Long: "Clippers are malware that swap a crypto wallet address you copied for the attacker's, so\n" +
 			"the money you send goes to them. With this on, while nobody is using the PC, ABA now and\n" +
@@ -1111,6 +1111,21 @@ func clipboardCmd() *cobra.Command {
 			return install.Reload()
 		},
 	}
+	c.AddCommand(&cobra.Command{
+		Use:   "test",
+		Short: "Watch it catch a harmless fake clipper",
+		Long: "Starts a harmless fake clipper from your Temp folder and has ABA put a bait out right away,\n" +
+			"instead of waiting until nobody is using the PC. Don't touch the mouse or keyboard for a few\n" +
+			"seconds while it runs. Your clipboard is put back afterwards.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireAdmin(); err != nil {
+				return err
+			}
+			return runClipboardTest()
+		},
+	})
+	return c
 }
 
 // testReason is the verdict of the test alert in a few words.

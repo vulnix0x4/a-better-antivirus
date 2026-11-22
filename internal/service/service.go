@@ -205,6 +205,10 @@ func (s *server) run(ctx context.Context, ctl <-chan svcctl.Signal) error {
 			fmt.Fprint(h, oa.PID)
 			queues[h.Sum32()%workers] <- oa
 		case c := <-ctl:
+			// `aba clipboard test` asks for a bait now, the same way.
+			if tr := s.PendingTest(); tr != nil && tr.Clipboard {
+				s.safe("clipboard test", s.clipboardBaitNow)
+			}
 			if c == svcctl.Reload {
 				if err := s.reload(); err != nil {
 					s.log.Printf("reload: %v", err)

@@ -124,3 +124,15 @@ func (s *server) onClipper(f *clipbait.Finding) {
 	oa.UserID, _ = procinfo.UserID(f.PID)
 	s.eng.HandleAccess(oa)
 }
+
+// clipboardBaitNow has every guard put a bait out right away (for `aba
+// clipboard test`), instead of waiting for a quiet moment.
+func (s *server) clipboardBaitNow() {
+	clipGuards.Lock()
+	defer clipGuards.Unlock()
+	for id, h := range clipGuards.running {
+		if _, err := fmt.Fprintln(h.In, "bait"); err != nil {
+			s.log.Printf("clipboard bait: asking the guard in session %d for a bait: %v", id, err)
+		}
+	}
+}
