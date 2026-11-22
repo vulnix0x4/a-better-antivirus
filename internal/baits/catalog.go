@@ -64,6 +64,12 @@ type Spec struct {
 	// uses: "Local State" for the Chromium family (when empty), "profiles.ini"
 	// for Firefox. It existing shows the app has been used.
 	Profiles string
+	// Synced (optional) says, in one sentence, that the folder the bait is
+	// planted in is kept in sync with a cloud (on macOS: Desktop and
+	// Documents in iCloud Drive), so the decoy will be uploaded and show up
+	// on the person's other devices. "" when it isn't. Setup asks before
+	// planting such baits (yes by default).
+	Synced func(u config.UserInfo) string
 	// Since is the config version that introduced this bait, when it's newer
 	// than the catalog's first version: setup then offers it to installs
 	// configured before it existed.
@@ -556,4 +562,24 @@ func Moved(bs *config.BaitState, s Spec, u config.UserInfo) bool {
 		}
 	}
 	return false
+}
+
+// SyncNote says whether any of the chosen baits (ids) would be planted in a
+// folder that syncs to a cloud: the sentence that explains it, and which
+// baits those are.
+func SyncNote(plan []Availability, u config.UserInfo, ids []string) (note string, synced []string) {
+	chosen := map[string]bool{}
+	for _, id := range ids {
+		chosen[id] = true
+	}
+	for _, a := range plan {
+		if !a.Available || !chosen[a.Spec.ID] || a.Spec.Synced == nil {
+			continue
+		}
+		if n := a.Spec.Synced(u); n != "" {
+			note = n
+			synced = append(synced, a.Spec.ID)
+		}
+	}
+	return note, synced
 }

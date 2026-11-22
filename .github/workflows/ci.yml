@@ -126,6 +126,15 @@ jobs:
         if: runner.os == 'Linux'
         run: bash scripts/packages-linux.sh dist-linux
 
+      # The release build for macOS, as the release workflow makes it, but
+      # nothing published or signed.
+      - name: Release build (macOS)
+        if: runner.os == 'macOS'
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          version: "~> v2"
+          args: release --snapshot --clean --skip=publish,sign --config .goreleaser-macos.yaml
+
       - name: Build for the end-to-end run (macOS)
         if: runner.os == 'macOS'
         run: |

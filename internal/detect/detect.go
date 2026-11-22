@@ -54,4 +54,10 @@ type Access struct {
 	// process is gone, that's what tells a person's program from a service.
 	User   string
 	UserID string
+
+	// Helpers are processes the operating system ran to do this program's
+	// work for it (on macOS: Finder's helper copying a file a script asked
+	// Finder to copy). They're frozen with the program when it's frozen as a
+	// stealer, and left alone otherwise.
+	Helpers []uint32
 }

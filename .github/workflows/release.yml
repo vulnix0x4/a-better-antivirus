@@ -38,6 +38,33 @@ jobs:
         shell: pwsh
         run: ./installer/verify.ps1
 
+  # The macOS files (.goreleaser-macos.yaml), added to the release the job
+  # above made, with their own signed checksum list. Then a check of what was
+  # just built: the list matches the files, and the program runs.
+  macos:
+    needs: release
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          version: "~> v2"
+          args: release --clean --config .goreleaser-macos.yaml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ABA_SIGNING_KEY: ${{ secrets.ABA_SIGNING_KEY }}
+      - name: Check the macOS files
+        run: |
+          cd dist-macos
+          shasum -a 256 -c SHA256SUMS-macos.txt
+          test -s SHA256SUMS-macos.txt.sig
+          ./aba_*_darwin_arm64 --version
+
   # The Linux files (.goreleaser-linux.yaml), added to the release the job
   # above made, with their own signed checksum list. Then the same checks the
   # CI run makes, on the files that were just published: the .deb installed,

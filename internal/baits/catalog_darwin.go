@@ -13,11 +13,10 @@ package baits
 //     dot-folders of the home folder. Measured over 45 minutes on a Mac in
 //     use, nothing read the fake app data there except Spotlight, once, when
 //     it was created (and Spotlight is never reported).
-//   - Desktop and Documents are left out of the defaults. Stealers do sweep
-//     them (Atomic has Finder copy documents from both), but when iCloud
-//     Drive keeps them in sync, a bait there is uploaded and shows up on your
-//     iPhone and other Macs, and iCloud's own service reads it all day. They
-//     can be added (`aba bait add`).
+//   - Stealers sweep Desktop and Documents too (Atomic has Finder copy
+//     documents from both), so there are baits there. When iCloud Drive
+//     keeps those folders in sync, a bait there is uploaded and shows up on
+//     your iPhone and other Macs: setup says so and asks (yes by default).
 
 import (
 	"bytes"
@@ -26,6 +25,7 @@ import (
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/provenance"
+	"golang.org/x/sys/unix"
 )
 
 // adminOnly reports whether path is somewhere only root can write to: what's
@@ -34,6 +34,30 @@ func adminOnly(path string) bool {
 	ok, _ := provenance.RootOnly(path)
 	return ok
 }
+
+// inICloud reports whether iCloud Drive keeps dir in sync: macOS marks the
+// folder itself when "Desktop & Documents Folders" is on. (Only the folder's
+// own attributes are read, never what's in it.)
+func inICloud(dir string) bool {
+	if dir == "" {
+		return false
+	}
+	_, err := unix.Getxattr(dir, "com.apple.file-provider-domain-id", nil)
+	return err == nil
+}
+
+// syncedIn is a Spec.Synced for a bait planted in dir(u).
+func syncedIn(dir func(u config.UserInfo) string) func(u config.UserInfo) string {
+	return func(u config.UserInfo) string {
+		if inICloud(dir(u)) {
+			return "iCloud Drive keeps your Desktop and Documents in sync, so these decoys will be uploaded to iCloud and show up on your other Apple devices."
+		}
+		return ""
+	}
+}
+
+func desktopOf(u config.UserInfo) string   { return u.Desktop }
+func documentsOf(u config.UserInfo) string { return u.Documents }
 
 // BrowserUserData returns a decoy browser's data folder.
 func BrowserUserData(u config.UserInfo, id string) string {
@@ -99,25 +123,25 @@ var Catalog = []Spec{
 		},
 	},
 	{
-		ID: "documents-passwords", Name: "password list in Documents", Category: "Files", Kind: KindFile,
+		ID: "documents-passwords", Name: "password list in Documents", Category: "Files", Kind: KindFile, Default: true,
 		Description: "Atomic and its kin have Finder copy documents with names like password, wallet, seed.",
-		Caveat:      "If iCloud Drive syncs your Documents folder, this file is uploaded and shows up on your other devices.",
+		Synced:      syncedIn(documentsOf),
 		Files: func(u config.UserInfo) []FileSpec {
 			return []FileSpec{{Path: j(u.Documents, passwordsName(u, "documents")), Audit: true, Text: true, Gen: lf(genPasswordsTxt)}}
 		},
 	},
 	{
-		ID: "desktop-passwords", Name: "password list on the Desktop", Category: "Files", Kind: KindFile,
+		ID: "desktop-passwords", Name: "password list on the Desktop", Category: "Files", Kind: KindFile, Default: true,
 		Description: "The Desktop is the first folder file grabbers sweep.",
-		Caveat:      "If iCloud Drive syncs your Desktop, this file is uploaded and shows up on your other devices.",
+		Synced:      syncedIn(desktopOf),
 		Files: func(u config.UserInfo) []FileSpec {
 			return []FileSpec{{Path: j(u.Desktop, passwordsName(u, "desktop")), Audit: true, Text: true, Gen: lf(genPasswordsTxt)}}
 		},
 	},
 	{
-		ID: "seed-phrase", Name: "wallet recovery phrase (Documents)", Category: "Files", Kind: KindFile,
+		ID: "seed-phrase", Name: "wallet recovery phrase (Documents)", Category: "Files", Kind: KindFile, Default: true,
 		Description: "Crypto stealers look for 'seed', 'wallet', 'recovery'.",
-		Caveat:      "If iCloud Drive syncs your Documents folder, this file is uploaded and shows up on your other devices.",
+		Synced:      syncedIn(documentsOf),
 		Files: func(u config.UserInfo) []FileSpec {
 			name := vary(u, "seed", "wallet recovery phrase.txt", "seed phrase.txt", "metamask seed.txt", "crypto wallet seed.txt",
 				"ledger recovery phrase.txt", "wallet backup seed.txt")
