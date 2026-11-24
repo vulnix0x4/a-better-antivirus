@@ -35,6 +35,7 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/baits"
 	"github.com/vulnix0x4/a-better-antivirus/internal/classify"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
+	"github.com/vulnix0x4/a-better-antivirus/internal/detect"
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
 )
@@ -293,6 +294,32 @@ func (e *Engine) lockHost(inst *procinfo.BrowserInstance) func() {
 	}
 }
 
+// errReadOnly ends a look at the state that has nothing to write.
+var errReadOnly = errors.New("read only")
+
+// undone reports whether what ABA did about alert a has all been undone
+// since (`aba resume`, `aba release`, `aba trust`): then the case is closed,
+// and what that program does next is a new alert, with a new response, not
+// a line added to one nobody is looking at any more. An alert that did
+// nothing that stays in place (alert only) is never undone.
+func (e *Engine) undone(a *alerts.Alert) bool {
+	if !a.Did(config.ActionFreeze) && !a.Did(config.ActionBlockProgram) && !a.Did(config.ActionIsolate) && !a.Did(config.ActionDisableAdapters) {
+		return false
+	}
+	still := false
+	e.Ops.UpdateState(func(st *config.State) error {
+		for _, f := range st.Frozen {
+			still = still || f.AlertID == a.ID
+		}
+		for _, b := range st.Blocked {
+			still = still || b.AlertID == a.ID
+		}
+		still = still || (st.Isolation != nil && st.Isolation.AlertID == a.ID)
+		return errReadOnly
+	})
+	return !still
+}
+
 // joinHost adds hit to the alert already made about the browser instance,
 // if there is one: one alert, and one freeze, per instance. pid is the
 // process that made this access; it joins the incident too.
@@ -300,6 +327,17 @@ func (e *Engine) joinHost(inst *procinfo.BrowserInstance, pid uint32, hit alerts
 	e.mu.Lock()
 	inc := e.incidents[inst.Main]
 	if inc == nil || !inc.alert.Verdict.Host || time.Since(inc.last) >= window || (inc.createTime != 0 && inc.createTime != inst.MainCreate) {
+		e.mu.Unlock()
+		return false
+	}
+	a := inc.alert
+	e.mu.Unlock()
+	if e.undone(a) {
+		e.closeIncident(a)
+		return false
+	}
+	e.mu.Lock()
+	if e.incidents[inst.Main] != inc {
 		e.mu.Unlock()
 		return false
 	}
@@ -313,6 +351,17 @@ func (e *Engine) joinHost(inst *procinfo.BrowserInstance, pid uint32, hit alerts
 		e.Ops.SaveAlert(cp)
 	}
 	return true
+}
+
+// closeIncident forgets every process's incident that is alert a.
+func (e *Engine) closeIncident(a *alerts.Alert) {
+	e.mu.Lock()
+	for p, inc := range e.incidents {
+		if inc.alert == a {
+			delete(e.incidents, p)
+		}
+	}
+	e.mu.Unlock()
 }
 
 // addHit adds a bait hit to an alert (unless it's there already) and returns
@@ -333,8 +382,10 @@ func (e *Engine) addHit(a *alerts.Alert, hit alerts.BaitHit) (*alerts.Alert, boo
 // to delete or overwrite a fake profile's files, for it to finish making that
 // folder a profile of its own (you added a profile, and it reached that
 // folder's name). It wipes the folder, makes a real profile in it and writes
-// that down in its list of profiles seconds later.
-const takeWait = 12 * time.Second
+// that down in its list of profiles seconds later (Brave, in the VM: the
+// files deleted within 0.24 s, the folder made anew at 1.3 s, listed at
+// 10.1 s).
+const takeWait = 15 * time.Second
 
 // stillUnadopted looks again, a moment later, whether the browser has taken
 // the fake profile as its own after all (you added a profile, and it reached
@@ -372,6 +423,31 @@ func (e *Engine) takenOver(baitID string) bool {
 	cfg := e.cfg
 	e.mu.Unlock()
 	return ok && cfg != nil && s.Inside != nil && (baits.Adopted(s, cfg.User) || baits.TakenOver(s, cfg.User))
+}
+
+// hostRead reports, before the reader is classified, whether oa is the
+// genuine browser (its own program, in its own folder, signed by its maker)
+// opening a fake profile inside it that it doesn't know: what classify
+// calls a Host verdict. Such a read is settled by the host policy, about
+// that browser alone, and never counts toward a sweep: not as the read that
+// completes one, and not as an earlier one that a later read completes.
+func (e *Engine) hostRead(oa *detect.Access, baitID string) bool {
+	if !embedded(baitID) {
+		return false
+	}
+	image := oa.Image
+	if live, err := e.Ops.ImagePath(oa.PID); err == nil && live != "" {
+		image = live
+	}
+	e.mu.Lock()
+	cls := e.classifier
+	e.mu.Unlock()
+	ref := e.baitRef(baitID)
+	if cls == nil || !ref.Unadopted || ref.OwnerSigner == "" || !cls.OwnerCandidate(image, ref) {
+		return false
+	}
+	sig := e.Ops.Verify(image)
+	return sig.Valid && strings.Contains(strings.ToLower(sig.Signer), strings.ToLower(ref.OwnerSigner))
 }
 
 // embedded: the bait is a fake profile inside a real browser.
