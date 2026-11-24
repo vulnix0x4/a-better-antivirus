@@ -18,8 +18,8 @@ import (
 
 type world struct {
 	home, chrome, real, bait, stage, zip, exe, evidence string
-	store                                              baits.Store
-	start                                              time.Time
+	store                                               baits.Store
+	start                                               time.Time
 }
 
 func write(t *testing.T, p string, b []byte) {
@@ -82,7 +82,9 @@ func (w world) run(t *testing.T, held bool) *alerts.Autopsy {
 			}
 			return recorder.Result{Stores: []recorder.Coverage{{Store: w.store.ID, Name: w.store.Name, Kind: w.store.Kind, Files: 1, Watched: true, Since: w.start.Add(-time.Hour)}}}, ""
 		},
-		StartedAt: func(pid uint32) (time.Time, error) { return w.start.Add(time.Duration(pid-900) * time.Millisecond), nil },
+		StartedAt: func(pid uint32) (time.Time, error) {
+			return w.start.Add(time.Duration(pid-900) * time.Millisecond), nil
+		},
 		OpenFiles: func(pid uint32) ([]string, error) {
 			if pid == 900 && held {
 				return []string{w.zip, "/usr/lib/libc.dylib"}, nil

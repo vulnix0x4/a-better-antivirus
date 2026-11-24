@@ -30,11 +30,11 @@ type IOC struct {
 
 // IOCFile is the program, by its fingerprint.
 type IOCFile struct {
-	SHA256    string `json:"sha256,omitempty"`
-	Name      string `json:"name"`
-	Path      string `json:"path,omitempty"` // with your home folder written as ~
-	Signed    bool   `json:"signed"`
-	Signer    string `json:"signer,omitempty"`
+	SHA256     string `json:"sha256,omitempty"`
+	Name       string `json:"name"`
+	Path       string `json:"path,omitempty"` // with your home folder written as ~
+	Signed     bool   `json:"signed"`
+	Signer     string `json:"signer,omitempty"`
 	VirusTotal string `json:"virustotal,omitempty"`
 }
 
