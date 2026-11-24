@@ -201,21 +201,22 @@ func browserPopup(a *alerts.Alert, body string) (text string, flags uint32, yes,
 	check := "Check " + b + "'s extensions and remove any you don't know. If you didn't add one lately, something on this " + platform.PC + " is running its code inside " + b + ": follow the steps in `aba alerts show " + a.ID + "`."
 	switch {
 	case frozen:
-		text = body + "\nABA froze that " + b + ", all of it, and what started it. It isn't the " + b + " you're using: your own windows keep running.\n\n" +
+		text = body + "\nABA froze that " + b + ", all of it, and what started it: something ran its own code inside it.\n\n" +
 			"Kill them?\n" +
 			"Yes = Kill them (recommended)\n" +
 			"No = Unfreeze them (this time only: nothing gets trusted)\n" +
 			"Cancel = Decide later (they stay frozen)" + isoNote
 		return text, mbYesNoCancel | mbIconError, []string{"kill", a.ID}, []string{"resume", a.ID}
 	case a.Verdict.KeepRunning && a.Did(config.ActionBlockProgram):
-		text = body + "\n" + b + " opened a fake profile that only a stealer would open. ABA left it running, since it's the browser you're using, but cut the internet of every " + b + " window.\n\n" +
-			check + "\n\n" +
+		// (The alert's summary, at the top, already says it was left running
+		// and every window of it cut off.)
+		text = body + "\n" + check + "\n\n" +
 			"Give " + b + " its internet back now?\n" +
 			"Yes = Restore it now (nothing gets trusted)\n" +
 			"No = Keep it cut (recommended until you've checked)" + isoNote
 		return text, mbYesNo | mbIconError, []string{"resume", a.ID}, nil
 	case a.Verdict.KeepRunning:
-		text = body + "\n" + b + " opened a fake profile that only a stealer would open. It's the browser you're using, so ABA left it running.\n\n" + check + isoNote
+		text = body + "\n" + check + isoNote
 		return text, mbOK | mbIconError, nil, nil
 	}
 	// Gone before ABA could look, or nothing was configured to stop it.

@@ -227,8 +227,38 @@ func (p hostPlan) stopVerdict(v classify.Verdict) classify.Verdict {
 		}
 		reasons = append(reasons, s)
 	}
-	reasons = append(reasons, fmt.Sprintf("ABA froze that %s, all of it, not the %s windows you use", name, name))
+	froze := fmt.Sprintf("ABA froze that %s, all of it (its main process and everything it started)", name)
+	if p.freezeStarter {
+		froze += ", and what started it"
+	}
+	reasons = append(reasons, froze)
 	return classify.Verdict{Tier: config.TierCritical, Host: true, Swept: v.Swept, Reasons: append(reasons, v.Reasons...)}
+}
+
+// which names the browser by what gave it away, for an alert's title: "a
+// Chrome started suspended by ghost.exe", "an Edge with no window on your
+// screen".
+func (p hostPlan) which() string {
+	inst := p.inst
+	name := alerts.BrowserName(inst.Image)
+	a := "a "
+	if strings.ContainsAny(strings.ToLower(name[:1]), "aeiou") {
+		a = "an "
+	}
+	switch {
+	case inst.CreatedSuspended:
+		return a + name + " started suspended by " + p.starterName()
+	case len(inst.Hidden) > 0:
+		return a + name + " started hidden by " + p.starterName()
+	case p.starter == starterUntrusted:
+		return a + name + " started by " + p.starterName()
+	case p.visible == visNo:
+		return a + name + " with no window on your screen"
+	case len(inst.Flags) > 0:
+		flag, _, _ := strings.Cut(inst.Flags[0], " ")
+		return a + name + " started with " + flag
+	}
+	return a + name + " that isn't the one you're using"
 }
 
 // keepVerdict is the verdict for the browser you're using: critical, but it

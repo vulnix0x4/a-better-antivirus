@@ -93,7 +93,7 @@ func TestBrowserCreatedSuspendedIsFrozenWithItsStarter(t *testing.T) {
 			t.Errorf("summary %q lacks %q", a.Summary, want)
 		}
 	}
-	if !strings.Contains(a.Title, "inside Chrome") {
+	if a.Title != "Possible stealer: a Chrome started suspended by ghost.exe read your bait" {
 		t.Errorf("title: %q", a.Title)
 	}
 	if _, why := trust.Rule(a); why == "" || trust.OneClick(a) {
@@ -489,6 +489,43 @@ func TestAgainAfterResumeIsANewAlert(t *testing.T) {
 	e.HandleAccess(ev(1001, chromeExe, cookiesOf(bait), 1))
 	if len(f.saved) != 2 {
 		t.Fatalf("a read while it's still cut off made a third alert")
+	}
+}
+
+// The title and reasons say what gave the browser away, and never that it
+// was "hidden" or not the one you use when that isn't what ABA saw.
+func TestBrowserAlertSaysWhatGaveItAway(t *testing.T) {
+	cmdExe := `C:\Windows\System32\cmd.exe`
+	for _, tc := range []struct {
+		name, title string
+		starter     uint32
+		image       string
+		mod         func(*procinfo.BrowserInstance)
+		visible     bool
+	}{
+		{"created suspended", "a Chrome started suspended by ghost.exe", 900, ghostExe, suspended, false},
+		{"hidden", "a Chrome started hidden by ghost.exe", 900, ghostExe, func(b *procinfo.BrowserInstance) { b.Hidden = []string{"it was told to keep its window hidden"} }, false},
+		{"no window", "a Chrome with no window on your screen", 4410, explorerExe, nil, false},
+		{"started from cmd.exe", "a Chrome started by cmd.exe", 905, cmdExe, nil, true},
+	} {
+		e, f, bait, b := browserUser(t, "balanced", tc.starter, tc.image, tc.mod)
+		signed(f, cmdExe, "Microsoft Windows")
+		f.parents[b.Main] = []procinfo.Ancestor{{PID: tc.starter, Image: tc.image, CreateTime: 1}}
+		f.visible[1000] = tc.visible
+		e.HandleAccess(ev(1000, chromeExe, bait, 1))
+		a := only(f)
+		if a == nil || !a.Did(config.ActionFreeze) || !strings.Contains(a.Title, tc.title) {
+			t.Fatalf("%s: %+v", tc.name, a)
+		}
+		all := a.Title + " " + strings.Join(a.Verdict.Reasons, " ")
+		for _, wrong := range []string{"hidden copy", "windows you use"} {
+			if strings.Contains(all, wrong) {
+				t.Errorf("%s: %q in %s", tc.name, wrong, all)
+			}
+		}
+		if tc.name != "hidden" && strings.Contains(a.Title, "hidden") {
+			t.Errorf("%s: %q", tc.name, a.Title)
+		}
 	}
 }
 

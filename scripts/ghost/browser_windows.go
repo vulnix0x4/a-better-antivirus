@@ -63,7 +63,7 @@ func openInside(h windows.Handle, file string, wait time.Duration) (int, error) 
 	const pathAt = 0x200
 	mem, _, err := procVirtualAllocEx.Call(uintptr(h), 0, 0x1000, windows.MEM_COMMIT|windows.MEM_RESERVE, windows.PAGE_EXECUTE_READWRITE)
 	if mem == 0 {
-		return 0, err
+		return 0, failed("VirtualAllocEx", err)
 	}
 	path := utf16.Encode([]rune(file + "\x00"))
 	pb := make([]byte, 2*len(path))
@@ -76,14 +76,14 @@ func openInside(h windows.Handle, file string, wait time.Duration) (int, error) 
 	code := stub(uint64(mem+pathAt), uint64(procCreateFileW.Addr()), uint64(procReadFile.Addr()), uint64(procCloseHandle.Addr()))
 	var n uintptr
 	if err := windows.WriteProcessMemory(h, mem, &code[0], uintptr(len(code)), &n); err != nil {
-		return 0, err
+		return 0, failed("WriteProcessMemory", err)
 	}
 	if err := windows.WriteProcessMemory(h, mem+pathAt, &pb[0], uintptr(len(pb)), &n); err != nil {
-		return 0, err
+		return 0, failed("WriteProcessMemory", err)
 	}
 	th, _, err := procCreateRemoteThread.Call(uintptr(h), 0, 0, mem, 0, 0, 0)
 	if th == 0 {
-		return 0, err
+		return 0, failed("CreateRemoteThread", err)
 	}
 	defer windows.CloseHandle(windows.Handle(th))
 	if ev, _ := windows.WaitForSingleObject(windows.Handle(th), uint32(wait.Milliseconds())); ev != windows.WAIT_OBJECT_0 {

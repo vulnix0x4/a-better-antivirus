@@ -34,6 +34,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
 	"unsafe"
 
@@ -139,27 +140,39 @@ func holders(path string) string {
 	return out
 }
 
-// browser runs the browser modes (see the top of this file).
-func browser(mode, target, file, status string) error {
-	note := func(format string, a ...any) {
-		fmt.Printf(format+"\n", a...)
-		if status != "" {
-			if f, err := os.OpenFile(status, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
-				fmt.Fprintf(f, format+"\n", a...)
-				f.Close()
-			}
+// failed says which call failed and Windows' own error number, for the test
+// that reads ghost's status file.
+func failed(call string, err error) error {
+	if errno, ok := err.(syscall.Errno); ok {
+		return fmt.Errorf("%s: %v (Win32 error %d)", call, err, uint32(errno))
+	}
+	return fmt.Errorf("%s: %v", call, err)
+}
+
+// statusNote writes a line to stdout and to the status file (if any).
+func statusNote(status, format string, a ...any) {
+	fmt.Printf(format+"\n", a...)
+	if status != "" {
+		if f, err := os.OpenFile(status, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
+			fmt.Fprintf(f, format+"\n", a...)
+			f.Close()
 		}
 	}
+}
+
+// browser runs the browser modes (see the top of this file).
+func browser(mode, target, file, status string) error {
+	note := func(format string, a ...any) { statusNote(status, format, a...) }
 	note("ghost pid %d", os.Getpid())
 	if mode == "browser-inject" {
 		var pid uint32
 		if _, err := fmt.Sscan(target, &pid); err != nil {
-			return err
+			return failed("reading the browser's pid "+target, err)
 		}
 		const access = windows.PROCESS_CREATE_THREAD | windows.PROCESS_VM_OPERATION | windows.PROCESS_VM_WRITE | windows.PROCESS_QUERY_INFORMATION
 		h, err := windows.OpenProcess(access, false, pid)
 		if err != nil {
-			return err
+			return failed(fmt.Sprintf("OpenProcess(%d)", pid), err)
 		}
 		defer windows.CloseHandle(h)
 		note("browser pid %d", pid)
@@ -172,7 +185,7 @@ func browser(mode, target, file, status string) error {
 	}
 	pi, err := startSuspended(target)
 	if err != nil {
-		return err
+		return failed("CreateProcess("+target+", suspended)", err)
 	}
 	defer windows.CloseHandle(pi.Process)
 	defer windows.CloseHandle(pi.Thread)
@@ -198,13 +211,15 @@ func main() {
 			status = os.Args[4]
 		}
 		if err := browser(os.Args[1], os.Args[2], os.Args[3], status); err != nil {
+			statusNote(status, "failed: %v", err)
 			fmt.Fprintln(os.Stderr, "ghost:", err)
 			os.Exit(1)
 		}
 		return
 	}
 	if len(os.Args) != 3 && len(os.Args) != 4 {
-		fmt.Fprintln(os.Stderr, "usage: ghost plain|ghost|map|link|linkgone <file> [heartbeat file]  |  ghost resume <pid>  |  ghost holders <file>")
+		fmt.Fprintln(os.Stderr, "usage: ghost plain|ghost|map|link|linkgone <file> [heartbeat file]  |  ghost resume <pid>  |  ghost holders <file>"+
+			"  |  ghost browser-suspended <browser.exe> <file> [status file]  |  ghost browser-inject <pid> <file> [status file]")
 		os.Exit(2)
 	}
 	mode, path := os.Args[1], os.Args[2]
