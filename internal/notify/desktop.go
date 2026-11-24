@@ -112,6 +112,19 @@ func ShowPopup(a *alerts.Alert, cli string) {
 	switch {
 	case a.Test:
 		messageBox(title, body+"\nThis was a test. Everything worked.", mbOK|mbIconInfo)
+	case a.Verdict.Host || a.Verdict.KeepRunning:
+		// A browser going through a fake profile: never "It's mine, trust it".
+		text, flags, yes, no := browserPopup(a, body)
+		switch messageBox(title, text, flags) {
+		case idYes:
+			if cli != "" && len(yes) > 0 {
+				RunElevated(cli, yes...)
+			}
+		case idNo:
+			if cli != "" && len(no) > 0 {
+				RunElevated(cli, no...)
+			}
+		}
 	case frozen:
 		// "Is it yours?" is the wrong question here: people who ran a cracked
 		// game or a "free Nitro" tool did start it themselves. Ask whether it
@@ -170,6 +183,48 @@ func ShowPopup(a *alerts.Alert, cli string) {
 			RunElevated(cli, "trust", a.ID)
 		}
 	}
+}
+
+// browserPopup is the popup about a genuine browser that went through a fake
+// profile (classify.Verdict Host): the text, the buttons, and the aba
+// command each answer runs (nil: none). It's never "It's mine: trust it":
+// one click would let every later stealer running its code inside the same
+// browser through.
+func browserPopup(a *alerts.Alert, body string) (text string, flags uint32, yes, no []string) {
+	b := alerts.BrowserName(a.ExeName())
+	frozen := a.Did(config.ActionFreeze) && !a.Did(config.ActionKill)
+	isolated := a.Did(config.ActionIsolate) || a.Did(config.ActionDisableAdapters)
+	isoNote := ""
+	if isolated {
+		isoNote = "\n\nYour " + platform.PC + " is isolated from the network too. When it's safe, run `aba release` as admin."
+	}
+	check := "Check " + b + "'s extensions and remove any you don't know. If you didn't add one lately, something on this " + platform.PC + " is running its code inside " + b + ": follow the steps in `aba alerts show " + a.ID + "`."
+	switch {
+	case frozen:
+		text = body + "\nABA froze that " + b + ", all of it, and what started it. It isn't the " + b + " you're using: your own windows keep running.\n\n" +
+			"Kill them?\n" +
+			"Yes = Kill them (recommended)\n" +
+			"No = Unfreeze them (this time only: nothing gets trusted)\n" +
+			"Cancel = Decide later (they stay frozen)" + isoNote
+		return text, mbYesNoCancel | mbIconError, []string{"kill", a.ID}, []string{"resume", a.ID}
+	case a.Verdict.KeepRunning && a.Did(config.ActionBlockProgram):
+		text = body + "\n" + b + " opened a fake profile that only a stealer would open. ABA left it running, since it's the browser you're using, but cut the internet of every " + b + " window.\n\n" +
+			check + "\n\n" +
+			"Give " + b + " its internet back now?\n" +
+			"Yes = Restore it now (nothing gets trusted)\n" +
+			"No = Keep it cut (recommended until you've checked)" + isoNote
+		return text, mbYesNo | mbIconError, []string{"resume", a.ID}, nil
+	case a.Verdict.KeepRunning:
+		text = body + "\n" + b + " opened a fake profile that only a stealer would open. It's the browser you're using, so ABA left it running.\n\n" + check + isoNote
+		return text, mbOK | mbIconError, nil, nil
+	}
+	// Gone before ABA could look, or nothing was configured to stop it.
+	what := "Your settings don't freeze programs, so that " + b + " (it isn't the one you're using) is still running."
+	if a.Process != nil && a.Process.Exited {
+		what = "Nothing of that " + b + " is left to stop now."
+	}
+	text = body + "\n" + what + " Something on this " + platform.PC + " starts " + b + " to run its own code inside it: follow the steps in `aba alerts show " + a.ID + "`." + isoNote
+	return text, mbOK | mbIconError, nil, nil
 }
 
 // baitWhat names what the program read, for the popup question.

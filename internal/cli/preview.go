@@ -86,8 +86,55 @@ func Previews() []Screen {
 	ta := sampleAlert()
 	ta.Test, ta.ID = true, "20261118-190455-7c21"
 	add("22-safe-test", ui.Banner("safe test")+"\n\n"+ui.Plain.Render(" A harmless copy of ABA in your Temp folder is about to read passwords.txt on the Desktop,\n exactly the way a stealer would.")+"\n\n"+renderTestResult(ta, "ntfy"))
-	add("41-alert-list", ui.AlertTable([]*alerts.Alert{sampleAlert(), infoAlert(), sweepAlert()}, ui.Width()))
+	add("41-alert-list", ui.AlertTable([]*alerts.Alert{browserKeptAlert(), browserStealerAlert(), sampleAlert(), infoAlert(), sweepAlert()}, ui.Width()))
+	add("42-alert-browser-stealer", ui.AlertDetail(browserStealerAlert()))
+	add("43-alert-browser-kept", ui.AlertDetail(browserKeptAlert()))
 	return out
+}
+
+const previewChrome = `C:\Program Files\Google\Chrome\Application\chrome.exe`
+
+// browserStealerAlert: a stealer started Chrome suspended and ran its code
+// inside it, which went through the fake profile (see engine's host.go).
+func browserStealerAlert() *alerts.Alert {
+	stealer := `C:\Users\bob\AppData\Local\Temp\cl3v\chromelevator.exe`
+	why := "Chrome was started suspended by chromelevator.exe and never ran as a browser, then went through a fake profile only a stealer would open: that's a stealer running its own code inside a genuine Chrome, to get at the passwords and cookies it protects"
+	a := &alerts.Alert{
+		ID: "20261123-101722-b7e1", Time: time.Now().Add(-2 * time.Minute), Kind: alerts.KindRead, Tier: config.TierCritical,
+		Title: "Possible stealer inside Chrome: a hidden copy of it opened your bait", Status: "open", LatencyMS: 9, Instant: true,
+		Summary: "Caught the moment it opened the bait (instant freeze). " + why,
+		Baits:   []alerts.BaitHit{{Name: "extra profile inside your Chrome", Path: `C:\Users\bob\AppData\Local\Google\Chrome\User Data\Profile 23\Network\Cookies`, Access: "read", Time: time.Now()}},
+		Process: &alerts.Process{PID: 9120, Image: previewChrome, CommandLine: `"` + previewChrome + `"`, User: `DESKTOP-7Q2\bob`,
+			Signature: provenance.Result{Signed: true, Valid: true, Signer: "Google LLC"},
+			Parents:   []procinfo.Parent{{PID: 9088, Image: stealer}, {PID: 4410, Image: `C:\Windows\explorer.exe`}}},
+		Verdict: classify.Verdict{Tier: config.TierCritical, Host: true, Reasons: []string{why,
+			"created suspended: its first thread never ran, so it never got to be a browser; code was put into it instead",
+			"started by " + stealer + ": unsigned program running from a user-writable folder (C:\\Users\\bob\\AppData\\Local\\Temp\\cl3v): typical of stealers",
+			"ABA froze that Chrome, all of it, not the Chrome windows you use"}},
+	}
+	a.AddAction(config.ActionFreeze, nil, "4 process(es) frozen: that whole Chrome, from its main process (pid 9120) the moment it opened the bait; with it: chromelevator.exe (pid 9088)")
+	a.AddAction(config.ActionBlockProgram, nil, stealer)
+	return a
+}
+
+// browserKeptAlert: something inside the Chrome you're using went through
+// the fake profile; it's left running, its internet cut.
+func browserKeptAlert() *alerts.Alert {
+	why := "Chrome opened a fake profile that only a stealer would open: something is running inside the Chrome you're using (an add-on, or code a stealer put into it)"
+	a := &alerts.Alert{
+		ID: "20261123-094410-5c0d", Time: time.Now().Add(-40 * time.Minute), Kind: alerts.KindRead, Tier: config.TierCritical,
+		Title: "Something inside your Chrome read a bait: its internet is cut", Status: "open",
+		Summary: why + ". ABA left it running, since it's the browser you're using, and cut the internet of every Chrome window instead",
+		Baits:   []alerts.BaitHit{{Name: "extra profile inside your Chrome", Path: `C:\Users\bob\AppData\Local\Google\Chrome\User Data\Profile 23\Login Data`, Access: "read", Time: time.Now()}},
+		Process: &alerts.Process{PID: 5532, Image: previewChrome, User: `DESKTOP-7Q2\bob`,
+			Signature: provenance.Result{Signed: true, Valid: true, Signer: "Google LLC"},
+			Parents:   []procinfo.Parent{{PID: 4410, Image: `C:\Windows\explorer.exe`}}},
+		Verdict: classify.Verdict{Tier: config.TierCritical, Host: true, KeepRunning: true, Reasons: []string{why,
+			"it has a window on your screen, and nothing about how it was started is unusual: it's the browser you're using, so ABA doesn't freeze it (you'd lose your work)"}},
+	}
+	a.AddAction(config.ActionBlockProgram, nil, previewChrome)
+	a.AddAction(config.ActionLeftRunning, nil, "it's the Chrome you're using; the internet of every Chrome window is cut instead")
+	return a
 }
 
 func sampleConfig() *config.Config {

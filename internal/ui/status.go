@@ -463,17 +463,33 @@ func AlertDetail(a *alerts.Alert) string {
 	} else if a.Process != nil && !a.Test && a.Kind == alerts.KindRead {
 		id := shortID(a.ID)
 		var rows [][2]string
-		if a.Did(config.ActionFreeze) || a.Did(config.ActionBlockProgram) {
-			rows = append(rows, [2]string{"aba kill " + id, "it's malware: end it (it stays cut off)"})
-		}
-		rows = append(rows, [2]string{"aba trust " + id, "it's yours: undo everything and stop alerting about it"})
-		if a.Did(config.ActionFreeze) || a.Did(config.ActionBlockProgram) {
-			rows = append(rows, [2]string{"aba resume " + id, "not sure: let it run again, without trusting it"})
+		switch {
+		case a.Verdict.KeepRunning:
+			// The browser you're using: nothing to kill, and it's never
+			// trusted for a fake profile.
+			if a.Did(config.ActionBlockProgram) {
+				rows = append(rows, [2]string{"aba resume " + id, "give " + alerts.BrowserName(a.ExeName()) + " its internet back (nothing gets trusted)"})
+			}
+		case a.Verdict.Host:
+			if a.Did(config.ActionFreeze) || a.Did(config.ActionBlockProgram) {
+				rows = append(rows, [2]string{"aba kill " + id, "end that browser and what started it"},
+					[2]string{"aba resume " + id, "not sure: let them run again, without trusting them"})
+			}
+		default:
+			if a.Did(config.ActionFreeze) || a.Did(config.ActionBlockProgram) {
+				rows = append(rows, [2]string{"aba kill " + id, "it's malware: end it (it stays cut off)"})
+			}
+			rows = append(rows, [2]string{"aba trust " + id, "it's yours: undo everything and stop alerting about it"})
+			if a.Did(config.ActionFreeze) || a.Did(config.ActionBlockProgram) {
+				rows = append(rows, [2]string{"aba resume " + id, "not sure: let it run again, without trusting it"})
+			}
 		}
 		if a.Did(config.ActionIsolate) {
 			rows = append(rows, [2]string{"aba release", "reconnect the " + platform.PC + " when it's safe"})
 		}
-		b.WriteString(Heading("What now") + "\n" + indent(Cmd(rows), 2) + "\n")
+		if len(rows) > 0 {
+			b.WriteString(Heading("What now") + "\n" + indent(Cmd(rows), 2) + "\n")
+		}
 	}
 	if a.Tier == config.TierCritical && !a.Test && a.Status != "resolved" {
 		b.WriteString(Heading("If you didn't cause this") + "\n")
