@@ -56,6 +56,7 @@ type fakeOps struct {
 	visible   map[uint32]bool // by main pid
 	onVisible func()
 	asked     int // window checks
+	logf      func(format string, a ...any)
 }
 
 func newFake() *fakeOps {
@@ -85,25 +86,29 @@ func (f *fakeOps) SuspendTree(pid uint32) ([]uint32, error) {
 	f.suspended = append(f.suspended, pid)
 	return []uint32{pid, pid + 1}, nil
 }
-func (f *fakeOps) Resume(p []uint32)                        { f.resumed = append(f.resumed, p...) }
-func (f *fakeOps) KillTree(pid uint32) error                { f.killed = append(f.killed, pid); return nil }
-func (f *fakeOps) Forensics(uint32, *alerts.Process)        {}
-func (f *fakeOps) BlockProgram(p string) error              { f.blocked = append(f.blocked, p); return nil }
-func (f *fakeOps) Isolate() error                           { f.isolated++; return nil }
-func (f *fakeOps) DisableAdapters() ([]string, error)       { return []string{"Wi-Fi"}, nil }
-func (f *fakeOps) SaveAlert(a *alerts.Alert) error          { f.saved[a.ID] = a; return nil }
-func (f *fakeOps) NotifyDesktop(a *alerts.Alert)            { f.desktop = append(f.desktop, a.ID) }
-func (f *fakeOps) NotifyPhone(a *alerts.Alert)              { f.phone = append(f.phone, a.ID) }
-func (f *fakeOps) RetireDecoy(id, why string)               { f.retired = append(f.retired, id) }
-func (f *fakeOps) PendingTest() *TestRequest                { return f.test }
-func (f *fakeOps) ClearTest()                               { f.test = nil }
-func (f *fakeOps) UserSession(pid uint32) bool              { return !f.gone[pid] }
-func (f *fakeOps) Elevated(pid uint32) bool                 { return pid == 777 || f.elevated[pid] }
-func (f *fakeOps) Hash(img string) string                   { return f.hashes[img] }
-func (f *fakeOps) CommandLine(pid uint32) string            { return f.cmdlines[pid] }
-func (f *fakeOps) InjectedCode(pid uint32) (string, bool)   { d, ok := f.injected[pid]; return d, ok }
-func (f *fakeOps) IsSelf(img string) bool                   { return strings.HasSuffix(strings.ToLower(img), `\aba.exe`) }
-func (f *fakeOps) Logf(string, ...any)                      {}
+func (f *fakeOps) Resume(p []uint32)                      { f.resumed = append(f.resumed, p...) }
+func (f *fakeOps) KillTree(pid uint32) error              { f.killed = append(f.killed, pid); return nil }
+func (f *fakeOps) Forensics(uint32, *alerts.Process)      {}
+func (f *fakeOps) BlockProgram(p string) error            { f.blocked = append(f.blocked, p); return nil }
+func (f *fakeOps) Isolate() error                         { f.isolated++; return nil }
+func (f *fakeOps) DisableAdapters() ([]string, error)     { return []string{"Wi-Fi"}, nil }
+func (f *fakeOps) SaveAlert(a *alerts.Alert) error        { f.saved[a.ID] = a; return nil }
+func (f *fakeOps) NotifyDesktop(a *alerts.Alert)          { f.desktop = append(f.desktop, a.ID) }
+func (f *fakeOps) NotifyPhone(a *alerts.Alert)            { f.phone = append(f.phone, a.ID) }
+func (f *fakeOps) RetireDecoy(id, why string)             { f.retired = append(f.retired, id) }
+func (f *fakeOps) PendingTest() *TestRequest              { return f.test }
+func (f *fakeOps) ClearTest()                             { f.test = nil }
+func (f *fakeOps) UserSession(pid uint32) bool            { return !f.gone[pid] }
+func (f *fakeOps) Elevated(pid uint32) bool               { return pid == 777 || f.elevated[pid] }
+func (f *fakeOps) Hash(img string) string                 { return f.hashes[img] }
+func (f *fakeOps) CommandLine(pid uint32) string          { return f.cmdlines[pid] }
+func (f *fakeOps) InjectedCode(pid uint32) (string, bool) { d, ok := f.injected[pid]; return d, ok }
+func (f *fakeOps) IsSelf(img string) bool                 { return strings.HasSuffix(strings.ToLower(img), `\aba.exe`) }
+func (f *fakeOps) Logf(format string, a ...any) {
+	if f.logf != nil {
+		f.logf(format, a...)
+	}
+}
 func (f *fakeOps) Hold(pids []uint32)                       { f.held = append(f.held, pids...) }
 func (f *fakeOps) Ancestors(pid uint32) []procinfo.Ancestor { return f.parents[pid] }
 func (f *fakeOps) RunningImage(path string) []uint32        { return f.running[path] }

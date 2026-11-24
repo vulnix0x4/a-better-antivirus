@@ -404,6 +404,252 @@ func TestBrowserTakingTheFolderForANewProfile(t *testing.T) {
 	}
 }
 
+// The VM's timeline of Brave's own "Add profile" reaching the fake's name:
+// the three files deleted at +0.09/0.17/0.24 s, the folder gone at +0.28 s,
+// the window check at +0.42 s, the folder made anew as a real profile at
+// +1.3 s, listed in Local State only at +10.1 s. ABA must recognise the
+// folder taken from disk well before its wait ends, cut nothing, and raise
+// one plain alert.
+func TestProfileAddedInTheBrowserTimeline(t *testing.T) {
+	e, f, bait, _ := browserUser(t, "balanced", 4410, explorerExe, nil)
+	f.visible[1000] = true
+	prof := strings.TrimSuffix(bait, `\Login Data`)
+	webData := prof + `\Web Data`
+	// The fake profile on disk first: the temporary folder's path has an 8.3
+	// short name in it, which paths.Key only spells out for files that exist.
+	os.MkdirAll(prof+`\Network`, 0o755)
+	for _, p := range []string{bait, cookiesOf(bait), webData, prof + `\Preferences`} {
+		os.WriteFile(p, []byte("fake"), 0o644)
+	}
+	st := stateWithAll()
+	st.Baits["chrome-profile"] = &config.BaitState{ID: "chrome-profile", Name: "extra profile inside your Chrome",
+		Files: []config.BaitFile{{Path: bait, Audit: true}, {Path: cookiesOf(bait), Audit: true}, {Path: webData, Audit: true}}}
+	e.Configure(e.cfg, st)
+	start := time.Now()
+	done := make(chan bool, 3)
+	for i, p := range []string{bait, cookiesOf(bait), webData} {
+		i, p := i, p
+		go func() {
+			time.Sleep(time.Duration(90+75*i) * time.Millisecond)
+			e.HandleAccess(ev(1000, chromeExe, p, 0x10000))
+			done <- true
+		}()
+	}
+	go func() {
+		time.Sleep(280 * time.Millisecond)
+		os.RemoveAll(prof)
+		time.Sleep(1020 * time.Millisecond) // +1.3 s: a real profile
+		os.MkdirAll(prof+`\Network`, 0o755)
+		for _, n := range []string{"Preferences", "Secure Preferences", "Extension State", "Login Data", "Web Data", `Network\Cookies`} {
+			os.WriteFile(prof+`\`+n, []byte("real"), 0o644)
+		}
+		os.MkdirAll(prof+`\Sessions`, 0o755)
+	}()
+	for i := 0; i < 3; i++ {
+		<-done
+	}
+	took := time.Since(start)
+	a := only(f)
+	if len(f.saved) != 1 || a == nil || a.Kind != alerts.KindDecoyRetired || len(f.blocked) != 0 || len(f.suspended) != 0 || len(f.retired) != 1 {
+		t.Fatalf("alerts %d, alert %+v, blocked %v, retired %v", len(f.saved), a, f.blocked, f.retired)
+	}
+	if took > 4*time.Second || a.Tier != config.TierInfo || strings.Contains(a.Title+a.Summary, "stealer") {
+		t.Fatalf("took %v; %s: %q / %q", took, a.Tier, a.Title, a.Summary)
+	}
+	if len(a.Baits) != 3 {
+		t.Errorf("the three deletes in one alert: %+v", a.Baits)
+	}
+}
+
+// After `aba resume` gave the browser you're using its internet back, the
+// same browser going through the fake profile again (here from its network
+// service, one of its own processes) is a new alert, and its internet is
+// cut again: not a line added to the old one.
+func TestAgainAfterResumeIsANewAlert(t *testing.T) {
+	e, f, bait, _ := browserUser(t, "balanced", 4410, explorerExe, nil)
+	f.visible[1000] = true
+	f.cmdlines[1002] = `"` + chromeExe + `" --type=utility --utility-sub-type=network.mojom.NetworkService`
+	e.HandleAccess(ev(1000, chromeExe, bait, 1))
+	first := only(f)
+	if first == nil || !first.Verdict.KeepRunning || len(f.blocked) != 1 {
+		t.Fatalf("first: %+v", first)
+	}
+	// `aba resume <id>`: its internet is back.
+	f.state.Blocked = nil
+	e.HandleAccess(ev(1002, chromeExe, bait, 1))
+	if len(f.saved) != 2 || len(f.blocked) != 2 || len(f.desktop) != 2 {
+		t.Fatalf("after resume: alerts %d, blocked %v, popups %d", len(f.saved), f.blocked, len(f.desktop))
+	}
+	for _, a := range f.saved {
+		if a.ID != first.ID && (!a.Verdict.KeepRunning || a.Process.PID != 1002 || !a.Did(config.ActionBlockProgram)) {
+			t.Fatalf("second: %+v", a)
+		}
+	}
+	// While the block is still in place, the same reads do join.
+	e.HandleAccess(ev(1001, chromeExe, cookiesOf(bait), 1))
+	if len(f.saved) != 2 {
+		t.Fatalf("a read while it's still cut off made a third alert")
+	}
+}
+
+// Caught inside its open, then resumed by you: the next read the event log
+// reports is a new alert and a new freeze, not a line in the old one.
+func TestInstantCatchResumedThenReadsAgain(t *testing.T) {
+	e, f := setup("balanced")
+	e.cfg.InstantFreeze = true
+	img := `C:\Users\bob\AppData\Local\Temp\x\stealer.exe`
+	f.images[100] = img
+	if !e.DecideInstant(100, desktopBait) {
+		t.Fatal("not frozen inside the open")
+	}
+	e.HandleOpen(100, desktopBait, time.Now(), []uint32{100})
+	f.state.Frozen, f.state.Blocked = nil, nil // `aba resume <id>`
+	e.HandleAccess(ev(100, img, discordBait, 1))
+	if len(f.saved) != 2 || len(f.suspended) != 1 {
+		t.Fatalf("alerts %d, suspended %v", len(f.saved), f.suspended)
+	}
+}
+
+// One of the browser's own processes (its network service) opening the fake
+// profile is handled like the main process: the whole instance is judged,
+// from its main process.
+func TestABrowsersChildIsHandledLikeItsMain(t *testing.T) {
+	e, f, bait, _ := browserUser(t, "balanced", 4410, explorerExe, nil)
+	f.visible[1000] = true
+	e.HandleAccess(ev(1002, chromeExe, bait, 1))
+	if a := only(f); a == nil || !a.Verdict.KeepRunning || len(f.blocked) != 1 || f.asked != 1 {
+		t.Fatalf("network service: %+v, blocked %v, window checks %d", a, f.blocked, f.asked)
+	}
+	e, f, bait, _ = browserUser(t, "balanced", 900, ghostExe, suspended)
+	e.HandleAccess(ev(1002, chromeExe, bait, 1))
+	if len(f.suspended) == 0 || f.suspended[0] != 1000 {
+		t.Fatalf("frozen from its main process: %v", f.suspended)
+	}
+}
+
+// The VM sequence with the real tool (-k -v chrome) while your Chrome and
+// Edge were open: earlier catches of its Chrome and Brave copies, Edge's
+// routine read of the password list, then the tool's next Chrome copy. Only
+// that copy and what started it are frozen; only the starter is cut off;
+// Edge and chrome.exe never.
+func TestAStealersBrowserIsFrozenAloneAfterOtherCatches(t *testing.T) {
+	e, f, bait, braveBait := threeBrowsers(t)
+	e.HandleAccess(ev(1000, chromeExe, bait, 1))
+	e.HandleAccess(ev(2000, braveExe, braveBait, 1))
+	e.HandleAccess(ev(3000, edgeExe, desktopBait, 1))
+	second := &procinfo.BrowserInstance{Main: 5000, MainCreate: 1, Image: chromeExe, PIDs: []uint32{5000}, CreatedSuspended: true,
+		Starter: 902, StarterImage: ghostExe, StarterCreate: 1}
+	f.browsers[5000], f.images[5000], f.images[902] = second, chromeExe, ghostExe
+	f.parents[5000] = []procinfo.Ancestor{{PID: 902, Image: ghostExe, CreateTime: 1}}
+	e.HandleAccess(ev(5000, chromeExe, cookiesOf(bait), 1))
+	var a *alerts.Alert
+	for _, x := range f.saved {
+		if x.Process.PID == 5000 {
+			a = x
+		}
+	}
+	if a == nil || !a.Verdict.Host || len(a.Verdict.Swept) > 0 {
+		t.Fatalf("the tool's next copy: %+v", a)
+	}
+	for _, fr := range f.state.Frozen {
+		if fr.AlertID == a.ID && fr.PID != 5000 && fr.PID != 5001 && fr.PID != 902 {
+			t.Fatalf("frozen with it: %+v", f.state.Frozen)
+		}
+	}
+	if hasP(f.suspended, 3000) {
+		t.Fatal("Edge frozen")
+	}
+	for _, b := range f.blocked {
+		if b == chromeExe || b == edgeExe || b == braveExe {
+			t.Fatalf("blocked %v", f.blocked)
+		}
+	}
+}
+
+// The same, then something put into the Chrome you're using goes through the
+// fake profile: left running, cut off, not frozen as part of a team.
+func TestTheBrowserYoureUsingAfterOtherCatches(t *testing.T) {
+	e, f, bait, braveBait := threeBrowsers(t)
+	e.HandleAccess(ev(1000, chromeExe, bait, 1))
+	e.HandleAccess(ev(2000, braveExe, braveBait, 1))
+	e.HandleAccess(ev(3000, edgeExe, desktopBait, 1))
+	yours := &procinfo.BrowserInstance{Main: 6000, MainCreate: 1, Image: chromeExe, PIDs: []uint32{6000, 6001}, Starter: 4410, StarterImage: explorerExe, StarterCreate: 1}
+	f.browsers[6000], f.browsers[6001], f.images[6000], f.images[6001] = yours, yours, chromeExe, chromeExe
+	f.visible[6000] = true
+	e.HandleAccess(ev(6001, chromeExe, bait, 1))
+	var a *alerts.Alert
+	for _, x := range f.saved {
+		if x.Process.PID == 6001 {
+			a = x
+		}
+	}
+	if a == nil || !a.Verdict.KeepRunning || hasP(f.suspended, 6000) || hasP(f.suspended, 6001) || hasP(f.suspended, 3000) {
+		t.Fatalf("your Chrome: %+v, suspended %v", a, f.suspended)
+	}
+}
+
+// Your Edge reads the password list on its own, then code put into it goes
+// through its fake profile: still the browser you're using (its own fake
+// profile never counts toward a sweep). Only reads of two more apps' data
+// make it a sweep.
+func TestTheBrowserYoureUsingAndASweep(t *testing.T) {
+	e, f, bait, _ := threeBrowsers(t)
+	_ = bait
+	edgeBait := addEdge(t, e)
+	yours := &procinfo.BrowserInstance{Main: 3000, MainCreate: 1, Image: edgeExe, PIDs: []uint32{3000}, Starter: 4410, StarterImage: explorerExe, StarterCreate: 1}
+	f.browsers[3000] = yours
+	f.visible[3000] = true
+	e.HandleAccess(ev(3000, edgeExe, desktopBait, 1))
+	e.HandleAccess(ev(3000, edgeExe, edgeBait, 1))
+	e.HandleAccess(ev(3000, edgeExe, discordBait, 1))
+	if hasP(f.suspended, 3000) {
+		t.Fatalf("your Edge frozen for the password list, its fake profile and one more app: %v", f.suspended)
+	}
+	e.HandleAccess(ev(3000, edgeExe, awsBait, 1))
+	if !hasP(f.suspended, 3000) {
+		t.Fatal("three other apps' data: that's a sweep, whatever it is")
+	}
+}
+
+// threeBrowsers: Chrome (1000, a stealer's copy started by ghost.exe), Brave
+// (2000, the same) and your Edge (3000), each with a fake profile.
+func threeBrowsers(t *testing.T) (*Engine, *fakeOps, string, string) {
+	t.Helper()
+	e, f, bait, _ := browserUser(t, "balanced", 900, ghostExe, suspended)
+	e.cfg.InstantFreeze = true
+	braveUD := strings.Replace(strings.TrimSuffix(bait, `Profile 23\Login Data`), `Google\Chrome`, `BraveSoftware\Brave-Browser`, 1)
+	os.MkdirAll(braveUD, 0o755)
+	os.WriteFile(braveUD+"Local State", []byte(`{"profile":{"info_cache":{"Default":{}}}}`), 0o644)
+	e.cfg.User.Embedded["brave-profile"] = "Profile 13"
+	braveBait := braveUD + `Profile 13\Network\Cookies`
+	st := stateWithAll()
+	st.Baits["chrome-profile"] = &config.BaitState{ID: "chrome-profile", Name: "extra profile inside your Chrome",
+		Files: []config.BaitFile{{Path: bait, Audit: true}, {Path: cookiesOf(bait), Audit: true}}}
+	st.Baits["brave-profile"] = &config.BaitState{ID: "brave-profile", Name: "extra profile inside your Brave", Files: []config.BaitFile{{Path: braveBait, Audit: true}}}
+	e.Configure(e.cfg, st)
+	brave := &procinfo.BrowserInstance{Main: 2000, MainCreate: 1, Image: braveExe, PIDs: []uint32{2000}, CreatedSuspended: true,
+		Starter: 900, StarterImage: ghostExe, StarterCreate: 1}
+	f.browsers[2000], f.images[2000] = brave, braveExe
+	signed(f, braveExe, "Brave Software Inc")
+	f.images[3000] = edgeExe
+	signed(f, edgeExe, "Microsoft Corporation")
+	return e, f, bait, braveBait
+}
+
+// addEdge gives Edge a fake profile too, and returns its bait.
+func addEdge(t *testing.T, e *Engine) string {
+	t.Helper()
+	ud := e.cfg.User.LocalAppData + `\Microsoft\Edge\User Data\`
+	os.MkdirAll(ud, 0o755)
+	os.WriteFile(ud+"Local State", []byte(`{"profile":{"info_cache":{"Default":{}}}}`), 0o644)
+	e.cfg.User.Embedded["edge-profile"] = "Profile 17"
+	b := ud + `Profile 17\Login Data`
+	st := stateWithAll()
+	st.Baits["edge-profile"] = &config.BaitState{ID: "edge-profile", Name: "extra profile inside your Edge", Files: []config.BaitFile{{Path: b, Audit: true}}}
+	e.Configure(e.cfg, st)
+	return b
+}
+
 const (
 	braveExe = `C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe`
 	edgeExe  = `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`

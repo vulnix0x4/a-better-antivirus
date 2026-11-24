@@ -328,7 +328,9 @@ func (e *Engine) DecideInstantOpWhy(pid uint32, path string, op detect.Op) (bool
 	exempt := cls.SweepExempt(image, pid, &sig)
 	// Deleting several apps' data isn't going through it: uninstallers and
 	// cleaners do that. Reading or rewriting it is.
-	if op != detect.OpDelete {
+	// (Never the genuine browser going through its fake profile: see host.go,
+	// and hostRead.)
+	if op != detect.OpDelete && !v.Host {
 		if swept := e.touch(pid, baitID, time.Now()); len(swept) >= sweepApps && !exempt {
 			v = e.sweepVerdict(v, swept)
 		}
@@ -547,10 +549,19 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	if !instant {
 		e.waitDecision(oa.PID)
 		if claimedNow() {
-			// The instant path already caught and is reporting this process.
-			// What it went on to do to the bait still belongs in that alert.
-			e.noteAfter(oa)
-			return
+			e.mu.Lock()
+			inc := e.incidents[oa.PID]
+			e.mu.Unlock()
+			if inc != nil && e.undone(inc.alert) {
+				// Caught, then resumed by you: this is something new it did.
+				e.Unclaim(oa.PID)
+				e.closeIncident(inc.alert)
+			} else {
+				// The instant path already caught and is reporting this process.
+				// What it went on to do to the bait still belongs in that alert.
+				e.noteAfter(oa)
+				return
+			}
 		}
 	}
 	received := time.Now()
@@ -583,7 +594,7 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 		e.mu.Unlock()
 	}
 	var swept []string
-	if access == "read" || access == "write" {
+	if (access == "read" || access == "write") && !e.hostRead(oa, baitID) {
 		swept = e.touch(oa.PID, baitID, time.Now())
 		if len(swept) >= sweepApps && !e.sweepable(oa.PID) {
 			swept = nil
@@ -607,6 +618,16 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 		if len(wrecked) >= wreckFolders && !e.sweepable(oa.PID) {
 			wrecked = nil
 		}
+	}
+
+	// An earlier alert about it whose response has been undone since (you
+	// resumed it, gave it its internet back, released it) is a closed case:
+	// what it does now is a new alert, not a line in that one.
+	e.mu.Lock()
+	inc0 := e.incidents[oa.PID]
+	e.mu.Unlock()
+	if inc0 != nil && !instant && e.undone(inc0.alert) {
+		e.closeIncident(inc0.alert)
 	}
 
 	e.mu.Lock()
