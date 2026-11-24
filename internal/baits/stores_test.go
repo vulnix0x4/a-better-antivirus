@@ -174,3 +174,31 @@ func TestMatchRel(t *testing.T) {
 		}
 	}
 }
+
+func TestPrefixes(t *testing.T) {
+	s := Store{Root: filepath.FromSlash("/u/Library"), Files: []string{"Cookies/Cookies.binarycookies", "Containers/com.apple.Safari/*/Cookies", "Keychains/login.keychain-db"}}
+	got := s.Prefixes()
+	want := []string{filepath.FromSlash("/u/Library/Containers/com.apple.Safari/"), filepath.FromSlash("/u/Library/Cookies/Cookies.binarycookies"), filepath.FromSlash("/u/Library/Keychains/login.keychain-db")}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("got %q", got)
+	}
+	c := Store{Root: filepath.FromSlash("/u/Chrome"), Files: []string{"Local State", "*/Login Data", "*/Network/Cookies"}}
+	if got := c.Prefixes(); len(got) != 1 || got[0] != filepath.FromSlash("/u/Chrome/") {
+		t.Errorf("chrome: %q", got)
+	}
+}
+
+func TestDirsLeaveOutBaitFolders(t *testing.T) {
+	u := storeUser(t)
+	chrome, _ := find(RealStores(u, nil), "chrome-profile")
+	spec, _ := ByID("chrome-profile")
+	ud := spec.Inside(u)
+	touch(t, filepath.Join(ud, "Local State"))
+	touch(t, filepath.Join(ud, "Default", "Network", "Cookies"))
+	touch(t, filepath.Join(ud, ProfileFolder(u, "chrome-profile"), "Login Data"))
+	got := chrome.Dirs()
+	want := []string{ud, filepath.Join(ud, "Default"), filepath.Join(ud, "Default", "Network")}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("Dirs = %q\nwant %q", got, want)
+	}
+}

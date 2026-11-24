@@ -15,6 +15,7 @@ package baits
 
 import (
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -323,6 +324,86 @@ func globEscape(p string) string {
 	}
 	r := strings.NewReplacer(`\`, `\\`, "[", `\[`, "*", `\*`, "?", `\?`)
 	return r.Replace(p)
+}
+
+// Dirs lists the folders that exist now and can hold the store's files
+// (every profile folder of a browser, a wallet's folder): watchers that
+// watch folders rather than files watch these. Folders holding baits are
+// left out.
+func (s Store) Dirs() []string {
+	if _, err := os.Stat(s.Root); err != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, f := range s.Files {
+		d := path.Dir(f)
+		var found []string
+		if d == "." {
+			found = []string{s.Root}
+		} else {
+			found, _ = filepath.Glob(filepath.Join(globEscape(s.Root), filepath.FromSlash(d)))
+		}
+		for _, p := range found {
+			if seen[p] {
+				continue
+			}
+			if fi, err := os.Stat(p); err != nil || !fi.IsDir() {
+				continue
+			}
+			rel, _ := filepath.Rel(s.Root, p)
+			skip := false
+			for _, sk := range s.Skip {
+				skip = skip || (rel != "." && matchRel(sk, filepath.ToSlash(rel), true))
+			}
+			if skip {
+				continue
+			}
+			seen[p] = true
+			out = append(out, p)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// Prefixes are the longest fixed beginnings of the store's file paths (the
+// root, and each pattern up to its first wildcard): a path that's one of the
+// store's files starts with one of them. Watchers that can only match text
+// cheaply look for these.
+func (s Store) Prefixes() []string {
+	var out []string
+	for _, f := range s.Files {
+		parts := strings.Split(f, "/")
+		var fixed []string
+		for _, p := range parts {
+			if strings.ContainsAny(p, "*?[") {
+				break
+			}
+			fixed = append(fixed, p)
+		}
+		pre := s.Root
+		if len(fixed) > 0 {
+			pre = filepath.Join(append([]string{s.Root}, fixed...)...)
+		}
+		if len(fixed) < len(parts) {
+			pre += string(filepath.Separator)
+		}
+		out = appendNew(out, pre)
+	}
+	// One that starts with another adds nothing.
+	var keep []string
+	for _, a := range out {
+		covered := false
+		for _, b := range out {
+			covered = covered || (a != b && strings.HasPrefix(a, b) && strings.HasSuffix(b, string(filepath.Separator)))
+		}
+		if !covered {
+			keep = append(keep, a)
+		}
+	}
+	sort.Strings(keep)
+	return keep
 }
 
 // StoreFor says which of stores path belongs to.
