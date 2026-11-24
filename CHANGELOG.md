@@ -55,7 +55,11 @@ cookies or keys?
   or trusted by a rule: ransomware often runs inside a legitimate program. The system's own sync (OneDrive,
   iCloud) is exempt, and so is anything you've allowed to read everything.
 - **A program that looks legitimate deleting a bait** (you in Explorer, a cleaner, a sync client) is still
-  only reported, and the bait put back.
+  only reported, and the bait put back. So is PowerShell, cmd or another script host deleting one: that's
+  you at a prompt. A script that deletes your documents in two folders within two minutes is stopped.
+- **An alert made the instant a program opened a bait says what it went on to do.** Windows rarely says
+  what an open asked for, so a wiper caught inside its open was first reported as a stealer; when the event
+  log then says it overwrote or deleted the bait, the alert becomes one about ransomware or a wiper.
 - **Windows** audits writes to a bait as well as reads and deletes (existing baits get the new rule when
   the service starts). **macOS** reports an open that only writes. **Linux** already held every open of a
   bait; a program that deletes one is now frozen when it's one that would be for reading it.

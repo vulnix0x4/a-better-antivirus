@@ -416,6 +416,34 @@ func TestDeleteByAnUntrustedProgramIsStopped(t *testing.T) {
 	}
 }
 
+// A script host deleting one bait is you, at a prompt or in a script of your
+// own: reported, never frozen (your terminal would freeze). Deleting your
+// documents in folder after folder is a wiper, whoever signed the script host.
+func TestAScriptDeletingFolderAfterFolderIsStopped(t *testing.T) {
+	e, f := setup("balanced")
+	docs := `C:\Users\bob\Documents\passwords.txt`
+	st := stateWithAll()
+	st.Baits["documents-passwords"] = &config.BaitState{ID: "documents-passwords", Name: "passwords.txt in Documents", Files: []config.BaitFile{{Path: docs, Audit: true}}}
+	e.Configure(e.cfg, st)
+	ps := `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`
+	f.sigs[ps] = provenance.Result{Signed: true, Valid: true, Signer: "Microsoft Windows"}
+	e.HandleAccess(ev(1700, ps, desktopBait, 0x10000))
+	a := lastAlert(f)
+	if a == nil || a.Kind != alerts.KindDelete || a.Did(config.ActionFreeze) || len(f.suspended) != len(f.resumed)/2 {
+		t.Fatalf("one delete by a script host: %+v (suspended %v, resumed %v)", a, f.suspended, f.resumed)
+	}
+	e.cfg.InstantFreeze = true
+	f.images[1700] = ps
+	if ok, why := e.DecideInstantOpWhy(1700, desktopBait, detect.OpDelete); ok {
+		t.Errorf("a script host deleting one bait was frozen in the open: %s", why)
+	}
+	e.HandleAccess(ev(1700, ps, docs, 0x10000))
+	a = lastAlert(f)
+	if a.Tier != config.TierCritical || !a.Did(config.ActionFreeze) || !strings.Contains(a.Summary, "deleted files of yours in 2 different folders") {
+		t.Fatalf("deletes in two folders by a script host: %+v", a)
+	}
+}
+
 // Opening a bait only to write to it is what ransomware does to a file. An
 // untrusted program is stopped for it like for a read.
 func TestOverwriteByAnUntrustedProgramIsStopped(t *testing.T) {
