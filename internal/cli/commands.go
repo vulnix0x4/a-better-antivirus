@@ -429,9 +429,10 @@ func testReaderCmd() *cobra.Command {
 				}
 				switch do {
 				case "overwrite":
-					// What ransomware asks for: to write, not to read.
-					// (Nothing is written: asking is what's caught.)
+					// What ransomware does: open it to write, not to read,
+					// and write over the start of it.
 					if f, err := os.OpenFile(p, os.O_WRONLY, 0); err == nil {
+						f.Write([]byte("XXXXXXXXXXXXXXXX"))
 						f.Close()
 					}
 				case "delete":

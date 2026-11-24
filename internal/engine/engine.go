@@ -106,15 +106,16 @@ type Engine struct {
 	index       map[string]string // lower path -> bait id
 	baitNames   map[string]string
 	incidents   map[uint32]*incident
-	claimed     map[uint32]time.Time     // PIDs the instant path is handling
-	seen        map[string]time.Time     // program|bait -> last notification, for alerts with no action
-	touched     map[uint32]*sweep        // baits each process opened recently
-	wrecked     map[uint32]*sweep        // folders each process rewrote document baits in recently
-	sids        map[uint32]string        // account a process read baits as (detect.Access.UserID), as the watcher reported it
-	pending     map[uint32]chan struct{} // instant decisions in progress
-	eventFrozen map[uint32]time.Time     // processes the event-log path froze
-	marks       map[uint32]mark          // processes seen using a trick to dodge detection
-	team        []teamRead               // recent bait reads by anyone, for sweeps split over several processes
+	claimed     map[uint32]time.Time        // PIDs the instant path is handling
+	seen        map[string]time.Time        // program|bait -> last notification, for alerts with no action
+	touched     map[uint32]*sweep           // baits each process opened recently
+	wrecked     map[uint32]*sweep           // folders each process rewrote document baits in recently
+	sids        map[uint32]string           // account a process read baits as (detect.Access.UserID), as the watcher reported it
+	pending     map[uint32]chan struct{}    // instant decisions in progress
+	later       map[uint32][]alerts.BaitHit // what a program caught in its open went on to do, until its alert is on record
+	eventFrozen map[uint32]time.Time        // processes the event-log path froze
+	marks       map[uint32]mark             // processes seen using a trick to dodge detection
+	team        []teamRead                  // recent bait reads by anyone, for sweeps split over several processes
 }
 
 // mark notes that a process did something only evasion explains.
@@ -161,7 +162,7 @@ const window = 2 * time.Minute
 func New(ops Ops, selfPID uint32) *Engine {
 	return &Engine{Ops: ops, SelfPID: selfPID, incidents: map[uint32]*incident{}, claimed: map[uint32]time.Time{},
 		seen: map[string]time.Time{}, touched: map[uint32]*sweep{}, wrecked: map[uint32]*sweep{}, sids: map[uint32]string{},
-		pending: map[uint32]chan struct{}{}, eventFrozen: map[uint32]time.Time{}, marks: map[uint32]mark{}}
+		pending: map[uint32]chan struct{}{}, later: map[uint32][]alerts.BaitHit{}, eventFrozen: map[uint32]time.Time{}, marks: map[uint32]mark{}}
 }
 
 // Configure (re)loads config and the bait index.
@@ -502,7 +503,10 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	if !instant {
 		e.waitDecision(oa.PID)
 		if claimedNow() {
-			return // the instant path already caught and is reporting this process
+			// The instant path already caught and is reporting this process.
+			// What it went on to do to the bait still belongs in that alert.
+			e.noteAfter(oa)
+			return
 		}
 	}
 	received := time.Now()
@@ -951,7 +955,18 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 			delete(e.incidents, pid)
 		}
 	}
+	// What the event log said it did to the bait while this alert was being made.
+	var after *alerts.Alert
+	for _, h := range e.later[oa.PID] {
+		if cp, ok := e.did(a, h); ok {
+			after = cp
+		}
+	}
+	delete(e.later, oa.PID)
 	e.mu.Unlock()
+	if after != nil {
+		e.Ops.SaveAlert(after)
+	}
 
 	// Script hosts and runtimes are never quieted: the next script could be a
 	// different one. Neither are critical alerts.
@@ -1007,6 +1022,75 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 		})
 	}
 	e.Ops.Logf("alert %s: %s [%s] actions=%d latency=%dms (delivery %dms)", a.ID, a.Title, a.Tier, len(a.Actions), a.LatencyMS, a.DeliveryMS)
+}
+
+// noteAfter records what a program already caught inside its open of a bait
+// went on to do to it. Windows doesn't always say what an open asked for, so
+// a program caught there is reported as having opened the bait. The event
+// log, a moment later, says when it overwrote or deleted it: then the alert
+// says so, because that's ransomware or a wiper, not a stealer.
+func (e *Engine) noteAfter(oa *detect.Access) {
+	access := ""
+	switch oa.Op {
+	case detect.OpWrite:
+		access = "write"
+	case detect.OpDelete:
+		access = "delete"
+	default:
+		return
+	}
+	baitID, ok := e.IsBait(oa.Path)
+	if !ok {
+		return
+	}
+	e.mu.Lock()
+	hit := alerts.BaitHit{ID: baitID, Name: e.baitNames[baitID], Path: oa.Path, Access: access, Time: oa.Time}
+	inc := e.incidents[oa.PID]
+	if inc == nil {
+		// Its alert isn't on record yet: kept for when it is (see handle).
+		if len(e.later) > 256 {
+			e.later = map[uint32][]alerts.BaitHit{}
+		}
+		if len(e.later[oa.PID]) < 16 {
+			e.later[oa.PID] = append(e.later[oa.PID], hit)
+		}
+		e.mu.Unlock()
+		return
+	}
+	cp, changed := e.did(inc.alert, hit)
+	e.mu.Unlock()
+	if changed {
+		e.Ops.SaveAlert(cp)
+	}
+}
+
+// did adds to alert a what its program went on to do to a bait (hit: a write
+// or a delete), and returns a copy to save. An alert about a read becomes one
+// about what was done to the file. Called with e.mu held.
+func (e *Engine) did(a *alerts.Alert, hit alerts.BaitHit) (*alerts.Alert, bool) {
+	for _, h := range a.Baits {
+		if strings.EqualFold(h.Path, hit.Path) && h.Access == hit.Access {
+			return nil, false
+		}
+	}
+	a.Baits = append(a.Baits, hit)
+	if a.Kind == alerts.KindRead && !a.Test {
+		what, to, threat := "overwrote", "overwrite", "Possible ransomware"
+		a.Kind = alerts.KindWrite
+		if hit.Access == "delete" {
+			what, to, threat, a.Kind = "deleted", "delete", "Possible wiper or ransomware", alerts.KindDelete
+		}
+		if a.Tier == config.TierCritical {
+			a.Title = threat + ": " + a.ExeName() + " " + what + " your bait"
+		} else {
+			a.Title = a.ExeName() + " " + what + " a bait"
+		}
+		a.Verdict.Reasons = append(a.Verdict.Reasons[:len(a.Verdict.Reasons):len(a.Verdict.Reasons)],
+			"it went on to "+to+" the bait: that's what ransomware and wipers do to a file, not what a stealer does")
+	}
+	cp := *a
+	cp.Baits = append([]alerts.BaitHit(nil), a.Baits...)
+	return &cp, true
 }
 
 // wantsAutopsy: a program caught as a stealer or clipper (or `aba test`'s),

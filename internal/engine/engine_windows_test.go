@@ -473,6 +473,59 @@ func TestInstantDecisionKnowsWhatTheOpenAskedFor(t *testing.T) {
 	}
 }
 
+// Windows doesn't always say what an open asked for, so a program caught
+// inside its open is reported as having opened the bait. When the event log
+// then says it overwrote or deleted it, the alert says so.
+func TestAnInstantCatchLearnsWhatTheProgramWentOnToDo(t *testing.T) {
+	img := `C:\Users\bob\AppData\Local\Temp\x\locker.exe`
+	for _, c := range []struct {
+		mask         uint32
+		kind, access string
+		title        string
+	}{
+		{0x2, alerts.KindWrite, "write", "Possible ransomware: locker.exe overwrote your bait"},
+		{0x10000, alerts.KindDelete, "delete", "Possible wiper or ransomware: locker.exe deleted your bait"},
+	} {
+		// The event arrives once the alert is on record.
+		e, f := setup("balanced")
+		e.cfg.InstantFreeze = true
+		f.images[620] = img
+		if ok, why := e.DecideInstantWhy(620, desktopBait); !ok {
+			t.Fatalf("not frozen in the open: %s", why)
+		}
+		e.HandleOpen(620, desktopBait, time.Now(), []uint32{620})
+		if a := only(f); a == nil || a.Kind != alerts.KindRead || !strings.Contains(a.Title, "opened your bait") {
+			t.Fatalf("the instant alert: %+v", a)
+		}
+		e.HandleAccess(ev(620, img, desktopBait, c.mask))
+		a := only(f)
+		if len(f.saved) != 1 || a.Kind != c.kind || a.Title != c.title || len(a.Baits) != 2 || a.Baits[1].Access != c.access {
+			t.Errorf("after the event: %d alert(s), kind %s, title %q, baits %+v", len(f.saved), a.Kind, a.Title, a.Baits)
+		}
+		// Told twice (Windows logs each handle), it's there once.
+		e.HandleAccess(ev(620, img, desktopBait, c.mask))
+		if a := only(f); len(a.Baits) != 2 {
+			t.Errorf("the same thing twice: %+v", a.Baits)
+		}
+
+		// The event arrives while the alert is still being made.
+		e, f = setup("balanced")
+		e.cfg.InstantFreeze = true
+		f.images[621] = img
+		if ok, why := e.DecideInstantWhy(621, desktopBait); !ok {
+			t.Fatalf("not frozen in the open: %s", why)
+		}
+		e.HandleAccess(ev(621, img, desktopBait, c.mask))
+		if len(f.saved) != 0 {
+			t.Fatalf("the event made an alert of its own: %+v", f.saved)
+		}
+		e.HandleOpen(621, desktopBait, time.Now(), []uint32{621})
+		if a := only(f); a == nil || len(f.saved) != 1 || a.Kind != c.kind || a.Title != c.title {
+			t.Errorf("the event came first: %+v", a)
+		}
+	}
+}
+
 // A program that rewrites your documents in one folder after another is
 // ransomware whatever it is: signed, trusted by you, anything but the
 // system's own sync (OneDrive puts your folders back file by file).
