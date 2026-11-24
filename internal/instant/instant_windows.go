@@ -35,6 +35,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
 )
 
 // ---- oplock guard on one file ----
@@ -181,10 +183,7 @@ func (g *Guard) Release() {
 
 // ---- finding the opener ----
 
-var (
-	ntdll                        = windows.NewLazySystemDLL("ntdll.dll")
-	procNtQuerySystemInformation = ntdll.NewProc("NtQuerySystemInformation")
-)
+var ntdll = windows.NewLazySystemDLL("ntdll.dll")
 
 // Thread is a thread currently blocked in a kernel ("Executive") wait.
 type Thread struct {
@@ -193,60 +192,19 @@ type Thread struct {
 	CtxSwitches uint32
 }
 
-const (
-	systemProcessInformation = 5
-	statusInfoLengthMismatch = 0xC0000004
-	threadStateWaiting       = 5
-	waitReasonExecutive      = 0
-
-	// x64 / arm64 layouts of SYSTEM_PROCESS_INFORMATION / SYSTEM_THREAD_INFORMATION.
-	procInfoSize   = 0x100
-	procPIDOffset  = 0x50
-	threadInfoSize = 0x50
-	thWaitTime     = 0x18
-	thTID          = 0x30
-	thCtxSwitches  = 0x40
-	thState        = 0x44
-	thWaitReason   = 0x48
-)
-
 // StuckThreads lists threads in an Executive wait, excluding PIDs 0, 4 and skip.
 func StuckThreads(skip uint32) ([]Thread, error) {
-	size := uint32(1 << 20)
-	var buf []byte
-	for i := 0; ; i++ {
-		buf = make([]byte, size)
-		var ret uint32
-		r, _, _ := procNtQuerySystemInformation.Call(systemProcessInformation, uintptr(unsafe.Pointer(&buf[0])), uintptr(size), uintptr(unsafe.Pointer(&ret)))
-		if r == 0 {
-			break
-		}
-		if uint32(r) != statusInfoLengthMismatch || i > 6 {
-			return nil, errors.New("NtQuerySystemInformation failed")
-		}
-		size *= 2
-		if ret > size {
-			size = ret + 64<<10
-		}
+	ps, err := procinfo.SystemProcesses(func(pid uint32) bool { return pid > 4 && pid != skip })
+	if err != nil {
+		return nil, err
 	}
 	var out []Thread
-	for off := 0; off+procInfoSize <= len(buf); {
-		base := buf[off:]
-		next := le32(base, 0)
-		n := int(le32(base, 4))
-		pid := uint32(le64(base, procPIDOffset))
-		if pid > 4 && pid != skip {
-			for i := 0; i < n && procInfoSize+(i+1)*threadInfoSize <= len(base); i++ {
-				t := base[procInfoSize+i*threadInfoSize:]
-				if le32(t, thState) == threadStateWaiting && le32(t, thWaitReason) == waitReasonExecutive {
-					out = append(out, Thread{PID: pid, TID: uint32(le64(t, thTID)), WaitTime: le32(t, thWaitTime), CtxSwitches: le32(t, thCtxSwitches)})
-				}
+	for _, p := range ps {
+		for _, t := range p.Threads {
+			if t.State == procinfo.ThreadWaiting && t.WaitReason == procinfo.WaitExecutive {
+				out = append(out, Thread{PID: t.PID, TID: t.TID, WaitTime: t.WaitTime, CtxSwitches: t.CtxSwitches})
 			}
 		}
-		if next == 0 {
-			break
-		}
-		off += int(next)
 	}
 	return out, nil
 }
@@ -350,7 +308,8 @@ type Watcher struct {
 	// open (pids), which switches instant freeze off for that file.
 	OnBlocked func(path string, pids []uint32)
 	// Suspect (optional) picks, among programs paused inside an open, one
-	// already known to be sweeping: it's reported before the open is let go.
+	// already known to be a suspect (sweeping, or a browser created suspended):
+	// it's reported before the open is let go.
 	Suspect func(path string, pids []uint32) uint32
 	Logf    func(format string, args ...any)
 	Self    uint32
@@ -566,11 +525,12 @@ func (w *Watcher) guard(path string, stop windows.Handle) {
 			}
 			continue
 		}
-		// A program already known to be sweeping (it read other apps' data) is
-		// decided while the open is still paused, so it never gets this file.
+		// A program already known to be a suspect (sweeping other apps' data, a
+		// browser created suspended going through a fake profile) is decided
+		// while the open is still paused, so it never gets this file.
 		if w.Suspect != nil && !own {
 			if p := w.Suspect(path, stuckPIDs(stuck)); p != 0 {
-				w.logf("instant: %s opened while pid %d (already sweeping) was paused in it", path, p)
+				w.logf("instant: %s opened while pid %d (a known suspect) was paused in it", path, p)
 				w.report(path, at, intent, []uint32{p})
 				g.Release()
 				if stopped(150 * time.Millisecond) {
