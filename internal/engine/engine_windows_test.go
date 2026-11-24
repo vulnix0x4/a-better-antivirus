@@ -438,9 +438,17 @@ func TestAScriptDeletingFolderAfterFolderIsStopped(t *testing.T) {
 		t.Errorf("a script host deleting one bait was frozen in the open: %s", why)
 	}
 	e.HandleAccess(ev(1700, ps, docs, 0x10000))
-	a = lastAlert(f)
-	if a.Tier != config.TierCritical || !a.Did(config.ActionFreeze) || !strings.Contains(a.Summary, "deleted files of yours in 2 different folders") {
-		t.Fatalf("deletes in two folders by a script host: %+v", a)
+	// A second alert, and this one stops it. (Both are critical: a script
+	// host always is. Only this one acts.)
+	var stopped *alerts.Alert
+	for _, x := range f.saved {
+		if x.Did(config.ActionFreeze) {
+			stopped = x
+		}
+	}
+	if len(f.saved) != 2 || stopped == nil || stopped.Tier != config.TierCritical ||
+		!strings.Contains(stopped.Summary, "deleted files of yours in 2 different folders") {
+		t.Fatalf("deletes in two folders by a script host: %d alert(s), the one that froze: %+v", len(f.saved), stopped)
 	}
 }
 
