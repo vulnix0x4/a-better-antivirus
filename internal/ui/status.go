@@ -244,7 +244,7 @@ func AlertTable(list []*alerts.Alert, w int) string {
 	head := fmt.Sprintf("  %-12s  %-12s  %-*s  %-*s  %s", "WHEN", "SEVERITY", whoW, "PROGRAM", whatW, "WHAT IT READ", "ID")
 	b.WriteString(Fainter.Render(head) + "\n")
 	for _, a := range list {
-		when := a.Time.Format("Jan 02 15:04")
+		when := a.Time.Local().Format("Jan 02 15:04")
 		what := ""
 		if len(a.Baits) > 0 {
 			what = a.Baits[0].Name
@@ -304,7 +304,7 @@ func AlertDetail(a *alerts.Alert) string {
 		return lipgloss.NewStyle().PaddingLeft(indent).Width(w).Render(s)
 	}
 	b.WriteString("\n" + TierBadge(a.Tier) + " " + Bold.Render(a.Title) + "\n")
-	b.WriteString(Dim.Render(a.Time.Format("Mon Jan 2 2006, 15:04:05")+"  ·  alert "+shortID(a.ID)) + "\n")
+	b.WriteString(Dim.Render(a.Time.Local().Format("Mon Jan 2 2006, 15:04:05")+"  ·  alert "+shortID(a.ID)) + "\n")
 	if a.Summary != "" {
 		b.WriteString("\n" + wrap(Plain.Render(a.Summary), 0) + "\n")
 	}
@@ -317,7 +317,7 @@ func AlertDetail(a *alerts.Alert) string {
 	if len(a.Baits) > 0 {
 		b.WriteString(Heading("Baits touched") + "\n")
 		for _, h := range a.Baits {
-			b.WriteString(fmt.Sprintf("  %s %s %s\n    %s\n", Dim.Render(h.Time.Format("15:04:05.000")), h.Access, Bold.Render(h.Name), Fainter.Render(h.Path)))
+			b.WriteString(fmt.Sprintf("  %s %s %s\n    %s\n", Dim.Render(h.Time.Local().Format("15:04:05.000")), h.Access, Bold.Render(h.Name), Fainter.Render(h.Path)))
 		}
 	}
 	if ap := a.Autopsy; ap != nil {
