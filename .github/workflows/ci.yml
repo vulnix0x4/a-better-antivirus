@@ -62,7 +62,8 @@ jobs:
   # the Windows job. GitHub's Linux runners have passwordless sudo, a real
   # kernel and systemd; its macOS runners have passwordless sudo and System
   # Integrity Protection off, so ABA can be given Full Disk Access there
-  # without a person clicking. CGO stays off, like in the release builds.
+  # without a person clicking. CGO stays off on Linux, like in the release
+  # builds; on macOS it's on, like in theirs (package machmem).
   test-unix:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -72,7 +73,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     env:
-      CGO_ENABLED: "0"
+      CGO_ENABLED: ${{ matrix.os == 'macos-latest' && '1' || '0' }}
+      MACOSX_DEPLOYMENT_TARGET: "14.0"
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v6

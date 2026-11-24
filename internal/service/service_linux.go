@@ -34,6 +34,7 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
 	"github.com/vulnix0x4/a-better-antivirus/internal/provenance"
+	"github.com/vulnix0x4/a-better-antivirus/internal/recorder"
 	"github.com/vulnix0x4/a-better-antivirus/internal/svcctl"
 )
 
@@ -126,10 +127,12 @@ func sdNotify(state string) {
 
 // watchers is what the service keeps for noticing bait opens on Linux.
 type watchers struct {
-	fan    *fanwatch.Watcher
-	fanErr error
-	net    *netguard.Guard // keeps network cut-offs in force
-	dirs   *fanwatch.Dirs  // the folders baits are in
+	fan       *fanwatch.Watcher
+	fanErr    error
+	net       *netguard.Guard  // keeps network cut-offs in force
+	dirs      *fanwatch.Dirs   // the folders baits are in
+	stores    *fanwatch.Stores // the folders of the real stores, for the flight recorder
+	storeDirs map[string]bool
 
 	repairMu sync.Mutex
 	repairT  *time.Timer
@@ -161,6 +164,14 @@ func (s *server) prepare() {
 		if !w.Held() {
 			s.log.Printf("this kernel has no fanotify permission events: bait opens are reported after the fact, not held")
 		}
+	}
+	if st, err := fanwatch.NewStores(); err != nil {
+		s.recWhy = "the kernel wouldn't let ABA watch the folders your real data is in (" + err.Error() + ")"
+		s.log.Printf("flight recorder: %v", err)
+	} else {
+		st.OnOpen, st.Logf = s.onStoreOpen, s.log.Printf
+		st.OnLost = func(at time.Time) { s.rec.Lost(at, at, "the kernel dropped some file events (too many at once)") }
+		s.stores = st
 	}
 	if d, err := fanwatch.NewDirs(); err != nil {
 		s.log.Printf("watching bait folders: %v; a deleted bait is noticed at the next check instead", err)
@@ -291,6 +302,9 @@ func (s *server) startWatching(ctx context.Context) {
 		go s.dirs.Run()
 		s.log.Printf("watching the folders baits are in")
 	}
+	if s.stores != nil {
+		go s.stores.Run()
+	}
 	go s.watchEscapes(ctx)
 	s.once1.Do(func() { close(s.listening) })
 }
@@ -305,6 +319,69 @@ func (s *server) stopWatching() {
 	if s.dirs != nil {
 		s.dirs.Close()
 	}
+	if s.stores != nil {
+		s.stores.Close()
+	}
+}
+
+// settle is how long the autopsy waits for the kernel's reports of the
+// moments before the freeze: they're queued at once.
+const settle = 300 * time.Millisecond
+
+// watchStores makes the flight recorder's real stores watched: a mark on
+// every folder their files are in (see fanwatch.Stores), so that a file
+// replaced by a new one is still covered. A folder that appears later (a new
+// browser profile) is marked at the next check, within 5 minutes; until then
+// its store doesn't count as watched.
+func (s *server) watchStores(stores []baits.Store) (why, gap map[string]string) {
+	why, gap = map[string]string{}, map[string]string{}
+	if s.stores == nil {
+		return why, gap
+	}
+	var dirs, files []string
+	for _, st := range stores {
+		dirs = append(dirs, st.Dirs()...)
+		for _, f := range st.Resolve() {
+			if _, bait := s.eng.IsBait(f); !bait {
+				files = append(files, f)
+			}
+		}
+	}
+	failed := s.stores.Sync(dirs, files)
+	prev := s.storeDirs
+	s.storeDirs = map[string]bool{}
+	for _, st := range stores {
+		for _, d := range st.Dirs() {
+			if err := failed[d]; err != nil {
+				if why[st.ID] == "" {
+					why[st.ID] = "ABA couldn't watch " + d + " (" + err.Error() + ")"
+				}
+				continue
+			}
+			s.storeDirs[d] = true
+			if prev != nil && !prev[d] && gap[st.ID] == "" {
+				gap[st.ID] = "a new folder of it appeared (" + d + "), which ABA only watches from its next check"
+			}
+		}
+	}
+	return why, gap
+}
+
+// onStoreOpen gets every open of a file in a real store's folder (the
+// recorder picks out which are the store's), for the flight recorder.
+func (s *server) onStoreOpen(o fanwatch.StoreOpen) {
+	store, ok := s.rec.Match(o.Path)
+	if !ok {
+		return // another file in the same folder (a browser's history, its cache index…)
+	}
+	op := recorder.Open{At: o.At, Path: o.Path, PID: o.PID}
+	if o.PID != 0 {
+		if st, err := procinfo.ReadStat(o.PID); err == nil {
+			op.PPID, op.Start = st.PPID, procinfo.StartFromTicks(st.StartTime)
+		}
+		op.Image, _ = procinfo.ImagePath(o.PID)
+	}
+	s.rec.NoteStore(store.ID, op)
 }
 
 // detectionHealth reports what Linux needs for bait opens to be noticed, and

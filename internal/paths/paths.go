@@ -32,6 +32,10 @@ func ConfigFile() string  { return filepath.Join(DataDir(), "config.json") }
 func StateFile() string   { return filepath.Join(DataDir(), "state.json") }
 func SecretsFile() string { return filepath.Join(DataDir(), "secrets.json") } // admin-only, and encrypted where the OS offers it
 func AlertsDir() string   { return filepath.Join(DataDir(), "alerts") }
+
+// EvidenceDir holds what the autopsy of a caught program saved (one folder
+// per alert): admin-only, like everything in the data folder but public/.
+func EvidenceDir() string { return filepath.Join(DataDir(), "evidence") }
 func LogFile() string     { return filepath.Join(DataDir(), "service.log") }
 func TestFile() string    { return filepath.Join(DataDir(), "pending-test.json") }
 

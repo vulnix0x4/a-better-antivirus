@@ -125,7 +125,8 @@ ABA catches infostealers by **what they do**, not by recognising the file, so it
                3. verify the code signature ────────┤ signed legit app? → unfreeze, just note it
                4. collect forensics while frozen ───┤ command line, parents, hash, connections
                5. block / kill / isolate ───────────┤ as configured
-               6. alert ────────────────────────────┘ desktop popup + toast + phone
+               6. alert ────────────────────────────┤ desktop popup + toast + phone
+               7. autopsy, still frozen ────────────┘ did it already take your real data?
 ```
 
 - **Instant freeze** (on by default, `aba instant on|off`): ABA holds an exclusive *opportunistic lock* on every bait so Windows tells it the moment one is opened. If the opener is suspicious, ABA freezes it right away — typically ~0.1 s after the open (72–151 ms in CI) — instead of waiting for the event log. To stay safe, it only acts on ordinary non-admin programs running as you (never system processes or ABA itself), and if it can't pinpoint the opener with certainty it doesn't guess.
@@ -183,10 +184,12 @@ aba learn        trust several of your own apps at once
 When something trips:
 
 ```
-aba trust <id>   it's yours: undo everything and stop alerting about it
-aba kill <id>    it's malware: end what the alert froze (it stays cut off)
-aba resume <id>  not sure: let it run again, without trusting it
-aba release      undo all responses: network back, everything unfrozen/unblocked
+aba trust <id>       it's yours: undo everything and stop alerting about it
+aba kill <id>        it's malware: end what the alert froze (it stays cut off; the evidence is kept)
+aba resume <id>      not sure: let it run again, without trusting it
+aba release          undo all responses: network back, everything unfrozen/unblocked
+aba autopsy <id>     did it take your real data? everything ABA found while it was frozen
+aba export-ioc <id>  write a file of what's safe to share about it (nothing is uploaded)
 ```
 
 Setup:
@@ -197,6 +200,7 @@ aba update       check for a new version and install it (--check to only look)
 aba bait list | show <id> | add <path or catalog id> | remove <id> | rename | catalog
 aba ignore list | add <pattern> [--signer X] | remove <n>
 aba instant [on|off]
+aba recorder [on|off]
 aba phone test
 aba uninstall [--purge]
 ```
@@ -219,6 +223,29 @@ Every alert asks whether that program should be reading that bait. One click on 
 When something is **frozen**, the popup asks "Kill it?" and reminds you that games, mods, cheats and cracks never need to read this, rather than asking "is it yours?" (you *did* start that cracked game yourself). Only signed programs can be trusted in one click; anything else is unfrozen that once (`aba trust <id>` in a terminal still trusts it, pinned to the file). A program that keeps touching a bait without you answering only pops up once every 12 hours, except script hosts and anything critical; the rest goes to `aba alerts`.
 
 **Learning mode** (Strict and custom setups, 3 days by default): critical threats are stopped from minute one, while merely suspicious programs only alert so you can mark your own apps before Strict starts freezing them. You get a notification when learning mode ends. `aba learn` lists everything that tripped so you can trust several at once.
+
+## After a catch: did it take your real data?
+
+A bait tells you a stealer is there. It doesn't tell you whether it had already been through your real browser, wallet or keys before it opened the bait, and that's the first thing you need to know. So ABA keeps a **flight recorder**: it quietly notes which program opens your real passwords, cookies, wallets, Telegram and Discord sessions, SSH and cloud keys (the real counterparts of the baits, in the places the baits already know). It keeps that in memory, never alerts on it, and only reads it after a catch.
+
+A moment after the alert, while the program is still frozen, ABA looks into it and adds one of three answers to the alert:
+
+- **It read these real things**, with when (relative to the bait) and what to do about each, now: sign out of every site in that browser, move the funds in that wallet, terminate the other Telegram sessions, replace those SSH keys. You get a second notification for this one.
+- **No sign it read anything real**, with what ABA was watching and since when. That's what ABA saw, not proof: it's never worded as "nothing was taken".
+- **ABA can't tell**, and why: the recorder was off, or started after the program did; something opened a store and ABA couldn't pin it on this program for certain; a store wasn't watched the whole time.
+
+It also lists the files the program has open, files that appeared where stealers stage what they collect while it ran (and the names inside an archive it made, each marked as a bait, a byte-for-byte copy of your real file, or merely named like one), and where it was sending: its open connections, and any Telegram bot, Discord webhook or web address in its memory and its program file. Only these generic shapes are looked for, never one stealer family's config.
+
+```
+aba autopsy <id>      everything found
+aba export-ioc <id>   a local file to share if you want: the program's fingerprint, the bot tokens,
+                      webhooks and addresses that are certainly the attacker's, a clipper's wallet.
+                      Nothing of yours, and nothing is uploaded.
+```
+
+Before anything can end the program, an **evidence folder** only administrators can read is saved: the findings, a copy of the program, copies of what it staged, and a copy of its memory. Those last two hold whatever it collected, which may be your own passwords and cookies; the folder says so, and `export-ioc` leaves them out. `aba kill` waits for it. All the evidence folders together are kept to 2 GB: when there's more, the oldest lose their big parts (the memory copy first) and keep their findings.
+
+How the recorder watches: on **Windows**, an audit rule on the folders those files are in, inherited only by the files directly in each folder and only for reading data (browsers replace some of these files all the time, and a rule on a file goes with it). A folder that logs more than 600 opens in an hour is let go of for a day, so the Security log keeps room for the baits. On **Linux**, fanotify marks on the same folders, reporting opens (nothing is held). On **macOS**, the eslogger stream the baits already use.
 
 ## Clipboard bait (optional, Windows)
 
@@ -251,6 +278,7 @@ So a swapped release file, a compromised mirror or a proxy can't get code onto y
 - **Desktop popups need you to be signed in.** Detections are always logged and phone alerts always go out, and responses happen either way.
 - **Some legit software reads files** (backup, sync, search tools). One click on *It's mine* handles that. A backup tool that copies your whole AppData looks like a sweep; allow it to read everything with `aba ignore add "<path>" --signer <publisher>` (or *It's mine* on the sweep alert, for signed programs).
 - **`~/.aws/credentials` is read by every AWS SDK** (OpenCode, Claude Code, VS Code, Terraform…), so a *signed* program reading it is only logged. Unsigned programs, script hosts and runtimes still trip it, and the other baits are unaffected.
+- **The autopsy can only say what ABA could see.** The flight recorder sees a program *open* a file, not what it read. It doesn't see a program that reads the disk underneath the file system, reads a shadow copy, or has your browser hand over its data (through its debugging port, or code injected into it): the opener is then the browser. It only knows the places in its catalog; data kept anywhere else isn't watched. It can't vouch for anything from before it started, or (on Windows and Linux) for a new browser profile folder until its next check, within 5 minutes. A program that had exited by the time ABA looked can't be tied to an open with certainty, and isn't. Connections a stealer had already closed aren't known, only the ones still open when it was frozen. On macOS, reading a frozen program's memory fails for programs built with Apple's hardened runtime (most stealers aren't).
 - **Low profile, not hidden.** The service and program folder are called "File Access Monitor" so they don't advertise themselves to malware that checks for honeypots, while Windows' Installed apps list and Start menu show it as **A Better Antivirus** so you can always find it.
 
 ## What gets changed on your PC
@@ -261,6 +289,8 @@ So a swapped release file, a compromised mirror or a proxy can't get code onto y
 | Service | `FileAccessMonitor` (LocalSystem, auto-start) | ✓ |
 | Data, alerts, logs | `C:\ProgramData\FileAccessMonitor` (admins only; a status summary in `public\`) | alerts kept unless `--purge` |
 | Audit policy | "Audit File System: Success" | ✓ restored to what it was |
+| Flight recorder | an audit rule (read data, files directly in the folder only) on the folders holding your real browser profiles, wallets and keys; listed in ABA's state | ✓ only that rule is removed |
+| Evidence | `C:\ProgramData\FileAccessMonitor\evidence` (admins only): one folder per caught program | kept unless `--purge` |
 | Baits | your folders + fake app folders | ✓ (files you made yourself are kept) |
 | Firewall filters | WFP provider "A Better Antivirus" (only while responding) | ✓ |
 | Installed apps & Start menu | **A Better Antivirus** entry in Windows' Installed apps and Start menu | ✓ |
@@ -276,7 +306,7 @@ Windows is where ABA started and where it's been used longest. Its core protecti
 
 Download **[ABA-macOS.pkg](https://github.com/vulnix0x4/a-better-antivirus/releases/latest/download/ABA-macOS.pkg)** (Apple silicon and Intel) and open it. It's signed and notarized by Apple, so it opens without a warning. Then switch on **Full Disk Access** for **File Access Monitor** in *System Settings → Privacy & Security → Full Disk Access*: without it, macOS doesn't tell ABA who opens a file.
 
-- **What works:** noticing a bait being opened through Apple's **`eslogger`**, a few milliseconds after the open, including reads through hard links and copies made through Finder, traced back to the script that asked Finder for them (Finder's copy helper is frozen with that script, and only then). Freezing with **`pid_suspend`**, which the program's own user can't undo. Closing a frozen program's connections, and in Strict mode cutting the whole Mac off with **`pf`** while ABA's phone alerts still get out. Judging programs by their **code signature** (Apple, Developer ID, App Store) and by what started them. Desktop popups, phone alerts, a **launchd** service, automatic updates, and `aba uninstall [--purge]`. If iCloud Drive syncs your Desktop and Documents, setup asks before planting decoys there, since they would show up on your other Apple devices.
+- **What works:** noticing a bait being opened through Apple's **`eslogger`**, a few milliseconds after the open, including reads through hard links and copies made through Finder, traced back to the script that asked Finder for them (Finder's copy helper is frozen with that script, and only then). Freezing with **`pid_suspend`**, which the program's own user can't undo. The flight recorder and the autopsy (what a caught program had already opened, staged and was sending to, from its memory too). Closing a frozen program's connections, and in Strict mode cutting the whole Mac off with **`pf`** while ABA's phone alerts still get out. Judging programs by their **code signature** (Apple, Developer ID, App Store) and by what started them. Desktop popups, phone alerts, a **launchd** service, automatic updates, and `aba uninstall [--purge]`. If iCloud Drive syncs your Desktop and Documents, setup asks before planting decoys there, since they would show up on your other Apple devices.
 - **Not there yet:** pausing the opener inside its open, before it reads (that needs an Endpoint Security entitlement from Apple, requested), cutting just one program's internet (needs a Network Extension entitlement), and the injected-code check. Secrets are kept in a file only root can read, not in the system keychain.
 
 ### Linux (with systemd)
@@ -287,7 +317,7 @@ curl -fsSL https://raw.githubusercontent.com/vulnix0x4/a-better-antivirus/main/i
 
 The script downloads the latest release for your machine, checks that its checksum list carries a valid signature from ABA's release key, checks the download against it, and runs the setup ([read it first](install.sh)). There are also `.deb`, `.rpm` and tarball files on [Releases](https://github.com/vulnix0x4/a-better-antivirus/releases/latest), for amd64 and arm64: install one, then run `sudo aba install`.
 
-- **What works:** the kernel (**fanotify**) stops a program inside its `open()` of a bait until ABA has judged it, so a stealer is frozen before it reads a byte; hard links and renamed copies are recognised. Freezing in a **cgroup v2** group only root controls, so the program's user can't thaw it. Cutting a frozen program off the internet, and in Strict mode isolating the machine, with **nftables** (ABA's phone alerts still get out). Linux has no code signatures, so ABA goes by **who installed the program** (a package: `dpkg`, `rpm`, `pacman`, `apk`, snap or system flatpak, in folders only root can write) and **what started it**: `cat` typed in your terminal is a warning, the same `cat` run by a script from a download is a stealer. Desktop popups with the same choices as on Windows, a deleted or replaced bait put back within a second (naming who did it), trust for a scheduled backup pinned to its exact command, a fake profile inside your real Firefox and Chromium-based browsers, a **systemd** service, automatic updates, and `aba uninstall [--purge]`.
+- **What works:** the kernel (**fanotify**) stops a program inside its `open()` of a bait until ABA has judged it, so a stealer is frozen before it reads a byte; hard links and renamed copies are recognised. Freezing in a **cgroup v2** group only root controls, so the program's user can't thaw it. Cutting a frozen program off the internet, and in Strict mode isolating the machine, with **nftables** (ABA's phone alerts still get out). Linux has no code signatures, so ABA goes by **who installed the program** (a package: `dpkg`, `rpm`, `pacman`, `apk`, snap or system flatpak, in folders only root can write) and **what started it**: `cat` typed in your terminal is a warning, the same `cat` run by a script from a download is a stealer. Desktop popups with the same choices as on Windows, a deleted or replaced bait put back within a second (naming who did it), trust for a scheduled backup pinned to its exact command, a fake profile inside your real Firefox and Chromium-based browsers, a **systemd** service, automatic updates, and `aba uninstall [--purge]`. The flight recorder and the autopsy, as on Windows, with fanotify folder marks.
 - **Not there yet:** secrets are kept in a file only root can read, not encrypted with a machine key; without nftables (iptables-only systems) ABA still freezes, but can't cut the internet, and says so.
 
 ## Building

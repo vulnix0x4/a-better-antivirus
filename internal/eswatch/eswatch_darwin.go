@@ -85,16 +85,22 @@ type Exec struct {
 	Stdin string // the terminal its input comes from, "" if a pipe or nothing
 }
 
-// Watcher follows eslogger. Set OnEvent (and OnExec) before Run.
+// Watcher follows eslogger. Set OnEvent (and OnExec, OnStoreOpen) before Run.
 type Watcher struct {
 	OnEvent func(Event)
 	OnExec  func(Exec)
-	Logf    func(format string, a ...any)
+	// OnStoreOpen gets every read of a file under one of the store prefixes
+	// (see SyncStores): the flight recorder's feed. It's never an alert.
+	OnStoreOpen func(Event)
+	Logf        func(format string, a ...any)
 
 	mu      sync.Mutex
 	files   []string
 	aliases map[string][2]string // another name for a bait (a hard link), in lower case -> as written, the bait
 	needles [][]byte
+	baitM   *matcher
+	stores  [][]byte // the real stores' path prefixes, as needles (see SyncStores)
+	storeM  *matcher
 	cmd     *exec.Cmd
 	running bool
 	since   time.Time
@@ -102,7 +108,7 @@ type Watcher struct {
 	closed  bool
 	wake    chan struct{}
 
-	Lines, Bytes, Matched atomic.Uint64
+	Lines, Bytes, Matched, StoreLines atomic.Uint64
 }
 
 func New() *Watcher { return &Watcher{wake: make(chan struct{}, 1)} }
@@ -120,6 +126,17 @@ func (w *Watcher) Sync(files []string) {
 	w.mu.Lock()
 	w.files = append([]string(nil), files...)
 	w.rebuild()
+	w.mu.Unlock()
+}
+
+// SyncStores sets the path prefixes of the real stores the flight recorder
+// watches (baits.Store.Prefixes). A line that mentions one is read as JSON
+// and every read in it handed to OnStoreOpen: which of them are really a
+// store's files is for the recorder to say.
+func (w *Watcher) SyncStores(prefixes []string) {
+	n := needles(prefixes)
+	w.mu.Lock()
+	w.stores, w.storeM = n, newMatcher(n)
 	w.mu.Unlock()
 }
 
@@ -149,6 +166,7 @@ func (w *Watcher) rebuild() {
 		all = append(all, a[0])
 	}
 	w.needles = needlesFold(all)
+	w.baitM = newMatcher(w.needles)
 }
 
 // bait says which bait path is, by its own name or another one.
@@ -365,10 +383,12 @@ func (w *Watcher) read(out io.Reader) {
 func (w *Watcher) line(line []byte) {
 	got := time.Now()
 	w.mu.Lock()
-	ns := w.needles
+	bm, sm, ss := w.baitM, w.storeM, w.stores
 	w.mu.Unlock()
 	isExec := matchAny(line, execMarks)
-	if !isExec && !matchAny(line, ns) {
+	isBait := !isExec && bm.match(line)
+	isStore := !isExec && w.OnStoreOpen != nil && sm.match(line)
+	if !isExec && !isBait && !isStore {
 		return
 	}
 	var e rawEvent
@@ -383,6 +403,17 @@ func (w *Watcher) line(line []byte) {
 	}
 	if e.Process.AuditToken.Pid == self {
 		return // ABA's own service planting and checking baits
+	}
+	if isStore {
+		w.StoreLines.Add(1)
+		for _, ev := range e.touches(got, w.storeOf(ss), nil) {
+			if ev.Op == Read {
+				w.OnStoreOpen(ev)
+			}
+		}
+	}
+	if !isBait {
+		return
 	}
 	for _, ev := range e.touches(got, w.bait, w.DropAlias) {
 		w.Matched.Add(1)
@@ -465,6 +496,21 @@ func (e *rawEvent) exec() (Exec, bool) {
 	return out, true
 }
 
+// storeOf is touches' matcher for the real stores: a path under one of the
+// prefixes (the recorder says which store, if any, it belongs to).
+func (w *Watcher) storeOf(ss [][]byte) func(string) (string, string, bool) {
+	return func(p string) (string, string, bool) {
+		q, _ := json.Marshal(p)
+		q = q[1 : len(q)-1]
+		for _, n := range ss {
+			if bytes.HasPrefix(q, n) {
+				return p, "", true
+			}
+		}
+		return "", "", false
+	}
+}
+
 // touches lists the baits this event is about.
 func (e *rawEvent) touches(got time.Time, baitOf func(string) (string, string, bool), dropAlias func(string)) []Event {
 	at, err := time.Parse(time.RFC3339Nano, e.Time)
@@ -481,7 +527,7 @@ func (e *rawEvent) touches(got time.Time, baitOf func(string) (string, string, b
 		if !ok {
 			return
 		}
-		if via != "" && op == Delete {
+		if via != "" && op == Delete && dropAlias != nil {
 			// Removing (or renaming) the second name a bait was given leaves
 			// the bait where it was: nothing to report, and nothing more to
 			// watch under that name.
@@ -592,6 +638,63 @@ func needles(paths []string) [][]byte {
 		}
 	}
 	return n
+}
+
+// matcher finds any of a set of needles in a line in about one pass, not
+// one per needle: needles are grouped by their first bytes (bait and store
+// paths nearly all start with the home folder), each group's first bytes
+// are searched for once, and only where they occur are the needles compared.
+type matcher struct {
+	groups []group
+}
+
+type group struct {
+	anchor []byte
+	rest   [][]byte // each needle, past the anchor
+}
+
+const anchorLen = 10
+
+func newMatcher(ns [][]byte) *matcher {
+	m := &matcher{}
+	idx := map[string]int{}
+	for _, n := range ns {
+		k := len(n)
+		if k > anchorLen {
+			k = anchorLen
+		}
+		a := string(n[:k])
+		i, ok := idx[a]
+		if !ok {
+			i = len(m.groups)
+			idx[a] = i
+			m.groups = append(m.groups, group{anchor: []byte(a)})
+		}
+		m.groups[i].rest = append(m.groups[i].rest, n[k:])
+	}
+	return m
+}
+
+func (m *matcher) match(line []byte) bool {
+	if m == nil {
+		return false
+	}
+	for _, g := range m.groups {
+		for off := 0; off < len(line); {
+			i := bytes.Index(line[off:], g.anchor)
+			if i < 0 {
+				break
+			}
+			at := off + i + len(g.anchor)
+			for _, r := range g.rest {
+				if bytes.HasPrefix(line[at:], r) {
+					return true
+				}
+			}
+			off += i + 1
+		}
+	}
+	return false
 }
 
 func matchAny(line []byte, ns [][]byte) bool {
