@@ -36,6 +36,12 @@ const (
 	KindClipper       = "clipper" // a program swapped the wallet address ABA put on the clipboard
 )
 
+// StatusNoted is the status of an alert ABA noted quietly: a read by a program
+// that looks legitimate, about which nothing was done. It's in the history,
+// but no popup or phone alert went out and nothing waits for an answer.
+// ("open" waits for one; "resolved" got one.)
+const StatusNoted = "noted"
+
 type BaitHit struct {
 	ID     string    `json:"id"`
 	Name   string    `json:"name"`

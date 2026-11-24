@@ -33,6 +33,12 @@ cookies or keys?
 - **A browser's fake-profile read no longer counts toward a sweep split over several programs.** Your own
   browser reading a bait once could be frozen as the "last member" of a stealer's team; and the autopsy no
   longer counts a genuine browser's opens of its own data as taken.
+- **A read by a program that looks legitimate no longer interrupts you.** Edge, for one, opens the password
+  list on your Desktop after every start; ABA rated that "looks legitimate" and still popped up a question,
+  again every 12 hours. Such reads (signed, installed software, nothing done about them) are now noted quietly:
+  in `aba alerts`, where you can trust them, but no popup, nothing waiting for an answer, and on the phone only
+  if you asked for every alert there. If the same program goes on to change or delete a bait, or turns out to
+  be part of a sweep, you hear about it as before.
 - **After you resume or release an alert, the same program going for a bait again is a new alert** with a new
   response; it used to be added quietly to the old one for two minutes.
 - **`aba alerts show`** prints when each bait was touched in local time, like the rest of the alert.

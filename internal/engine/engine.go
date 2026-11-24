@@ -168,6 +168,34 @@ type incident struct {
 	// wrecked: it had already gone to overwrite documents in several
 	// folders when this alert was made, so that's been judged.
 	wrecked bool
+	// quiet: the alert was noted quietly (see quietly); if what the program
+	// goes on to do changes that, you're told then.
+	quiet bool
+}
+
+// quietly reports whether alert a (verdict v) is only noted, with no popup
+// and no phone alert: a read by a program ABA rates as looking legitimate
+// (info), about which nothing was done. Never a test, a decoy being retired,
+// a browser going through its fake profile, a sweep, or a trick; and never
+// anything that read, wrote or deleted more than that. It's still saved, in
+// the history and counted by the sweep rules, but waits for no answer.
+func quietly(a *alerts.Alert, v classify.Verdict) bool {
+	return !a.Test && a.Kind == alerts.KindRead && v.Tier == config.TierInfo && len(a.Actions) == 0 &&
+		!v.DecoyOwner && !v.Host && !v.Evasion && len(v.Swept) == 0 && !v.Ignored
+}
+
+// tell notifies you about a (desktop, and phone from your minimum tier on).
+func (e *Engine) tell(a *alerts.Alert) {
+	e.Ops.NotifyDesktop(a)
+	e.mu.Lock()
+	min := config.TierWarn
+	if e.cfg != nil {
+		min = e.cfg.PhoneMinTier
+	}
+	e.mu.Unlock()
+	if a.Test || a.Tier.Rank() >= min.Rank() {
+		e.Ops.NotifyPhone(a)
+	}
 }
 
 // aggregation window: further bait hits by the same process join one alert.
@@ -594,7 +622,8 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 		e.mu.Unlock()
 	}
 	var swept []string
-	if (access == "read" || access == "write") && !e.hostRead(oa, baitID) {
+	hostOpen := e.hostRead(oa, baitID)
+	if (access == "read" || access == "write") && !hostOpen {
 		swept = e.touch(oa.PID, baitID, time.Now())
 		if len(swept) >= sweepApps && !e.sweepable(oa.PID) {
 			swept = nil
@@ -636,9 +665,10 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	if access == "swap" {
 		hit.Name, hit.Path = clipboardBaitName, "the clipboard"
 	}
-	if inc := e.incidents[oa.PID]; !instant && inc != nil && len(swept) >= sweepApps && inc.alert.Tier != config.TierCritical {
-		// It started out looking harmless and has now read several apps' data:
-		// handle it again as a sweep, with the full response.
+	if inc := e.incidents[oa.PID]; !instant && inc != nil && len(swept) >= sweepApps && (inc.alert.Tier != config.TierCritical || inc.alert.Verdict.KeepRunning) {
+		// It started out looking harmless (or as the browser you're using,
+		// left running) and has now read several apps' data: handle it again
+		// as a sweep, with the full response.
 		delete(e.incidents, oa.PID)
 	}
 	if inc := e.incidents[oa.PID]; !instant && inc != nil && len(wrecked) >= wreckFolders && !inc.wrecked &&
@@ -651,6 +681,13 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	}
 	if inc := e.incidents[oa.PID]; access == "swap" && inc != nil && inc.alert.Tier != config.TierCritical {
 		delete(e.incidents, oa.PID) // same: now it's a caught clipper
+	}
+	if inc := e.incidents[oa.PID]; !instant && inc != nil && ((inc.quiet && access != "read") || (inc.alert.Tier != config.TierCritical && hostOpen && !inc.alert.Verdict.Host)) {
+		// Same: noted quietly as a read, and now it goes to change or delete
+		// a bait; or now it's the genuine browser going through its fake
+		// profile, which the host policy judges (see host.go). Neither is a
+		// line to add to a quiet or harmless-looking alert.
+		delete(e.incidents, oa.PID)
 	}
 	// Aggregate repeat hits into the open alert, except for instant catches: a
 	// new freeze always gets its own alert and its own record in state (the
@@ -1145,6 +1182,10 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 		}
 	}
 
+	quiet := quietly(a, v)
+	if quiet {
+		a.Status = alerts.StatusNoted
+	}
 	e.Ops.UpdateState(func(st *config.State) error {
 		for _, p := range frozen {
 			ct := e.Ops.CreateTime(p)
@@ -1196,7 +1237,7 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	}
 	e.mu.Lock()
 	for p, ct := range members {
-		e.incidents[p] = &incident{alert: a, createTime: ct, last: time.Now(), wrecked: isWreck}
+		e.incidents[p] = &incident{alert: a, createTime: ct, last: time.Now(), wrecked: isWreck, quiet: quiet}
 	}
 	for pid, inc := range e.incidents {
 		if time.Since(inc.last) > window {
@@ -1213,9 +1254,33 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 		}
 		delete(e.later, p)
 	}
+	loud := false // a quiet read that turned out to be more meanwhile
+	if quiet && after != nil && after.Kind != alerts.KindRead {
+		loud, a.Status, after.Status = true, "open", "open"
+		for _, inc := range e.incidents {
+			if inc.alert == a {
+				inc.quiet = false
+			}
+		}
+	}
 	e.mu.Unlock()
 	if after != nil {
 		e.Ops.SaveAlert(after)
+	}
+	if loud {
+		e.tell(after)
+		return
+	}
+	if quiet {
+		// It's in the history (`aba alerts`), where it can be trusted from;
+		// nobody is interrupted for a program that looks legitimate. (Only
+		// someone who asked for every alert on their phone, "Everything" in
+		// setup, still gets it there.)
+		e.Ops.Logf("alert %s: %s read %s, which looks legitimate: noted quietly, no popup", a.ID, image, baitID)
+		if cfg.PhoneMinTier == config.TierInfo {
+			e.Ops.NotifyPhone(a)
+		}
+		return
 	}
 
 	// Script hosts and runtimes are never quieted: the next script could be a
@@ -1318,9 +1383,23 @@ func (e *Engine) noteAfter(oa *detect.Access) {
 		return
 	}
 	cp, changed := e.did(inc.alert, hit)
+	loud := false
+	if changed && inc.quiet && cp.Kind != alerts.KindRead {
+		// Noted quietly as a read; it went on to overwrite or delete the
+		// bait: that you hear about.
+		loud, inc.alert.Status, cp.Status = true, "open", "open"
+		for _, x := range e.incidents {
+			if x.alert == inc.alert {
+				x.quiet = false
+			}
+		}
+	}
 	e.mu.Unlock()
 	if changed {
 		e.Ops.SaveAlert(cp)
+	}
+	if loud {
+		e.tell(cp)
 	}
 }
 

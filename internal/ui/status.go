@@ -271,11 +271,14 @@ func AlertTable(list []*alerts.Alert, w int) string {
 			}
 		}
 		status := ""
-		if a.Status == "resolved" {
+		switch a.Status {
+		case "resolved":
 			status = Good.Render("✓ " + a.Note)
 			if a.Note == "" {
 				status = Good.Render("✓ resolved")
 			}
+		case alerts.StatusNoted:
+			status = Fainter.Render("noted quietly: looks legitimate")
 		}
 		tier := lipgloss.NewStyle().Width(12).Render(TierDot(a.Tier) + " " + TierWord(a.Tier))
 		who := lipgloss.NewStyle().Width(whoW).Render(Plain.Render(Truncate(a.ExeName(), whoW)))
@@ -460,6 +463,9 @@ func AlertDetail(a *alerts.Alert) string {
 			}
 			b.WriteString("  " + Good.Render(fmt.Sprintf("%d ms", a.LatencyMS)) + Dim.Render(" "+when) + "\n")
 		}
+	}
+	if a.Status == alerts.StatusNoted {
+		b.WriteString("\n" + Dim.Render("Noted quietly: it looks legitimate, so ABA didn't interrupt you about it. Nothing waits for an answer; if it's yours, trusting it keeps it out of the history too.") + "\n")
 	}
 	if a.Status == "resolved" {
 		b.WriteString("\n" + Good.Render(IconOK+" Resolved: "+a.Note) + "\n")
