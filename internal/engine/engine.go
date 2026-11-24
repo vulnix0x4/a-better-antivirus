@@ -150,6 +150,9 @@ type incident struct {
 	alert      *alerts.Alert
 	createTime int64
 	last       time.Time
+	// wrecked: it had already gone to overwrite documents in several
+	// folders when this alert was made, so that's been judged.
+	wrecked bool
 }
 
 // aggregation window: further bait hits by the same process join one alert.
@@ -558,8 +561,11 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 		// handle it again as a sweep, with the full response.
 		delete(e.incidents, oa.PID)
 	}
-	if inc := e.incidents[oa.PID]; !instant && inc != nil && len(wrecked) >= wreckFolders && inc.alert.Tier != config.TierCritical {
-		delete(e.incidents, oa.PID) // same: now it's rewriting folder after folder
+	if inc := e.incidents[oa.PID]; !instant && inc != nil && len(wrecked) >= wreckFolders && !inc.wrecked && inc.alert.Tier != config.TierCritical {
+		// Same: now it's rewriting folder after folder. (Judged once: a
+		// program that's exempt, like OneDrive, isn't alerted about anew for
+		// every file after that.)
+		delete(e.incidents, oa.PID)
 	}
 	if inc := e.incidents[oa.PID]; access == "swap" && inc != nil && inc.alert.Tier != config.TierCritical {
 		delete(e.incidents, oa.PID) // same: now it's a caught clipper
@@ -939,7 +945,7 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	}
 
 	e.mu.Lock()
-	e.incidents[oa.PID] = &incident{alert: a, createTime: createTime, last: time.Now()}
+	e.incidents[oa.PID] = &incident{alert: a, createTime: createTime, last: time.Now(), wrecked: isWreck}
 	for pid, inc := range e.incidents {
 		if time.Since(inc.last) > window {
 			delete(e.incidents, pid)

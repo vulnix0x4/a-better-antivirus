@@ -533,10 +533,15 @@ func TestRewritingFolderAfterFolderIsRansomware(t *testing.T) {
 	f.sigs[od] = provenance.Result{Signed: true, Valid: true, Signer: "Microsoft Corporation"}
 	e.HandleAccess(ev(1603, od, desktopBait, 0x2))
 	e.HandleAccess(ev(1603, od, docs, 0x2))
+	// (It lives in a folder anyone can write to, so it's held for the moment
+	// its signature takes to check, like any reader from there, and let go.)
 	for _, a := range f.saved {
-		if a.Tier == config.TierCritical || len(f.suspended) != 0 {
+		if a.Tier == config.TierCritical || a.Did(config.ActionFreeze) {
 			t.Fatalf("OneDrive writing in two folders: %+v", a)
 		}
+	}
+	if len(f.resumed) != 2*len(f.suspended) { // the fake freezes two processes a time
+		t.Fatalf("OneDrive left frozen: suspended %v, resumed %v", f.suspended, f.resumed)
 	}
 
 	// An app's own data doesn't count: only your documents do.
