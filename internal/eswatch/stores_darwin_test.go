@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	chromeOpen = `{"process":{"audit_token":{"euid":501,"pid":4242},"ppid":4200,"start_time":"2026-11-23T14:00:00.000001Z","executable":{"path":"/private/tmp/x/stealer"}},"event_type":10,"time":"2026-11-23T14:00:02.5Z","event":{"open":{"fflag":1,"file":{"path":"/Users/a/Library/Application Support/Google/Chrome/Default/Login Data"}}}}`
+	chromeOpen  = `{"process":{"audit_token":{"euid":501,"pid":4242},"ppid":4200,"start_time":"2026-11-23T14:00:00.000001Z","executable":{"path":"/private/tmp/x/stealer"}},"event_type":10,"time":"2026-11-23T14:00:02.5Z","event":{"open":{"fflag":1,"file":{"path":"/Users/a/Library/Application Support/Google/Chrome/Default/Login Data"}}}}`
 	chromeWrite = `{"process":{"audit_token":{"euid":501,"pid":77},"executable":{"path":"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"}},"event_type":10,"time":"2026-11-23T14:00:02Z","event":{"open":{"fflag":2,"file":{"path":"/Users/a/Library/Application Support/Google/Chrome/Default/Login Data"}}}}`
 	otherOpen   = `{"process":{"audit_token":{"euid":501,"pid":88},"executable":{"path":"/usr/bin/vim"}},"event_type":10,"time":"2026-11-23T14:00:02Z","event":{"open":{"fflag":1,"file":{"path":"/Users/a/notes.txt"}}}}`
 )
