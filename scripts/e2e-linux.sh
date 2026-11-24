@@ -256,7 +256,10 @@ timeout 60 sudo systemd-run --quiet --wait --collect --uid "$MY_UID" --gid "$MY_
 a=$(wait_alert '((.process.image // "") | test("/git$")) and .kind == "read"') || fail "no record of git reading the bait"
 [ "$(field "$a" .tier)" = info ] || fail "git reading a bait is $(field "$a" .tier), want info: $(field "$a" '.verdict.reasons | tostring')"
 [ "$(field "$a" '.actions | length')" = 0 ] || fail "ABA acted on git: $(field "$a" '.actions | tostring')"
-ok "git (package-owned) read the bait: noted, not touched ($(field "$a" '.verdict.reasons | join("; ")'))"
+# Noted quietly: in the history, no popup, nothing waiting for an answer.
+[ "$(field "$a" .status)" = noted ] || fail "git's read should be noted quietly, it's $(field "$a" .status)"
+sudo grep -q "$(field "$a" .id): .*noted quietly" "$DATA/service.log" || fail "the service didn't say it noted git's read quietly: $(sudo grep "$(field "$a" .id)" "$DATA/service.log" | tail -3)"
+ok "git (package-owned) read the bait: noted quietly, not touched ($(field "$a" '.verdict.reasons | join("; ")'))"
 # A file tool with nothing suspicious behind it: a warning, not a freeze.
 timeout 60 sudo systemd-run --quiet --wait --collect --uid "$MY_UID" --gid "$MY_GID" /usr/bin/cat "$PASSWORDS" > /dev/null 2>&1 || fail "cat couldn't read the bait"
 a=$(wait_alert '((.process.image // "") | test("/cat$")) and .tier == "warn"') || fail "no warning for cat reading the bait"

@@ -638,6 +638,13 @@ func TestTheBrowserYoureUsingAndASweep(t *testing.T) {
 	f.visible[3000] = true
 	e.HandleAccess(ev(3000, edgeExe, desktopBait, 1))
 	e.HandleAccess(ev(3000, edgeExe, edgeBait, 1))
+	kept := false
+	for _, a := range f.saved {
+		kept = kept || (a.Verdict.KeepRunning && a.Process.PID == 3000 && a.Did(config.ActionBlockProgram))
+	}
+	if !kept {
+		t.Fatal("its fake profile read after a quiet read of the password list must still be judged by the host policy (left running, cut off)")
+	}
 	e.HandleAccess(ev(3000, edgeExe, discordBait, 1))
 	if hasP(f.suspended, 3000) {
 		t.Fatalf("your Edge frozen for the password list, its fake profile and one more app: %v", f.suspended)
