@@ -36,6 +36,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/alerts"
+	"github.com/vulnix0x4/a-better-antivirus/internal/baits"
 	"github.com/vulnix0x4/a-better-antivirus/internal/classify"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/detect"
@@ -44,6 +45,7 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
 	"github.com/vulnix0x4/a-better-antivirus/internal/provenance"
+	"github.com/vulnix0x4/a-better-antivirus/internal/recorder"
 	"github.com/vulnix0x4/a-better-antivirus/internal/svcctl"
 )
 
@@ -132,7 +134,7 @@ func (s *server) prepare() {
 	// Whatever the service writes (its log, the alerts) is root's alone.
 	unix.Umask(0o077)
 	w := eswatch.New()
-	w.OnEvent, w.OnExec, w.Logf = s.onEvent, s.onExec, s.log.Printf
+	w.OnEvent, w.OnExec, w.OnStoreOpen, w.Logf = s.onEvent, s.onExec, s.onStoreOpen, s.log.Printf
 	s.es = w
 	if f, err := eswatch.FollowFinder(); err != nil {
 		s.log.Printf("following Finder's log: %v; copies Finder makes for a script are put down to Finder's helper", err)
@@ -193,7 +195,7 @@ func (s *server) startWatching(ctx context.Context) {
 	go s.es.Run()
 	go func() {
 		was, told := false, false
-		var blind time.Time
+		var blind, down time.Time
 		for i := 0; ; i++ {
 			running, since, err := s.es.Status()
 			now := running && time.Since(since) > time.Second
@@ -202,8 +204,14 @@ func (s *server) startWatching(ctx context.Context) {
 					s.log.Printf("watching baits with eslogger")
 					os.WriteFile(svcctl.WatchingFile(), []byte(strconv.Itoa(os.Getpid())), 0o644)
 					s.once1.Do(func() { close(s.listening) })
+					if !down.IsZero() {
+						// The flight recorder was blind meanwhile.
+						s.rec.Lost(down, time.Now(), "eslogger had stopped, and was started again")
+						down = time.Time{}
+					}
 				} else {
 					os.Remove(svcctl.WatchingFile())
+					down = time.Now()
 				}
 				was = now
 			}
@@ -284,6 +292,39 @@ func remember(p eswatch.Process, x *eswatch.Exec) {
 	}
 	procinfo.Remember(r)
 	provenance.Note(p.Image, p.CSFlags, p.Platform)
+}
+
+// settle is how long the autopsy waits for eslogger's reports of the
+// moments before the freeze: they come in within milliseconds.
+const settle = 300 * time.Millisecond
+
+// watchStores makes the flight recorder's real stores watched: eslogger
+// reports every open anyway, so it's only a matter of telling the watcher
+// which paths to pick out. A store's new profile folder is covered from the
+// moment it exists.
+func (s *server) watchStores(stores []baits.Store) (why, gap map[string]string) {
+	why = map[string]string{}
+	var prefixes []string
+	for _, st := range stores {
+		prefixes = append(prefixes, st.Prefixes()...)
+	}
+	s.es.SyncStores(prefixes)
+	if running, since, err := s.es.Status(); !running || time.Since(since) < time.Second {
+		w := "eslogger isn't running"
+		if err != nil {
+			w += ": " + err.Error()
+		}
+		for _, st := range stores {
+			why[st.ID] = w
+		}
+	}
+	return why, nil
+}
+
+// onStoreOpen gets every read of a real store's file (or of a file next to
+// one: the recorder picks out which), for the flight recorder.
+func (s *server) onStoreOpen(ev eswatch.Event) {
+	s.rec.Note(recorder.Open{At: ev.At, Path: ev.Path, PID: ev.Proc.PID, PPID: ev.Proc.PPID, Start: ev.Proc.Started, Image: ev.Proc.Image})
 }
 
 // onExec gets every program started.

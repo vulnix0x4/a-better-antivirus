@@ -201,6 +201,15 @@ type Config struct {
 	// while nobody is using the PC, to catch clippers (package clipbait).
 	// Off unless switched on: it touches the clipboard.
 	ClipboardBait bool `json:"clipboardBait,omitempty"`
+
+	// NoRecorder switches the flight recorder off (package recorder): ABA
+	// then doesn't note who opens your real passwords, cookies and keys, and
+	// after a catch can't say whether the program had been at them. On
+	// unless switched off.
+	NoRecorder bool `json:"noRecorder,omitempty"`
+	// NoMemoryImage leaves the copy of a caught program's memory out of its
+	// evidence folder (see package autopsy). It's taken unless switched off.
+	NoMemoryImage bool `json:"noMemoryImage,omitempty"`
 }
 
 // CurrentConfigVersion 2 added AutoUpdate. Configs written by v1 have no
