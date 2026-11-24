@@ -243,7 +243,7 @@ aba export-ioc <id>   a local file to share if you want: the program's fingerpri
                       Nothing of yours, and nothing is uploaded.
 ```
 
-Before anything can end the program, an **evidence folder** only administrators can read is saved: the findings, a copy of the program, copies of what it staged, and a copy of its memory. Those last two hold whatever it collected, which may be your own passwords and cookies; the folder says so, and `export-ioc` leaves them out. `aba kill` waits for it.
+Before anything can end the program, an **evidence folder** only administrators can read is saved: the findings, a copy of the program, copies of what it staged, and a copy of its memory. Those last two hold whatever it collected, which may be your own passwords and cookies; the folder says so, and `export-ioc` leaves them out. `aba kill` waits for it. All the evidence folders together are kept to 2 GB: when there's more, the oldest lose their big parts (the memory copy first) and keep their findings.
 
 How the recorder watches: on **Windows**, an audit rule on the folders those files are in, inherited only by the files directly in each folder and only for reading data (browsers replace some of these files all the time, and a rule on a file goes with it). A folder that logs more than 600 opens in an hour is let go of for a day, so the Security log keeps room for the baits. On **Linux**, fanotify marks on the same folders, reporting opens (nothing is held). On **macOS**, the eslogger stream the baits already use.
 

@@ -14,7 +14,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/alerts"
 )
@@ -142,10 +144,78 @@ func saveEvidence(c Case, h Hooks, a *alerts.Autopsy, img *memImage, staged []*a
 			copied += st.Size
 		}
 	}
+	for _, gone := range pruneEvidence(h.EvidenceDir, dir, evidenceTotalMax, time.Now()) {
+		h.logf("evidence: removed %s to make room for newer evidence", gone)
+	}
 	if len(errs) > 0 {
 		return fmt.Errorf("%s", strings.Join(errs, "; "))
 	}
 	return nil
+}
+
+// evidenceTotalMax is how much disk all the evidence folders together may
+// take. A program caught again and again (a false alarm nobody has answered
+// yet) would otherwise fill the disk, half a gigabyte of memory at a time.
+const evidenceTotalMax = 2 << 30
+
+// pruneEvidence keeps the evidence folders under root within max bytes in
+// all. The oldest give way first, and only their big parts: the copy of the
+// memory, then the staged files, then the copy of the program. What the
+// autopsy found (autopsy.json) is always kept, and so is all of keep, the
+// folder just written. It returns what it removed.
+func pruneEvidence(root, keep string, max int64, now time.Time) (removed []string) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	// A folder is named after its alert, and an alert's ID starts with its
+	// date and time: by name is oldest first.
+	var folders []string
+	var total int64
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		p := filepath.Join(root, e.Name())
+		total += dirSize(p)
+		if p != keep {
+			folders = append(folders, p)
+		}
+	}
+	sort.Strings(folders)
+	for _, part := range []string{"memory", "staged", "program"} {
+		for _, f := range folders {
+			if total <= max {
+				return removed
+			}
+			sub := filepath.Join(f, part)
+			n := dirSize(sub)
+			if n == 0 || os.RemoveAll(sub) != nil {
+				continue
+			}
+			total -= n
+			removed = append(removed, sub)
+			note, err := os.OpenFile(filepath.Join(f, "removed.txt"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+			if err == nil {
+				fmt.Fprintf(note, "%s: ABA removed %s/ from this folder to make room for newer evidence.\n", now.Format("2006-01-02 15:04"), part)
+				note.Close()
+			}
+		}
+	}
+	return removed
+}
+
+// dirSize is how many bytes the files under dir take (0 if there's no dir).
+func dirSize(dir string) (n int64) {
+	filepath.WalkDir(dir, func(_ string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			if fi, err := d.Info(); err == nil {
+				n += fi.Size()
+			}
+		}
+		return nil
+	})
+	return n
 }
 
 // copyCapped copies src to dst (at most max bytes), readable by its owner only.
