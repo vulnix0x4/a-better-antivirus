@@ -26,6 +26,7 @@ import (
 const (
 	KindRead          = "read"           // a bait was read
 	KindDelete        = "delete"         // a bait was deleted or renamed
+	KindWrite         = "write"          // a bait was opened to be changed (overwritten), not read
 	KindBaitMissing   = "bait-missing"   // a bait vanished without a delete event
 	KindAuditRemoved  = "audit-removed"  // a bait's audit rule was stripped
 	KindAuditDisabled = "audit-disabled" // file auditing was switched off system-wide

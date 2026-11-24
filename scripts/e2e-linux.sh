@@ -470,13 +470,22 @@ if [ -n "$FIREFOX" ]; then
   check "nothing else was alerted about meanwhile" test "$(alerts | jq length)" = "$count"
 fi
 
-say "A bait that disappears is put back at once, and whoever did it is named"
-pid=$(launch deleter "$HOME/Downloads/other-game" -delete -out "$OUT/del" "$PASSWORDS") || fail "couldn't start the deleter"
+say "A bait that disappears is put back at once, and the untrusted program that deleted it is stopped"
+# A program of its own for this: one that would be stopped for reading a bait
+# is stopped for destroying it too (a wiper, or ransomware that deletes what
+# it has encrypted a copy of), and its file is then cut off from the network.
+cp "$GRABBER" "$HOME/Downloads/wiper"; echo "a wiper's fingerprint" >> "$HOME/Downloads/wiper"; chmod 755 "$HOME/Downloads/wiper"
+pid=$(launch deleter "$HOME/Downloads/wiper" -delete -out "$OUT/del" "$PASSWORDS") || fail "couldn't start the deleter"
 wait_until 50 has_line '^DELETED' "$OUT/del" || fail "the deleter didn't delete the bait: $(cat "$OUT/del" 2>/dev/null)"
 wait_until 25 test -f "$PASSWORDS" || fail "the deleted bait wasn't put back within 5 s"
 a=$(wait_alert ".kind == \"delete\" and .process.pid == $pid") || fail "no alert naming who deleted the bait"
 ok "put back within moments, and the alert names $(field "$a" '.process.image') (pid $pid): $(field "$a" .title)"
-kill -9 "$pid" 2>/dev/null
+[ "$(field "$a" .tier)" = critical ] || fail "the alert about the deleter is $(field "$a" .tier), want critical: $(field "$a" '.verdict.reasons[0]')"
+[ "$(field "$a" '[.actions[]? | select(.action=="freeze" and .ok)] | length')" -ge 1 ] || fail "the deleter wasn't frozen: $(field "$a" '.actions | tostring')"
+wait_until 25 frozen "$pid" || fail "the deleter (pid $pid) isn't in the frozen group: $(cat /proc/$pid/cgroup 2>/dev/null)"
+ok "and it was frozen: $(field "$a" '.verdict.reasons[0]')"
+sudo aba kill "$(field "$a" .id)" >/dev/null || fail "aba kill"
+rm -f "$HOME/Downloads/wiper"
 echo "not the bait" > "$HOME/.e2e-swap"; mv "$HOME/.e2e-swap" "$PASSWORDS" || fail "couldn't rename a file over the bait"
 wait_until 50 bash -c "[ \$(sudo sh -c 'cat $DATA/alerts/*.json' | jq -s '[.[] | select(.kind==\"delete\")] | length') -ge 2 ]" || fail "a bait replaced by a rename over it wasn't reported"
 ok "replaced by a rename over it: reported"

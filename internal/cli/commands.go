@@ -413,7 +413,7 @@ func runTest() error {
 }
 
 func testReaderCmd() *cobra.Command {
-	var beacon string
+	var beacon, do string
 	c := &cobra.Command{
 		Use:    "test-reader <path>...",
 		Hidden: true,
@@ -427,11 +427,23 @@ func testReaderCmd() *cobra.Command {
 				if i > 0 {
 					time.Sleep(300 * time.Millisecond)
 				}
-				f, err := os.Open(p)
-				if err == nil {
-					buf := make([]byte, 512)
-					f.Read(buf)
-					f.Close()
+				switch do {
+				case "overwrite":
+					// What ransomware does: open it to write, not to read,
+					// and write over the start of it.
+					if f, err := os.OpenFile(p, os.O_WRONLY, 0); err == nil {
+						f.Write([]byte("XXXXXXXXXXXXXXXX"))
+						f.Close()
+					}
+				case "delete":
+					os.Remove(p)
+				default:
+					f, err := os.Open(p)
+					if err == nil {
+						buf := make([]byte, 512)
+						f.Read(buf)
+						f.Close()
+					}
 				}
 			}
 			time.Sleep(60 * time.Second) // stay alive so the freeze is real; ABA kills us
@@ -440,6 +452,9 @@ func testReaderCmd() *cobra.Command {
 		},
 	}
 	c.Flags().StringVar(&beacon, "beacon", "", "")
+	// --do overwrite|delete: act like ransomware or a wiper on the files
+	// instead of reading them (for the end-to-end tests).
+	c.Flags().StringVar(&do, "do", "", "")
 	return c
 }
 

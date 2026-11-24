@@ -139,8 +139,8 @@ func watch(t *testing.T, bait string) (*Watcher, chan opened) {
 		}
 	})
 	w := &Watcher{Self: uint32(os.Getpid()), Logf: lg.add,
-		OnOpen: func(_ string, _ time.Time, pids []uint32) { ch <- opened{pids: pids, got: had()} },
-		OnGhost: func(_ string, _ time.Time, pids []uint32, ahead bool) {
+		OnOpen: func(_ string, _ time.Time, _ Intent, pids []uint32) { ch <- opened{pids: pids, got: had()} },
+		OnGhost: func(_ string, _ time.Time, _ Intent, pids []uint32, ahead bool) {
 			ch <- opened{pids: pids, ghost: true, ahead: ahead, got: had()}
 		}}
 	w.Sync([]string{bait})
