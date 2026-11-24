@@ -58,6 +58,10 @@ var AllActions = []Action{ActionFreeze, ActionBlockProgram, ActionKill, ActionIs
 // using (its internet is cut instead, where that's configured).
 const ActionLeftRunning Action = "left-running"
 
+// StarterBlocked starts the detail of a block-program action that cut off
+// what started a browser a stealer ran its code in, not the browser itself.
+const StarterBlocked = "what started it: "
+
 func (a Action) Describe() string {
 	switch a {
 	case ActionFreeze:
@@ -392,6 +396,9 @@ func (a Action) Verb() string {
 func (a Action) Done(detail string) string {
 	switch a {
 	case ActionFreeze:
+		if i := strings.Index(detail, " frozen: "); i >= 0 {
+			return "Froze " + detail[i+len(" frozen: "):] // what exactly, in the engine's words
+		}
 		n := 0
 		fmt.Sscanf(detail, "%d", &n)
 		if n > 1 {
@@ -399,6 +406,16 @@ func (a Action) Done(detail string) string {
 		}
 		return "Froze it"
 	case ActionBlockProgram:
+		if rest, ok := strings.CutPrefix(detail, StarterBlocked); ok {
+			var names []string
+			for _, p := range strings.Split(rest, ", ") {
+				if i := strings.LastIndexAny(p, `\/`); i >= 0 {
+					p = p[i+1:]
+				}
+				names = append(names, p)
+			}
+			return "Cut the internet of what started it (" + strings.Join(names, ", ") + ")"
+		}
 		return "Cut its internet"
 	case ActionKill:
 		return "Killed it"

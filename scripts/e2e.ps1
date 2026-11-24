@@ -596,8 +596,15 @@ if (-not $hostBait) {
     if (-not (Get-Process explorer -ErrorAction SilentlyContinue | Where-Object SessionId -gt 0)) {
         Ok 'skipped the browser-you-use half: no desktop session on this machine'
     } else {
+        # ghost is started exactly the way the browser was (the desktop's own
+        # token, or else this script's at medium integrity): otherwise it may
+        # not be allowed to open the browser at all.
+        $how = @('-shell')
         $vp = & $Medium -shell $bexe --no-first-run --no-default-browser-check --new-window about:blank
-        if ($LASTEXITCODE -or -not "$vp".Trim()) { $vp = & $Medium $bexe --no-first-run --no-default-browser-check --new-window about:blank }
+        if ($LASTEXITCODE -or -not "$vp".Trim()) {
+            $how = @()
+            $vp = & $Medium $bexe --no-first-run --no-default-browser-check --new-window about:blank
+        }
         $vp = if ("$vp".Trim() -match '^\d+$') { [int]"$vp".Trim() } else { 0 }
         $script:leftovers = @($vp)
         $shown = if ($vp) { WaitFor { $p = Get-Process -Id $vp -ErrorAction SilentlyContinue; $p -and $p.MainWindowHandle -ne 0 } 30 } else { $null }
@@ -606,26 +613,43 @@ if (-not $hostBait) {
         } else {
             Start-Sleep -Seconds 3
             $rulesBefore = WfpRules
-            $status = Join-Path $env:TEMP 'ghost-browser-inject.txt'
+            # (In Public: ghost may run as the desktop's user, who can write there.)
+            $status = Join-Path $env:PUBLIC 'ghost-browser-inject.txt'
             Remove-Item -LiteralPath $status -ErrorAction SilentlyContinue
             Snap
-            $ip = & $Medium $Ghost browser-inject $vp $hostBait $status
-            if ($LASTEXITCODE -or -not "$ip".Trim()) { Fail "ghost browser-inject didn't start" }
+            $ip = & $Medium @how $Ghost browser-inject $vp $hostBait $status
+            if ($LASTEXITCODE -or -not "$ip".Trim()) { Fail "ghost browser-inject didn't start (medium $($how -join ' '))" }
             $script:leftovers += [int]"$ip".Trim()
-            $ak = WaitFor { Fresh | Where-Object { $_.verdict.keepRunning } | Select-Object -Last 1 } 30
+            # What ghost says it did: read the fake profile from inside the
+            # browser, or which call failed (with Windows' error number).
+            $said = WaitFor {
+                if (Test-Path -LiteralPath $status) {
+                    $l = Get-Content -LiteralPath $status -ErrorAction SilentlyContinue | Where-Object { $_ -match '^(its thread read|failed:)' } | Select-Object -First 1
+                    if ($l) { return $l }
+                }
+                if (-not (Get-Process -Id ([int]"$ip".Trim()) -ErrorAction SilentlyContinue)) { return 'failed: ghost exited without saying why' }
+                $null
+            } 20
             ShowGhost $status
-            if (Test-Path "$data\service.log") {
-                Select-String -Path "$data\service.log" -Pattern 'window check|instant' | Select-Object -Last 6 | ForEach-Object { "  log: " + $_.Line } | Out-Host
+            if ($said -match '^failed: OpenProcess.*\(Win32 error 5\)') {
+                Ok "skipped the browser-you-use half: this machine doesn't let ghost into the $bname it started ($said)"
+            } else {
+                if (-not $said) { Fail 'ghost browser-inject said nothing within 20 s' }
+                if ($said -like 'failed:*') { Fail "ghost browser-inject: $said" }
+                $ak = WaitFor { Fresh | Where-Object { $_.verdict.keepRunning } | Select-Object -Last 1 } 30
+                if (Test-Path "$data\service.log") {
+                    Select-String -Path "$data\service.log" -Pattern 'window check|instant' | Select-Object -Last 6 | ForEach-Object { "  log: " + $_.Line } | Out-Host
+                }
+                Check ($ak -and $ak.tier -eq 'critical') "critical alert, left running: $($ak.summary)"
+                Check (-not (Did $ak 'freeze')) 'not frozen'
+                Check (-not (IsSuspended $vp)) "your $bname is still running"
+                Check (Did $ak 'block-program') "its internet is cut instead"
+                Check ((State).blocked | Where-Object { $_.path -eq $bexe }) "$bname's program is on the blocked list"
+                Check ((WfpRules) -gt $rulesBefore) 'a WFP rule for it is in place'
+                Aba resume $ak.id
+                Check (-not ((State).blocked | Where-Object { $_.path -eq $bexe })) 'aba resume gave it its internet back'
+                Check ((WfpRules) -eq $rulesBefore) 'and its WFP rule is gone'
             }
-            Check ($ak -and $ak.tier -eq 'critical') "critical alert, left running: $($ak.summary)"
-            Check (-not (Did $ak 'freeze')) 'not frozen'
-            Check (-not (IsSuspended $vp)) "your $bname is still running"
-            Check (Did $ak 'block-program') "its internet is cut instead"
-            Check ((State).blocked | Where-Object { $_.path -eq $bexe }) "$bname's program is on the blocked list"
-            Check ((WfpRules) -gt $rulesBefore) 'a WFP rule for it is in place'
-            Aba resume $ak.id
-            Check (-not ((State).blocked | Where-Object { $_.path -eq $bexe })) 'aba resume gave it its internet back'
-            Check ((WfpRules) -eq $rulesBefore) 'and its WFP rule is gone'
         }
         EndLeftovers
     }

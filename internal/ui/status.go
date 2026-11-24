@@ -453,7 +453,10 @@ func AlertDetail(a *alerts.Alert) string {
 		if a.LatencyMS > 0 {
 			when := "after the read was logged"
 			if a.Instant {
-				when = "after it opened the bait, before it could read it"
+				// (Only one named while its open was still held never got a
+				// byte; one found by who woke up may have read the bait's
+				// fake contents first.)
+				when = "after it opened the bait"
 			}
 			b.WriteString("  " + Good.Render(fmt.Sprintf("%d ms", a.LatencyMS)) + Dim.Render(" "+when) + "\n")
 		}

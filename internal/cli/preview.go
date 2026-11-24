@@ -101,7 +101,7 @@ func browserStealerAlert() *alerts.Alert {
 	why := "Chrome was started suspended by chromelevator.exe and never ran as a browser, then went through a fake profile only a stealer would open: that's a stealer running its own code inside a genuine Chrome, to get at the passwords and cookies it protects"
 	a := &alerts.Alert{
 		ID: "20261123-101722-b7e1", Time: time.Now().Add(-2 * time.Minute), Kind: alerts.KindRead, Tier: config.TierCritical,
-		Title: "Possible stealer inside Chrome: a hidden copy of it opened your bait", Status: "open", LatencyMS: 9, Instant: true,
+		Title: "Possible stealer: a Chrome started suspended by chromelevator.exe opened your bait", Status: "open", LatencyMS: 9, Instant: true,
 		Summary: "Caught the moment it opened the bait (instant freeze). " + why,
 		Baits:   []alerts.BaitHit{{Name: "extra profile inside your Chrome", Path: `C:\Users\bob\AppData\Local\Google\Chrome\User Data\Profile 23\Network\Cookies`, Access: "read", Time: time.Now()}},
 		Process: &alerts.Process{PID: 9120, Image: previewChrome, CommandLine: `"` + previewChrome + `"`, User: `DESKTOP-7Q2\bob`,
@@ -110,10 +110,10 @@ func browserStealerAlert() *alerts.Alert {
 		Verdict: classify.Verdict{Tier: config.TierCritical, Host: true, Reasons: []string{why,
 			"created suspended: its first thread never ran, so it never got to be a browser; code was put into it instead",
 			"started by " + stealer + ": unsigned program running from a user-writable folder (C:\\Users\\bob\\AppData\\Local\\Temp\\cl3v): typical of stealers",
-			"ABA froze that Chrome, all of it, not the Chrome windows you use"}},
+			"ABA froze that Chrome, all of it (its main process and everything it started), and what started it"}},
 	}
-	a.AddAction(config.ActionFreeze, nil, "4 process(es) frozen: that whole Chrome, from its main process (pid 9120) the moment it opened the bait; with it: chromelevator.exe (pid 9088)")
-	a.AddAction(config.ActionBlockProgram, nil, stealer)
+	a.AddAction(config.ActionFreeze, nil, "4 process(es) frozen: that whole Chrome (from its main process, pid 9120) and what started it: chromelevator.exe (pid 9088), the moment it opened the bait")
+	a.AddAction(config.ActionBlockProgram, nil, config.StarterBlocked+stealer)
 	return a
 }
 

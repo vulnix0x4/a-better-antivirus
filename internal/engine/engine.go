@@ -1012,14 +1012,23 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	if config.Has(acts, config.ActionFreeze) {
 		if len(frozen) > 0 {
 			detail := fmt.Sprintf("%d process(es) frozen", len(frozen))
-			if stopHost {
-				detail += ": that whole " + alerts.BrowserName(image) + ", from its main process (pid " + fmt.Sprint(freezeRoot) + ")"
-			}
-			if instant {
-				detail += " the moment it opened the bait"
-			}
-			if len(also) > 0 {
-				detail += "; with it: " + strings.Join(also, ", ")
+			switch {
+			case stopHost:
+				// (config.Action.Done reads "frozen: …" as what was frozen.)
+				detail += fmt.Sprintf(": that whole %s (from its main process, pid %d)", alerts.BrowserName(image), freezeRoot)
+				if len(also) > 0 {
+					detail += " and what started it: " + strings.Join(also, ", ")
+				}
+				if instant {
+					detail += ", the moment it opened the bait"
+				}
+			default:
+				if instant {
+					detail += " the moment it opened the bait"
+				}
+				if len(also) > 0 {
+					detail += "; with it: " + strings.Join(also, ", ")
+				}
 			}
 			a.AddAction(config.ActionFreeze, nil, detail)
 		} else if !canTouch {
@@ -1060,7 +1069,7 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 				}
 				if len(did) > 0 {
 					sort.Strings(did)
-					a.AddAction(act, nil, strings.Join(did, ", "))
+					a.AddAction(act, nil, config.StarterBlocked+strings.Join(did, ", "))
 				}
 				continue
 			}
@@ -1120,6 +1129,10 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 		}
 	}
 	e.describe(a, v)
+	if stopHost {
+		// "Possible stealer: a Chrome started suspended by ghost.exe opened your bait"
+		a.Title = strings.Replace(a.Title, " inside "+alerts.BrowserName(image)+": a copy of it", ": "+host.which(), 1)
+	}
 	if v.DecoyOwner {
 		a.Kind = alerts.KindDecoyRetired
 	}
@@ -1751,9 +1764,10 @@ func (e *Engine) describe(a *alerts.Alert, v classify.Verdict) {
 			a.Title += ": its internet is cut"
 		}
 	case v.Host && v.Tier == config.TierCritical:
-		a.Title = threat + " inside " + alerts.BrowserName(exe) + ": a hidden copy of it " + what + " your bait"
+		// (The browser itself is named by what gave it away: see handle.)
+		a.Title = threat + " inside " + alerts.BrowserName(exe) + ": a copy of it " + what + " your bait"
 		if a.Process != nil && a.Process.Exited {
-			a.Title = threat + " inside " + alerts.BrowserName(exe) + ": a throwaway copy of it " + what + " your bait"
+			a.Title = threat + " inside " + alerts.BrowserName(exe) + ": a copy of it that exited at once " + what + " your bait"
 		}
 	case v.Tier == config.TierCritical:
 		a.Title = threat + ": " + exe + " " + what + " your bait"
