@@ -902,6 +902,12 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	if v.DecoyOwner {
 		e.Ops.RetireDecoy(baitID, a.Summary)
 	}
+	if test {
+		// Now, not after the autopsy, which takes a second or two: `aba test`
+		// has its alert already, and the next test's request may arrive
+		// meanwhile. Clearing later would wipe that one.
+		e.Ops.ClearTest()
+	}
 	// 7. The autopsy, now that the alert is out: what had it already taken?
 	if wantsAutopsy(a, v, frozen) {
 		c := autopsy.Case{AlertID: a.ID, Test: test, PID: oa.PID, Image: image, Tree: append([]uint32(nil), a.Process.TreePIDs...),
@@ -921,7 +927,6 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	}
 	if test {
 		e.Ops.KillTree(oa.PID)
-		e.Ops.ClearTest()
 		// The test reader is gone: don't leave it on the frozen list.
 		e.Ops.UpdateState(func(st *config.State) error {
 			var keep []config.FrozenProcess
