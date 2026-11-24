@@ -153,3 +153,13 @@ func TestRelBait(t *testing.T) {
 		t.Error(got)
 	}
 }
+
+// A store whose folder is watched but holds nothing isn't named as watched
+// (there was nothing to take), and doesn't stand in the way of "no sign".
+func TestEmptyWatchedStoreIsNotNamed(t *testing.T) {
+	cov := append(watchedAll(), recorder.Coverage{Store: "aws-keys", Name: "your AWS keys", Kind: baits.StoreKeys, Watched: true, Files: 0})
+	a := run(facts{recorderOn: true, start: start, res: recorder.Result{Stores: cov}})
+	if a.Answer != alerts.AnswerNoSign || strings.Contains(a.Headline, "AWS") {
+		t.Errorf("answer %s headline %q", a.Answer, a.Headline)
+	}
+}
