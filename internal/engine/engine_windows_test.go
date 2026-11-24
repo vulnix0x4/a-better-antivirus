@@ -46,6 +46,9 @@ type fakeOps struct {
 	autopsy *alerts.Autopsy
 	cases   []autopsy.Case
 	told    []string
+	// pendingAtAutopsy: whether a test request was still there when each
+	// autopsy began.
+	pendingAtAutopsy []bool
 }
 
 func newFake() *fakeOps {
@@ -115,6 +118,7 @@ func (f *fakeOps) Autopsy(c autopsy.Case) *alerts.Autopsy {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.cases = append(f.cases, c)
+	f.pendingAtAutopsy = append(f.pendingAtAutopsy, f.test != nil)
 	return f.autopsy
 }
 
@@ -165,6 +169,25 @@ func TestAutopsyAfterTheAlert(t *testing.T) {
 	defer f.mu.Unlock()
 	if len(f.cases) != 0 {
 		t.Errorf("an autopsy of a program that wasn't caught: %+v", f.cases)
+	}
+}
+
+// A test's request is cleared before its autopsy starts: the autopsy takes a
+// second or two, `aba test` returns as soon as it has its alert, and the next
+// test (`aba clipboard test` right after it) writes a request of its own that
+// a late clear would wipe.
+func TestTestRequestClearedBeforeItsAutopsy(t *testing.T) {
+	e, f := setup("balanced")
+	f.autopsy = &alerts.Autopsy{Answer: alerts.AnswerNoSign}
+	f.test = &TestRequest{PID: 100}
+	e.HandleAccess(ev(100, `C:\Users\bob\AppData\Local\Temp\aba-test-1.exe`, desktopBait, 1))
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.pendingAtAutopsy) != 1 {
+		t.Fatalf("autopsies of the test reader: %d", len(f.pendingAtAutopsy))
+	}
+	if f.pendingAtAutopsy[0] {
+		t.Error("the test request was still there when the autopsy began")
 	}
 }
 
