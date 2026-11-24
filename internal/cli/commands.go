@@ -148,6 +148,7 @@ func killCmd() *cobra.Command {
 			if err := requireAdmin(); err != nil {
 				return err
 			}
+			fmt.Println(ui.Dim.Render("Saving the evidence before ending it…"))
 			rep, err := respond.Kill(args[0])
 			printReport(rep)
 			return err
@@ -1020,6 +1021,11 @@ func notifyCmd() *cobra.Command {
 				return nil
 			}
 			a := env.Alert
+			if env.Autopsy && a.Autopsy != nil {
+				notify.Toast("ABA: what "+a.ExeName()+" had already opened", a.Autopsy.Headline)
+				notify.ShowAutopsy(a)
+				return nil
+			}
 			notify.Toast("ABA: "+a.Title, a.Summary)
 			// Info is just noted. Everything else (learning alerts included) gets
 			// the popup, so marking an app as yours is one click.

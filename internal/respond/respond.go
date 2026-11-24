@@ -5,8 +5,10 @@ package respond
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/alerts"
+	"github.com/vulnix0x4/a-better-antivirus/internal/autopsy"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/netguard"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
@@ -115,13 +117,15 @@ func unblockWhere(blocked []config.BlockedProgram, alertID string, rep *Report) 
 	return keep
 }
 
-// Kill terminates the processes frozen for an alert. The program stays blocked.
+// Kill terminates the processes frozen for an alert. The program stays
+// blocked. The evidence is saved first (see Preserve).
 func Kill(alertID string) (*Report, error) {
 	rep := &Report{}
 	a, err := alerts.Load(alertID)
 	if err != nil {
 		return rep, err
 	}
+	Preserve(a, rep)
 	err = config.UpdateState(func(st *config.State) error {
 		var keep []config.FrozenProcess
 		for _, f := range st.Frozen {
@@ -151,6 +155,53 @@ func Kill(alertID string) (*Report, error) {
 		x.Status, x.Note = "resolved", "killed"
 	})
 	return rep, err
+}
+
+// Preserve makes sure the evidence about an alert's frozen program is saved
+// before it's ended: what the autopsy found, a copy of the program, what it
+// staged, its memory (see package autopsy). The service saves it a moment
+// after the catch; if it's still at it, this waits for it; if it never did
+// (an alert from an older version, or the service wasn't running), the
+// evidence is saved here, without the flight recorder's part.
+func Preserve(a *alerts.Alert, rep *Report) {
+	st, _ := config.LoadState()
+	alive := false
+	if st != nil {
+		for _, f := range st.Frozen {
+			alive = alive || (f.AlertID == a.ID && procinfo.Alive(f.PID, f.CreateTime))
+		}
+	}
+	if !alive {
+		return
+	}
+	done := func(x *alerts.Alert) bool {
+		return x.Autopsy != nil && !x.Autopsy.Finished.IsZero() && x.Autopsy.Evidence != ""
+	}
+	if done(a) {
+		return
+	}
+	if time.Since(a.Time) < 3*time.Minute || (a.Autopsy != nil && a.Autopsy.Finished.IsZero()) {
+		if x, err := autopsy.Wait(a.ID, 90*time.Second, alerts.Load); err == nil && done(x) {
+			rep.ok("evidence saved to %s", x.Autopsy.Evidence)
+			return
+		}
+	}
+	cfg, _ := config.LoadConfig()
+	c, err := autopsy.CaseFrom(a, cfg, st)
+	if err != nil {
+		return
+	}
+	ap := autopsy.Run(c, autopsy.SystemHooks(cfg == nil || !cfg.NoMemoryImage))
+	alerts.Update(a.ID, func(x *alerts.Alert) {
+		if x.Autopsy == nil || x.Autopsy.Finished.IsZero() {
+			x.Autopsy = ap
+			return
+		}
+		x.Autopsy.Evidence, x.Autopsy.MemoryImage = ap.Evidence, ap.MemoryImage // keep the service's findings
+	})
+	if ap.Evidence != "" {
+		rep.ok("evidence saved to %s", ap.Evidence)
+	}
 }
 
 // Resume declares an alert a false positive: unfreeze and unblock its program.

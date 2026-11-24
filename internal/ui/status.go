@@ -320,6 +320,25 @@ func AlertDetail(a *alerts.Alert) string {
 			b.WriteString(fmt.Sprintf("  %s %s %s\n    %s\n", Dim.Render(h.Time.Format("15:04:05.000")), h.Access, Bold.Render(h.Name), Fainter.Render(h.Path)))
 		}
 	}
+	if ap := a.Autopsy; ap != nil {
+		b.WriteString(Heading("Did it take your real data?") + "\n")
+		style := Warn
+		switch ap.Answer {
+		case alerts.AnswerRead:
+			style = Bad
+		case alerts.AnswerNoSign:
+			style = Good
+		}
+		b.WriteString(wrap(style.Render(ap.Headline), 2) + "\n")
+		for i, st := range ap.Steps {
+			if i == 3 {
+				b.WriteString(Fainter.Render(fmt.Sprintf("    + %d more", len(ap.Steps)-3)) + "\n")
+				break
+			}
+			b.WriteString(wrap(fmt.Sprintf("%d. %s", i+1, st), 4) + "\n")
+		}
+		b.WriteString("  " + Hint("Everything ABA found:", "aba autopsy "+shortID(a.ID)) + "\n")
+	}
 	if p := a.Process; p != nil {
 		b.WriteString(Heading("Reader") + "\n")
 		rows := [][2]string{{"Process", fmt.Sprintf("%s (pid %d)", a.ExeName(), p.PID)}}
@@ -404,7 +423,7 @@ func AlertDetail(a *alerts.Alert) string {
 			}
 			switch {
 			case len(remote) == 0:
-				b.WriteString("  " + Good.Render("no connections to other machines") + Fainter.Render(fmt.Sprintf("  (%d local)", local)) + "\n")
+				b.WriteString("  " + Good.Render("no open connections to other machines") + Fainter.Render(fmt.Sprintf("  (%d local; ones it had already closed aren't known)", local)) + "\n")
 			case local > 0:
 				b.WriteString(Fainter.Render(fmt.Sprintf("  + %d local or listening", local)) + "\n")
 			}

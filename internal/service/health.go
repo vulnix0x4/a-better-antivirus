@@ -202,7 +202,9 @@ func (s *server) healthCheck(startup bool) {
 		s.reload()
 	} else {
 		s.baitsChanged(checked) // a repaired bait is a new file
+		s.syncRecorder(checked) // new browser profiles, a wallet installed…
 	}
+	s.recorderHealth(add)
 	add("Baits", ok == total, fmt.Sprintf("%d of %d healthy", ok, total))
 	if cfg.InstantFreeze {
 		// A guard is down for a moment after each open (and during this check),

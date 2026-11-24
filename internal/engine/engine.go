@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/alerts"
+	"github.com/vulnix0x4/a-better-antivirus/internal/autopsy"
 	"github.com/vulnix0x4/a-better-antivirus/internal/baits"
 	"github.com/vulnix0x4/a-better-antivirus/internal/classify"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
@@ -75,6 +76,13 @@ type Ops interface {
 	RunningImage(path string) []uint32
 	ClearTest()
 	Logf(format string, args ...any)
+	// Autopsy looks into a caught program while it's frozen (see package
+	// autopsy): what real data it opened, what it staged, where it was
+	// sending. It takes a while, so the engine asks only once the alert is out.
+	Autopsy(c autopsy.Case) *alerts.Autopsy
+	// NotifyAutopsy tells the person what the autopsy found, when it found
+	// that the program read real data.
+	NotifyAutopsy(a *alerts.Alert)
 }
 
 // TestRequest marks a reader process started by `aba test`.
@@ -525,8 +533,10 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 		}
 		if !dup {
 			a.Baits = append(a.Baits, hit)
+			cp := *a // the autopsy may be filling the alert in meanwhile (see autopsy)
+			cp.Baits = append([]alerts.BaitHit(nil), a.Baits...)
 			e.mu.Unlock()
-			e.Ops.SaveAlert(a)
+			e.Ops.SaveAlert(&cp)
 			return
 		}
 		e.mu.Unlock()
@@ -784,7 +794,7 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	e.Ops.Forensics(oa.PID, a.Process)
 
 	// 6. Remaining responses.
-	var blocked, isolated bool
+	var blocked, isolated, killAfter bool
 	var adapters, alsoBlocked []string
 	for _, act := range acts {
 		switch act {
@@ -804,6 +814,13 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 		case config.ActionKill:
 			if !canTouch {
 				a.AddAction(act, fmt.Errorf("refused"), "protected system process")
+				continue
+			}
+			if len(frozen) > 0 && wantsAutopsy(a, v, frozen) {
+				// Ended once the autopsy has saved the evidence: killing it
+				// now would destroy what it collected and where it was sending.
+				killAfter = true
+				a.AddAction(act, nil, "once the evidence was saved")
 				continue
 			}
 			err := e.Ops.KillTree(oa.PID)
@@ -885,6 +902,23 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	if v.DecoyOwner {
 		e.Ops.RetireDecoy(baitID, a.Summary)
 	}
+	// 7. The autopsy, now that the alert is out: what had it already taken?
+	if wantsAutopsy(a, v, frozen) {
+		c := autopsy.Case{AlertID: a.ID, Test: test, PID: oa.PID, Image: image, Tree: append([]uint32(nil), a.Process.TreePIDs...),
+			Frozen: append([]uint32(nil), frozen...), BaitAt: oa.Time, Conns: append([]procinfo.Conn(nil), a.Process.Connections...)}
+		if oa.Swap != nil {
+			c.Wallet = oa.Swap.Replacement
+		}
+		var kill uint32
+		if killAfter {
+			kill = oa.PID
+		}
+		if test {
+			e.autopsy(a, c, 0) // before the test reader is ended below
+		} else {
+			go e.autopsy(a, c, kill)
+		}
+	}
 	if test {
 		e.Ops.KillTree(oa.PID)
 		e.Ops.ClearTest()
@@ -901,6 +935,52 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 		})
 	}
 	e.Ops.Logf("alert %s: %s [%s] actions=%d latency=%dms (delivery %dms)", a.ID, a.Title, a.Tier, len(a.Actions), a.LatencyMS, a.DeliveryMS)
+}
+
+// wantsAutopsy: a program caught as a stealer or clipper (or `aba test`'s),
+// or anything frozen, gets looked into. A warning about a program that's
+// still running free doesn't: it's no verdict that it stole anything.
+func wantsAutopsy(a *alerts.Alert, v classify.Verdict, frozen []uint32) bool {
+	if a.Process == nil || v.DecoyOwner || v.Ignored {
+		return false
+	}
+	switch a.Kind {
+	case alerts.KindRead, alerts.KindClipper, alerts.KindTest:
+	default:
+		return false
+	}
+	return v.Tier == config.TierCritical || len(frozen) > 0 || a.Test
+}
+
+// autopsy runs the autopsy of a's program and adds what it found to a. kill
+// (if not 0) is a process to end once it's done: the configured response
+// waited for the evidence.
+func (e *Engine) autopsy(a *alerts.Alert, c autopsy.Case, kill uint32) {
+	defer func() {
+		if r := recover(); r != nil {
+			e.Ops.Logf("PANIC in the autopsy of %s: %v", c.AlertID, r)
+		}
+		if kill != 0 {
+			if err := e.Ops.KillTree(kill); err != nil {
+				e.Ops.Logf("alert %s: ending pid %d after the autopsy: %v", c.AlertID, kill, err)
+			}
+		}
+	}()
+	res := e.Ops.Autopsy(c)
+	if res == nil {
+		return
+	}
+	e.mu.Lock()
+	a.Autopsy = res
+	cp := *a
+	cp.Baits = append([]alerts.BaitHit(nil), a.Baits...)
+	e.mu.Unlock()
+	if err := e.Ops.SaveAlert(&cp); err != nil {
+		e.Ops.Logf("save alert %s with its autopsy: %v", a.ID, err)
+	}
+	if res.Answer == alerts.AnswerRead && !c.Test {
+		e.Ops.NotifyAutopsy(&cp)
+	}
 }
 
 func hasPID(pids []uint32, pid uint32) bool {
