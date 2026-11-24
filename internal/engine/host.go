@@ -417,6 +417,38 @@ func (e *Engine) HostSuspect(path string, pids []uint32) uint32 {
 	return hit
 }
 
+// ownApps says which of pids are a genuine browser (its own program, in its
+// own folder, signed by its maker), and whose data that is (pid -> the store
+// ID, which is the bait's): see autopsy.Case.Own. Not for a browser a
+// stealer started: what that copy opened, it opened for the stealer.
+func (e *Engine) ownApps(cls *classify.Classifier, pids []uint32) map[uint32]string {
+	out := map[uint32]string{}
+	images := map[uint32]string{}
+	for _, p := range pids {
+		if img, err := e.Ops.ImagePath(p); err == nil && img != "" {
+			images[p] = img
+		}
+	}
+	for _, s := range baits.Catalog {
+		if s.Inside == nil {
+			continue
+		}
+		ref := e.baitRef(s.ID)
+		for p, img := range images {
+			if _, done := out[p]; done || ref.OwnerSigner == "" || !cls.OwnerCandidate(img, ref) {
+				continue
+			}
+			if sig := e.Ops.Verify(img); sig.Valid && strings.Contains(strings.ToLower(sig.Signer), strings.ToLower(ref.OwnerSigner)) {
+				out[p] = s.ID
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 // sameImage reports whether a and b are the same program file.
 func sameImage(a, b string) bool {
 	return a != "" && b != "" && (paths.Same(a, b) || strings.EqualFold(filepath.Clean(a), filepath.Clean(b)))

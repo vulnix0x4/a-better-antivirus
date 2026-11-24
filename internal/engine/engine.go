@@ -809,8 +809,13 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	}
 	// A sweep split over several programs, each reading too little to look
 	// like one: together they went through several apps' data.
+	// (Not the genuine browser going through its fake profile: that's settled
+	// by the host policy, about that browser alone. A stealer's copy of it is
+	// frozen with what started it, a closed case; the browser you use is cut
+	// off. Either way, its read mustn't make a stranger that reads a bait
+	// later on the "last member" of a team it has nothing to do with.)
 	var teammates []teamRead
-	if !test && access == "read" && !v.DecoyOwner && !v.Builtin && e.sweepable(oa.PID) && !cls.SweepExempt(image, oa.PID, &sig) {
+	if !test && access == "read" && !v.DecoyOwner && !v.Builtin && !v.Host && e.sweepable(oa.PID) && !cls.SweepExempt(image, oa.PID, &sig) {
 		if units, members := e.joinTeam(oa.PID, baitID, image, now); units != nil && len(v.Swept) < sweepApps {
 			v = e.teamVerdict(v, units, len(members))
 			for _, m := range members {
@@ -1201,6 +1206,9 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 			Frozen: append([]uint32(nil), frozen...), BaitAt: oa.Time, Conns: append([]procinfo.Conn(nil), a.Process.Connections...)}
 		if oa.Swap != nil {
 			c.Wallet = oa.Swap.Replacement
+		}
+		if host == nil && !test {
+			c.Own = e.ownApps(cls, append(append([]uint32{oa.PID}, frozen...), a.Process.TreePIDs...))
 		}
 		var kill []uint32
 		if killAfter {

@@ -53,6 +53,12 @@ type Case struct {
 	// real stores: what's found is checked against both.
 	BaitFiles map[string]string
 	Stores    []baits.Store
+	// Own are processes that are the genuine app of a store (pid -> store
+	// ID): a real browser frozen for something else (a sweep it was part
+	// of). Its opens of its own data are the browser at work, not a theft,
+	// and aren't counted. (A browser a stealer started and ran its code in
+	// is never in here: what that copy opened, it opened for the stealer.)
+	Own map[uint32]string
 }
 
 // Hooks are the operating system's part, and the service's.
@@ -94,6 +100,28 @@ func (h Hooks) logf(f string, a ...any) {
 	if h.Logf != nil {
 		h.Logf(f, a...)
 	}
+}
+
+// withoutOwn leaves out of res the opens of a store by its own app (see
+// Case.Own).
+func withoutOwn(res recorder.Result, own map[uint32]string) recorder.Result {
+	if len(own) == 0 {
+		return res
+	}
+	var reads []recorder.Read
+	for _, r := range res.Reads {
+		if s, ok := own[r.PID]; !ok || s != r.Store {
+			reads = append(reads, r)
+		}
+	}
+	var doubts []recorder.Doubt
+	for _, d := range res.Doubts {
+		if s, ok := own[d.PID]; !ok || s != d.Store {
+			doubts = append(doubts, d)
+		}
+	}
+	res.Reads, res.Doubts = reads, doubts
+	return res
 }
 
 // Run looks into c and returns what it found. It never fails as a whole:
@@ -139,6 +167,12 @@ func Run(c Case, h Hooks) *alerts.Autopsy {
 			from = c.BaitAt.Add(-10 * time.Minute)
 		}
 		res, why := h.Recorder(recorder.Query{Members: members, From: from, To: to})
+		if n := len(res.Reads) + len(res.Doubts); len(c.Own) > 0 {
+			res = withoutOwn(res, c.Own)
+			if n > len(res.Reads)+len(res.Doubts) {
+				a.Notes = append(a.Notes, "Some of these processes are the genuine app whose data they opened (a real browser reading its own profiles): those opens are the app at work, and aren't counted as taken.")
+			}
+		}
 		f.res, f.recorderOn, f.recorderWhy = res, why == "", why
 		if why != "" {
 			// Without the recorder, coverage is still listed (all unwatched).
@@ -183,7 +217,11 @@ func Run(c Case, h Hooks) *alerts.Autopsy {
 					fs.What = "a bait (" + name + ")"
 				} else if s, ok := baits.StoreFor(c.Stores, p); ok {
 					fs.What = "a file of " + s.Name
-					f.held = append(f.held, alerts.StoreRead{Store: s.ID, Name: s.Name, Kind: s.Kind, Path: p, At: to, PID: m.PID, How: "it has it open right now"})
+					if c.Own[m.PID] == s.ID {
+						fs.What += " (its own data: it's that app)"
+					} else {
+						f.held = append(f.held, alerts.StoreRead{Store: s.ID, Name: s.Name, Kind: s.Kind, Path: p, At: to, PID: m.PID, How: "it has it open right now"})
+					}
 				}
 				if len(a.OpenFiles) < 300 {
 					a.OpenFiles = append(a.OpenFiles, fs)
