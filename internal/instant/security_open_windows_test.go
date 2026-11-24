@@ -20,7 +20,7 @@ func TestSecurityCheckIsNotARead(t *testing.T) {
 	}
 	got := make(chan ev, 4)
 	w := &Watcher{Self: 1, // treat our own PID as "someone else" for this test
-		OnOpen:  func(string, time.Time, []uint32) { got <- ev{read: true} },
+		OnOpen:  func(string, time.Time, Intent, []uint32) { got <- ev{read: true} },
 		OnOther: func(_ string, a uint32) { got <- ev{access: a} }}
 	w.Sync([]string{bait})
 	defer w.Stop()

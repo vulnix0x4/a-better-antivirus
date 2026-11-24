@@ -106,14 +106,16 @@ type Engine struct {
 	index       map[string]string // lower path -> bait id
 	baitNames   map[string]string
 	incidents   map[uint32]*incident
-	claimed     map[uint32]time.Time     // PIDs the instant path is handling
-	seen        map[string]time.Time     // program|bait -> last notification, for alerts with no action
-	touched     map[uint32]*sweep        // baits each process opened recently
-	sids        map[uint32]string        // account a process read baits as (detect.Access.UserID), as the watcher reported it
-	pending     map[uint32]chan struct{} // instant decisions in progress
-	eventFrozen map[uint32]time.Time     // processes the event-log path froze
-	marks       map[uint32]mark          // processes seen using a trick to dodge detection
-	team        []teamRead               // recent bait reads by anyone, for sweeps split over several processes
+	claimed     map[uint32]time.Time        // PIDs the instant path is handling
+	seen        map[string]time.Time        // program|bait -> last notification, for alerts with no action
+	touched     map[uint32]*sweep           // baits each process opened recently
+	wrecked     map[uint32]*sweep           // folders each process rewrote document baits in recently
+	sids        map[uint32]string           // account a process read baits as (detect.Access.UserID), as the watcher reported it
+	pending     map[uint32]chan struct{}    // instant decisions in progress
+	later       map[uint32][]alerts.BaitHit // what a program caught in its open went on to do, until its alert is on record
+	eventFrozen map[uint32]time.Time        // processes the event-log path froze
+	marks       map[uint32]mark             // processes seen using a trick to dodge detection
+	team        []teamRead                  // recent bait reads by anyone, for sweeps split over several processes
 }
 
 // mark notes that a process did something only evasion explains.
@@ -149,6 +151,9 @@ type incident struct {
 	alert      *alerts.Alert
 	createTime int64
 	last       time.Time
+	// wrecked: it had already gone to overwrite documents in several
+	// folders when this alert was made, so that's been judged.
+	wrecked bool
 }
 
 // aggregation window: further bait hits by the same process join one alert.
@@ -156,8 +161,8 @@ const window = 2 * time.Minute
 
 func New(ops Ops, selfPID uint32) *Engine {
 	return &Engine{Ops: ops, SelfPID: selfPID, incidents: map[uint32]*incident{}, claimed: map[uint32]time.Time{},
-		seen: map[string]time.Time{}, touched: map[uint32]*sweep{}, sids: map[uint32]string{},
-		pending: map[uint32]chan struct{}{}, eventFrozen: map[uint32]time.Time{}, marks: map[uint32]mark{}}
+		seen: map[string]time.Time{}, touched: map[uint32]*sweep{}, wrecked: map[uint32]*sweep{}, sids: map[uint32]string{},
+		pending: map[uint32]chan struct{}{}, later: map[uint32][]alerts.BaitHit{}, eventFrozen: map[uint32]time.Time{}, marks: map[uint32]mark{}}
 }
 
 // Configure (re)loads config and the bait index.
@@ -257,6 +262,13 @@ func (e *Engine) DecideInstant(pid uint32, path string) bool {
 
 // DecideInstantWhy is DecideInstant plus the reason, for the service log.
 func (e *Engine) DecideInstantWhy(pid uint32, path string) (bool, string) {
+	return e.DecideInstantOpWhy(pid, path, detect.OpRead)
+}
+
+// DecideInstantOpWhy is DecideInstantWhy for a watcher that knows what the
+// open asked for: to read the bait, only to change it (OpWrite) or only to
+// delete it (OpDelete).
+func (e *Engine) DecideInstantOpWhy(pid uint32, path string, op detect.Op) (bool, string) {
 	e.mu.Lock()
 	cfg, cls := e.cfg, e.classifier
 	baitID, isBait := e.index[paths.Key(path)]
@@ -299,8 +311,19 @@ func (e *Engine) DecideInstantWhy(pid uint32, path string) (bool, string) {
 	sig := e.Ops.Verify(image)
 	v := cls.Final(image, pid, e.baitRef(baitID), sig)
 	exempt := cls.SweepExempt(image, pid, &sig)
-	if swept := e.touch(pid, baitID, time.Now()); len(swept) >= sweepApps && !exempt {
-		v = e.sweepVerdict(v, swept)
+	// Deleting several apps' data isn't going through it: uninstallers and
+	// cleaners do that. Reading or rewriting it is.
+	if op != detect.OpDelete {
+		if swept := e.touch(pid, baitID, time.Now()); len(swept) >= sweepApps && !exempt {
+			v = e.sweepVerdict(v, swept)
+		}
+	}
+	// Going to overwrite your documents in a second folder: held here, in
+	// the open, whatever it is (see wreck).
+	if op == detect.OpWrite && !exempt && !classify.OSVendorSigned(sig) {
+		if wrecked := e.wreck(pid, baitID, path, time.Now()); len(wrecked) >= wreckFolders {
+			v = e.wreckVerdict(v, wrecked, "write")
+		}
 	}
 	if !v.Builtin && !v.DecoyOwner {
 		// (Elevated copies of ABA were let through above.)
@@ -314,10 +337,17 @@ func (e *Engine) DecideInstantWhy(pid uint32, path string) (bool, string) {
 		done(false)
 		return false, image + " is ignored or the real app"
 	}
-	if !exempt && v.Tier != config.TierCritical {
+	if !exempt && v.Tier != config.TierCritical && op == detect.OpRead {
 		if units, _ := e.joinTeam(pid, baitID, image, time.Now()); units != nil {
 			v = e.teamVerdict(v, units, 0)
 		}
+	}
+	if op == detect.OpDelete && (v.Tier != config.TierCritical || classify.ScriptHost(image)) {
+		// A program that looks legitimate removing a file, or a script host
+		// removing one: reported (the event log names it), not frozen here.
+		// See actionsFor in handle, which also counts a script's deletes.
+		done(false)
+		return false, fmt.Sprintf("%s is %s; deleting a bait isn't stopped inside the open for it", image, v.Tier)
 	}
 	if !config.Has(cfg.ActionsFor(v.Tier, time.Now()), config.ActionFreeze) {
 		done(false)
@@ -424,7 +454,13 @@ func (e *Engine) Unclaim(pid uint32) {
 // HandleOpen raises the alert (and runs the remaining responses) for a reader
 // that DecideInstant froze mid-open. frozen is what was suspended.
 func (e *Engine) HandleOpen(pid uint32, path string, at time.Time, frozen []uint32) {
-	e.handle(&detect.Access{PID: pid, Path: path, Op: detect.OpRead, Time: at}, frozen)
+	e.HandleOpenOp(pid, path, detect.OpRead, at, frozen)
+}
+
+// HandleOpenOp is HandleOpen for a watcher that knows what the open asked
+// for: to read the bait, only to change it (OpWrite) or only to delete it.
+func (e *Engine) HandleOpenOp(pid uint32, path string, op detect.Op, at time.Time, frozen []uint32) {
+	e.handle(&detect.Access{PID: pid, Path: path, Op: op, Time: at}, frozen)
 }
 
 func (e *Engine) baitRef(id string) classify.Bait {
@@ -468,7 +504,10 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	if !instant {
 		e.waitDecision(oa.PID)
 		if claimedNow() {
-			return // the instant path already caught and is reporting this process
+			// The instant path already caught and is reporting this process.
+			// What it went on to do to the bait still belongs in that alert.
+			e.noteAfter(oa)
+			return
 		}
 	}
 	received := time.Now()
@@ -484,6 +523,8 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	case detect.OpRead:
 	case detect.OpDelete:
 		access = "delete"
+	case detect.OpWrite:
+		access = "write"
 	case detect.OpSwap:
 		access = "swap"
 	default:
@@ -499,10 +540,29 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 		e.mu.Unlock()
 	}
 	var swept []string
-	if access == "read" {
+	if access == "read" || access == "write" {
 		swept = e.touch(oa.PID, baitID, time.Now())
 		if len(swept) >= sweepApps && !e.sweepable(oa.PID) {
 			swept = nil
+		}
+	}
+	// Rewriting your documents in folder after folder: ransomware, or a wiper.
+	// So is a script deleting them in folder after folder. (A script host
+	// deleting one bait is you, at a prompt or in a script of your own; an
+	// ordinary program's deletes aren't counted at all, see wreck.)
+	scripted := false
+	if access == "delete" {
+		img := oa.Image
+		if live, err := e.Ops.ImagePath(oa.PID); err == nil && live != "" {
+			img = live
+		}
+		scripted = classify.ScriptHost(img)
+	}
+	var wrecked []string
+	if access == "write" || scripted {
+		wrecked = e.wreck(oa.PID, baitID, oa.Path, time.Now())
+		if len(wrecked) >= wreckFolders && !e.sweepable(oa.PID) {
+			wrecked = nil
 		}
 	}
 
@@ -515,6 +575,14 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	if inc := e.incidents[oa.PID]; !instant && inc != nil && len(swept) >= sweepApps && inc.alert.Tier != config.TierCritical {
 		// It started out looking harmless and has now read several apps' data:
 		// handle it again as a sweep, with the full response.
+		delete(e.incidents, oa.PID)
+	}
+	if inc := e.incidents[oa.PID]; !instant && inc != nil && len(wrecked) >= wreckFolders && !inc.wrecked &&
+		(inc.alert.Tier != config.TierCritical || !inc.alert.Did(config.ActionFreeze)) {
+		// Same: now it's rewriting folder after folder. (Judged once: a
+		// program that's exempt, like OneDrive, isn't alerted about anew for
+		// every file after that. A script host's first delete made a critical
+		// alert that did nothing: that one is handled again too.)
 		delete(e.incidents, oa.PID)
 	}
 	if inc := e.incidents[oa.PID]; access == "swap" && inc != nil && inc.alert.Tier != config.TierCritical {
@@ -575,13 +643,20 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 		if test {
 			return []config.Action{config.ActionFreeze} // a test never cuts the network
 		}
-		if access == "delete" {
-			return nil // deleting isn't exfiltration; notify + auto-repair instead
+		if access == "delete" && (t != config.TierCritical || (scripted && len(wrecked) < wreckFolders)) {
+			// A program that looks legitimate removing a file (you, in
+			// Explorer; a cleaner; a sync client moving your folders), or a
+			// script host removing one (you again, at a prompt): the bait is
+			// put back and you're told. A program that would be stopped for
+			// reading a bait is stopped for destroying it too: that's a wiper,
+			// or ransomware that deletes what it has encrypted a copy of.
+			return nil
 		}
 		return cfg.ActionsFor(t, now)
 	}
 
 	isSweep := len(swept) >= sweepApps
+	isWreck := len(wrecked) >= wreckFolders
 
 	// 1-2. Instant verdict, freeze first.
 	pre := cls.Prelim(image, oa.PID, ref)
@@ -602,7 +677,9 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 		tricksOK = cls.TricksAllowed(image, oa.PID, baitID, &s)
 	}
 	evading := disguise || (tricky && !tricksOK)
-	if pre.Ignored && !instant && (pre.Builtin || !evading) {
+	// (Nor if it's rewriting folder after folder: that's judged below, once
+	// its signature is known, whatever rule covers it.)
+	if pre.Ignored && !instant && (pre.Builtin || (!evading && !isWreck)) {
 		e.Ops.Logf("ignored %s of %s by %s (%s)", access, oa.Path, image, strings.Join(pre.Reasons, "; "))
 		return
 	}
@@ -633,6 +710,14 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	v := cls.Final(image, oa.PID, ref, sig)
 	if isSweep && !cls.SweepExempt(image, oa.PID, &sig) {
 		v = e.sweepVerdict(v, swept)
+	}
+	// Decided only now that the signature is known, and never for the
+	// system's own programs: OneDrive and iCloud put your Desktop and
+	// Documents back file by file, which looks the same from here.
+	// (A script host's signature says nothing about the script: Windows'
+	// own PowerShell deleting folder after folder is judged like any other.)
+	if isWreck && !cls.SweepExempt(image, oa.PID, &sig) && (scripted || !classify.OSVendorSigned(sig)) {
+		v = e.wreckVerdict(v, wrecked, access)
 	}
 	if access == "swap" {
 		v = swapVerdict(oa.Swap)
@@ -763,6 +848,9 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	if access == "delete" {
 		a.Kind = alerts.KindDelete
 	}
+	if access == "write" {
+		a.Kind = alerts.KindWrite
+	}
 	if access == "swap" {
 		a.Kind = alerts.KindClipper
 	}
@@ -878,13 +966,24 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	}
 
 	e.mu.Lock()
-	e.incidents[oa.PID] = &incident{alert: a, createTime: createTime, last: time.Now()}
+	e.incidents[oa.PID] = &incident{alert: a, createTime: createTime, last: time.Now(), wrecked: isWreck}
 	for pid, inc := range e.incidents {
 		if time.Since(inc.last) > window {
 			delete(e.incidents, pid)
 		}
 	}
+	// What the event log said it did to the bait while this alert was being made.
+	var after *alerts.Alert
+	for _, h := range e.later[oa.PID] {
+		if cp, ok := e.did(a, h); ok {
+			after = cp
+		}
+	}
+	delete(e.later, oa.PID)
 	e.mu.Unlock()
+	if after != nil {
+		e.Ops.SaveAlert(after)
+	}
 
 	// Script hosts and runtimes are never quieted: the next script could be a
 	// different one. Neither are critical alerts.
@@ -942,6 +1041,75 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	e.Ops.Logf("alert %s: %s [%s] actions=%d latency=%dms (delivery %dms)", a.ID, a.Title, a.Tier, len(a.Actions), a.LatencyMS, a.DeliveryMS)
 }
 
+// noteAfter records what a program already caught inside its open of a bait
+// went on to do to it. Windows doesn't always say what an open asked for, so
+// a program caught there is reported as having opened the bait. The event
+// log, a moment later, says when it overwrote or deleted it: then the alert
+// says so, because that's ransomware or a wiper, not a stealer.
+func (e *Engine) noteAfter(oa *detect.Access) {
+	access := ""
+	switch oa.Op {
+	case detect.OpWrite:
+		access = "write"
+	case detect.OpDelete:
+		access = "delete"
+	default:
+		return
+	}
+	baitID, ok := e.IsBait(oa.Path)
+	if !ok {
+		return
+	}
+	e.mu.Lock()
+	hit := alerts.BaitHit{ID: baitID, Name: e.baitNames[baitID], Path: oa.Path, Access: access, Time: oa.Time}
+	inc := e.incidents[oa.PID]
+	if inc == nil {
+		// Its alert isn't on record yet: kept for when it is (see handle).
+		if len(e.later) > 256 {
+			e.later = map[uint32][]alerts.BaitHit{}
+		}
+		if len(e.later[oa.PID]) < 16 {
+			e.later[oa.PID] = append(e.later[oa.PID], hit)
+		}
+		e.mu.Unlock()
+		return
+	}
+	cp, changed := e.did(inc.alert, hit)
+	e.mu.Unlock()
+	if changed {
+		e.Ops.SaveAlert(cp)
+	}
+}
+
+// did adds to alert a what its program went on to do to a bait (hit: a write
+// or a delete), and returns a copy to save. An alert about a read becomes one
+// about what was done to the file. Called with e.mu held.
+func (e *Engine) did(a *alerts.Alert, hit alerts.BaitHit) (*alerts.Alert, bool) {
+	for _, h := range a.Baits {
+		if strings.EqualFold(h.Path, hit.Path) && h.Access == hit.Access {
+			return nil, false
+		}
+	}
+	a.Baits = append(a.Baits, hit)
+	if a.Kind == alerts.KindRead && !a.Test {
+		what, to, threat := "overwrote", "overwrite", "Possible ransomware"
+		a.Kind = alerts.KindWrite
+		if hit.Access == "delete" {
+			what, to, threat, a.Kind = "deleted", "delete", "Possible wiper or ransomware", alerts.KindDelete
+		}
+		if a.Tier == config.TierCritical {
+			a.Title = threat + ": " + a.ExeName() + " " + what + " your bait"
+		} else {
+			a.Title = a.ExeName() + " " + what + " a bait"
+		}
+		a.Verdict.Reasons = append(a.Verdict.Reasons[:len(a.Verdict.Reasons):len(a.Verdict.Reasons)],
+			"it went on to "+to+" the bait: that's what ransomware and wipers do to a file, not what a stealer does")
+	}
+	cp := *a
+	cp.Baits = append([]alerts.BaitHit(nil), a.Baits...)
+	return &cp, true
+}
+
 // wantsAutopsy: a program caught as a stealer or clipper (or `aba test`'s),
 // or anything frozen, gets looked into. A warning about a program that's
 // still running free doesn't: it's no verdict that it stole anything.
@@ -950,7 +1118,7 @@ func wantsAutopsy(a *alerts.Alert, v classify.Verdict, frozen []uint32) bool {
 		return false
 	}
 	switch a.Kind {
-	case alerts.KindRead, alerts.KindClipper, alerts.KindTest:
+	case alerts.KindRead, alerts.KindWrite, alerts.KindDelete, alerts.KindClipper, alerts.KindTest:
 	default:
 		return false
 	}
@@ -1220,6 +1388,71 @@ func (e *Engine) unitNames(units []string) []string {
 	return names
 }
 
+// wreckFolders is how many different folders a program must rewrite baits in,
+// within the window, to be stopped as ransomware whatever it is.
+const wreckFolders = 2
+
+// wreck records that pid opened the document bait at path to change it, and
+// returns the folders it has done that in within the window. Only your
+// documents count (the files in your Desktop, Documents and home folder):
+// that's where ransomware goes, and nothing legitimate rewrites files it
+// didn't make in one folder after another. An app's own data doesn't count:
+// the app, a cleaner or a sync client rewrites that all the time. Deletes
+// are only counted for a script host (see handle): you delete files in
+// several folders in Explorer, and a sync client moves them, all the time.
+func (e *Engine) wreck(pid uint32, baitID, path string, now time.Time) []string {
+	if sweepUnit(baitID) != filesUnit {
+		return nil
+	}
+	ct := e.Ops.CreateTime(pid)
+	dir := strings.ToLower(filepath.Dir(path))
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for p, sw := range e.wrecked {
+		fresh := false
+		for _, t := range sw.baits {
+			fresh = fresh || now.Sub(t) < window
+		}
+		if !fresh {
+			delete(e.wrecked, p)
+		}
+	}
+	sw := e.wrecked[pid]
+	if sw == nil || (ct != 0 && sw.createTime != 0 && sw.createTime != ct) {
+		sw = &sweep{createTime: ct, baits: map[string]time.Time{}}
+		e.wrecked[pid] = sw
+	}
+	if sw.createTime == 0 {
+		sw.createTime = ct
+	}
+	sw.baits[dir] = now
+	var dirs []string
+	for d, t := range sw.baits {
+		if now.Sub(t) < window {
+			dirs = append(dirs, d)
+		}
+	}
+	sort.Strings(dirs)
+	return dirs
+}
+
+// wreckVerdict turns a verdict into a critical one: the program rewrote
+// files of yours in several folders (access "write"), or a script deleted
+// them there ("delete").
+func (e *Engine) wreckVerdict(v classify.Verdict, dirs []string, access string) classify.Verdict {
+	names := make([]string, len(dirs))
+	for i, d := range dirs {
+		names[i] = filepath.Base(d)
+	}
+	did, moral := "went to overwrite", "ransomware and wipers rewrite everything they find, real programs only change what you open in them"
+	if access == "delete" {
+		did, moral = "deleted", "a wiper, or ransomware removing what it has encrypted a copy of, goes through everything it finds"
+	}
+	why := fmt.Sprintf("it %s files of yours in %d different folders within %d minutes (%s): %s",
+		did, len(dirs), int(window.Minutes()), strings.Join(names, ", "), moral)
+	return classify.Verdict{Tier: config.TierCritical, Reasons: append([]string{why}, v.Reasons...)}
+}
+
 func (e *Engine) sweepVerdict(v classify.Verdict, swept []string) classify.Verdict {
 	names := e.unitNames(swept)
 	why := fmt.Sprintf("it read the data of %d different apps within %d minutes (%s): stealers sweep everything, real apps only touch their own",
@@ -1244,12 +1477,23 @@ func (e *Engine) repeat(image, baitID string, now time.Time) bool {
 
 func (e *Engine) describe(a *alerts.Alert, v classify.Verdict) {
 	exe := a.ExeName()
-	what := "read"
-	if a.Kind == alerts.KindDelete {
-		what = "deleted"
+	what, threat := "read", "Possible stealer"
+	switch a.Kind {
+	case alerts.KindDelete:
+		what, threat = "deleted", "Possible wiper or ransomware"
+	case alerts.KindWrite:
+		what, threat = "changed", "Possible ransomware"
 	}
 	if a.Instant {
-		what = "opened"
+		// Caught inside the open: what it asked to do, not what it did.
+		switch a.Kind {
+		case alerts.KindDelete:
+			what = "went to delete"
+		case alerts.KindWrite:
+			what = "went to overwrite"
+		default:
+			what = "opened"
+		}
 	}
 	switch {
 	case a.Test && len(a.Baits) > 0 && a.Baits[0].Access == "swap":
@@ -1263,7 +1507,7 @@ func (e *Engine) describe(a *alerts.Alert, v classify.Verdict) {
 	case v.DecoyOwner:
 		a.Title = exe + " is installed: retiring its decoy"
 	case v.Tier == config.TierCritical:
-		a.Title = "Possible stealer: " + exe + " " + what + " your bait"
+		a.Title = threat + ": " + exe + " " + what + " your bait"
 	case v.Tier == config.TierWarn:
 		a.Title = exe + " " + what + " a bait"
 	default:

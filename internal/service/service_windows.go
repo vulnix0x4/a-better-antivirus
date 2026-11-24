@@ -569,11 +569,22 @@ func (s *server) detectionHealth(startup bool, add func(name string, ok bool, de
 
 // onOpen gets the program(s) that just opened a bait, identified precisely by
 // package instant. Freeze what deserves it; the alert is raised asynchronously.
-func (s *server) onOpen(path string, at time.Time, pids []uint32) {
+func (s *server) onOpen(path string, at time.Time, intent instant.Intent, pids []uint32) {
 	for _, pid := range pids {
 		s.sawOpen(pid, path)
-		s.decideOpen(path, at, pid)
+		s.decideOpenOp(path, opOf(intent), at, pid)
 	}
+}
+
+// opOf is what an open's intent means to the engine.
+func opOf(i instant.Intent) detect.Op {
+	switch i {
+	case instant.Write:
+		return detect.OpWrite
+	case instant.Delete:
+		return detect.OpDelete
+	}
+	return detect.OpRead
 }
 
 const ghostWhy = "it opened the bait in a way that keeps Windows from pausing it, which only makes sense to slip past instant freeze"
@@ -583,9 +594,17 @@ const ghostWhy = "it opened the bait in a way that keeps Windows from pausing it
 // opener. One that isn't frozen here (alert-only setup, a service) still gets
 // an alert, even if it never goes on to read: it may only have been probing
 // for which files are guarded.
-func (s *server) onGhost(path string, at time.Time, pids []uint32, ahead bool) {
+func (s *server) onGhost(path string, at time.Time, intent instant.Intent, pids []uint32, ahead bool) {
 	for _, pid := range pids {
 		s.sawOpen(pid, path)
+		if intent != instant.Read {
+			// An open to change or delete the bait that wasn't paused: backup
+			// and sync tools open files that way too, so it's no sign of
+			// evasion. It's decided like any opener; if it's let through, the
+			// event log reports what it does.
+			s.decideOpenOp(path, opOf(intent), at, pid)
+			continue
+		}
 		s.eng.NoteEvasion(pid, ghostWhy)
 		if s.decideOpen(path, at, pid) {
 			continue

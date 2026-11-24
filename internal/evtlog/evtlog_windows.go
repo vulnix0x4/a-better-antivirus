@@ -273,13 +273,18 @@ func (e *Event) AsObjectAccess() (*ObjectAccess, bool) {
 }
 
 // Access is the event in the form the engine takes. ok is false for an access
-// that neither reads nor deletes (attributes, permissions…): nothing to report.
+// that neither reads, changes nor deletes (attributes, permissions…): nothing
+// to report. Windows logs each kind of access as it's first used, so a
+// program that reads a bait and then overwrites it produces a read and a
+// write.
 func (oa *ObjectAccess) Access() (a *detect.Access, ok bool) {
 	a = &detect.Access{Time: oa.Time, Path: oa.ObjectName, Alias: oa.Alias,
 		PID: oa.ProcessID, Image: oa.ProcessName, User: oa.User, UserID: oa.UserSID}
 	switch {
 	case winsec.AccessMaskIsRead(oa.AccessMask):
 		a.Op = detect.OpRead
+	case winsec.AccessMaskIsWrite(oa.AccessMask):
+		a.Op = detect.OpWrite
 	case winsec.AccessMaskIsDelete(oa.AccessMask):
 		a.Op = detect.OpDelete
 	default:

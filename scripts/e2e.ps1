@@ -337,13 +337,14 @@ Check ((RecorderRule $sshDir).Count -eq 1) 'the flight recorder''s audit rule is
 $token = '7134567890:AAHk3n2Lq9xZr8Yv6Tt5Ww4Uu3Ss2Rr1Qq0'
 # Readers: copies of aba.exe (unsigned, in Temp) running test-reader, which
 # reads each file it's given in turn, then waits to be frozen.
-function Reader([string]$name, [string[]]$files, [string]$beacon) {
+function Reader([string]$name, [string[]]$files, [string]$beacon, [string]$do) {
     $exe = Join-Path $env:TEMP "$name.exe"
     Copy-Item $Aba $exe -Force
     [IO.File]::AppendAllText($exe, [guid]::NewGuid().ToString())
     Snap
     $readerArgs = @($exe, 'test-reader')
     if ($beacon) { $readerArgs += @('--beacon', $beacon) }
+    if ($do) { $readerArgs += @('--do', $do) }   # overwrite | delete, instead of reading
     $procId = & $Medium @readerArgs @files
     if ($LASTEXITCODE -or -not $procId) { Fail "fake stealer $name didn't start" }
     return [int]$procId
@@ -389,6 +390,32 @@ if ($ab.autopsy.answer -eq 'no-sign') {
     Check ($ab.autopsy.answer -eq 'cannot-tell' -and -not (($ab.autopsy.unsure -join ' ') -match 'SSH')) "can't tell, for reasons that aren't the SSH keys: $($ab.autopsy.unsure -join ' | ')"
 }
 Aba kill $ab.id
+
+Step 'Ransomware: a program that goes to overwrite a bait is stopped'
+# It opens the bait only to write to it: nothing to steal that way, and what
+# ransomware does to every file. A bait in Documents, where it would walk.
+$docBait = @((State).baits.PSObject.Properties.Value | ForEach-Object { $_.files.path } | Where-Object { $_ -like "$env:USERPROFILE\Documents\*" }) | Select-Object -First 1
+if (-not $docBait) { Fail 'no bait in Documents to try this on' }
+$pw = Reader 'locker-a' @($docBait) '' 'overwrite'
+$aw = AlertFor $pw
+Check ($aw -and $aw.tier -eq 'critical' -and (Did $aw 'freeze')) "caught and frozen ($($aw.id)): $($aw.title)"
+# Windows doesn't always say what an open asked for; then it's caught as an
+# open, and the alert says what it did once the event log does.
+$aw = WaitFor { Alerts | Where-Object { $_.id -eq $aw.id -and $_.kind -eq 'write' } } 20
+Check ($aw) "the alert says it overwrote the bait: $($aw.title)"
+Aba kill $aw.id
+Aba doctor --fix
+
+Step 'Wiper: a program that deletes a bait is stopped, and the bait put back'
+Check (WaitFor { Test-Path $docBait } 10) 'the bait is there'
+$pd = Reader 'wiper-a' @($docBait) '' 'delete'
+$ad = AlertFor $pd
+Check ($ad -and $ad.tier -eq 'critical' -and (Did $ad 'freeze')) "caught and frozen ($($ad.id)): $($ad.title)"
+$ad = WaitFor { Alerts | Where-Object { $_.id -eq $ad.id -and $_.kind -eq 'delete' } } 20
+Check ($ad) "the alert says it deleted the bait: $($ad.title)"
+Aba kill $ad.id
+Aba doctor --fix
+Check (WaitFor { Test-Path $docBait } 30) 'the deleted bait was put back'
 
 Step 'A signed, legit program reading a bait is let through'
 $legit = Join-Path $env:TEMP 'legit-curl.exe'   # Microsoft-signed (catalog), so "warn": notify only

@@ -46,6 +46,7 @@ const (
 	Read   Op = iota + 1 // opened for reading, or copied (clone, copyfile)
 	Delete               // deleted, or renamed away
 	Link                 // given a second name (a hard link)
+	Write                // opened only to write: to overwrite it, not to read it
 )
 
 // Process is what the kernel said about a process in an event.
@@ -551,8 +552,11 @@ func (e *rawEvent) touches(got time.Time, baitOf func(string) (string, string, b
 		case "open":
 			var flag uint32
 			json.Unmarshal(x["fflag"], &flag)
-			if flag&0x1 != 0 { // FREAD
+			switch {
+			case flag&0x1 != 0: // FREAD
 				add(Read, pathOf(x["file"]), "")
+			case flag&0x2 != 0: // FWRITE alone: what ransomware and wipers ask for
+				add(Write, pathOf(x["file"]), "")
 			}
 		case "clone", "copyfile":
 			add(Read, pathOf(x["source"]), "")

@@ -507,7 +507,14 @@ func (s *server) RetireDecoy(id, why string) {
 // at path (or has just identified it there): freeze it if it deserves it. It
 // reports whether it did; the alert is then raised asynchronously.
 func (s *server) decideOpen(path string, at time.Time, pid uint32) bool {
-	ok, why := s.eng.DecideInstantWhy(pid, path)
+	return s.decideOpenOp(path, detect.OpRead, at, pid)
+}
+
+// decideOpenOp is decideOpen for a watcher that knows what the open asked
+// for: to read the bait (OpRead), only to change it (OpWrite), or only to
+// delete it (OpDelete).
+func (s *server) decideOpenOp(path string, op detect.Op, at time.Time, pid uint32) bool {
+	ok, why := s.eng.DecideInstantOpWhy(pid, path, op)
 	if !ok {
 		s.log.Printf("instant: pid %d let through: %s", pid, why)
 		return false
@@ -519,8 +526,15 @@ func (s *server) decideOpen(path string, at time.Time, pid uint32) bool {
 		return false
 	}
 	img, _ := procinfo.ImagePath(pid)
-	s.log.Printf("instant freeze: %s (pid %d) opened %s; frozen %d ms after the open", img, pid, path, time.Since(at).Milliseconds())
-	go s.safe("instant-freeze alert", func() { s.eng.HandleOpen(pid, path, at, frozen) })
+	how := ""
+	switch op {
+	case detect.OpWrite:
+		how = " to change it"
+	case detect.OpDelete:
+		how = " to delete it"
+	}
+	s.log.Printf("instant freeze: %s (pid %d) opened %s%s; frozen %d ms after the open", img, pid, path, how, time.Since(at).Milliseconds())
+	go s.safe("instant-freeze alert", func() { s.eng.HandleOpenOp(pid, path, op, at, frozen) })
 	return true
 }
 
