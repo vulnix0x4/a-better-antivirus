@@ -79,8 +79,10 @@ func plant(t *testing.T, spec baits.Spec, u config.UserInfo) (*opens, func()) {
 	}
 	o := &opens{}
 	w := &instant.Watcher{Self: uint32(os.Getpid()),
-		OnOpen:  func(p string, _ time.Time, pids []uint32) { o.add("opened", p, pids) },
-		OnGhost: func(p string, _ time.Time, pids []uint32, _ bool) { o.add("opened without waiting", p, pids) },
+		OnOpen: func(p string, _ time.Time, _ instant.Intent, pids []uint32) { o.add("opened", p, pids) },
+		OnGhost: func(p string, _ time.Time, _ instant.Intent, pids []uint32, _ bool) {
+			o.add("opened without waiting", p, pids)
+		},
 		OnOther: func(p string, access uint32) {
 			o.add(fmt.Sprintf("opened (not for reading, access 0x%x)", access), p, nil)
 		}}

@@ -362,8 +362,11 @@ func (s *server) onEvent(ev eswatch.Event) {
 	// possible is still running.
 	go s.safe("origin", func() { classify.Remember(pid) })
 	op := detect.OpRead
-	if ev.Op == eswatch.Delete {
+	switch ev.Op {
+	case eswatch.Delete:
 		op = detect.OpDelete
+	case eswatch.Write:
+		op = detect.OpWrite
 	}
 	a := &detect.Access{Time: ev.At, Op: op, Path: ev.Path, Alias: ev.Alias, PID: pid, Image: image, Helpers: helpers}
 	if ev.Op == eswatch.Link {

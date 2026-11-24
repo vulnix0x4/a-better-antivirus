@@ -196,8 +196,11 @@ func warnings(a *alerts.Alert) string {
 }
 
 func accessVerb(access string) string {
-	if access == "delete" {
+	switch access {
+	case "delete":
 		return "deleted"
+	case "write":
+		return "changed"
 	}
 	return "read"
 }

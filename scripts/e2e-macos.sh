@@ -390,6 +390,17 @@ note "$(field "$a" '.autopsy.summary[0]')"
 sudo aba kill "$id" >/dev/null || fail "aba kill"
 rm -f "$HOME/Downloads/stealer-a" "$HOME/Downloads/stealer-b"
 
+say "Ransomware: a program that opens a bait only to write to it is stopped"
+# Nothing to steal that way: it's what ransomware and wipers do to a file.
+cp "$GRABBER" "$HOME/Downloads/locker"; echo "a locker's fingerprint" >> "$HOME/Downloads/locker"; codesign --force -s - "$HOME/Downloads/locker" 2>/dev/null; chmod 755 "$HOME/Downloads/locker"
+pid=$(launch "$HOME/Downloads/locker" -wait 1000 -write -out "$OUT/w1" "$PASSWORDS")
+id=$(expect_frozen "$pid" "$OUT/w1" "a program that went to overwrite a bait") || exit 1
+a=$(wait_alert ".id == \"$id\"") || fail "the alert $id is gone"
+[ "$(field "$a" .kind)" = write ] || fail "the alert is a $(field "$a" .kind), want write: $(field "$a" .title)"
+ok "$(field "$a" .title)"
+sudo aba kill "$id" >/dev/null || fail "aba kill"
+rm -f "$HOME/Downloads/locker"
+
 # =====================================================================
 say "Strict mode: the whole Mac is cut off, and given back"
 r=$(reloads)

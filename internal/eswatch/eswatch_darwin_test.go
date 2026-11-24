@@ -30,8 +30,10 @@ func collect(t *testing.T, baits []string, lines ...string) ([]Event, []Exec) {
 func TestReadsAndWrites(t *testing.T) {
 	bait := "/Users/a/Library/Application Support/Exodus/exodus.wallet/seed.seco"
 	evs, _ := collect(t, []string{bait}, openLine, writeLine)
-	if len(evs) != 1 {
-		t.Fatalf("want only the read, got %+v", evs)
+	// The read, and the open that only writes: that one is what ransomware
+	// and wipers do to a file, reported as a write.
+	if len(evs) != 2 || evs[1].Op != Write || evs[1].Path != bait || evs[1].Proc.PID != 1 {
+		t.Fatalf("want the read and the write, got %+v", evs)
 	}
 	e := evs[0]
 	if e.Op != Read || e.Path != bait || e.Proc.PID != 53306 || e.Proc.PPID != 53300 || e.Proc.Image != "/bin/cat" ||

@@ -52,6 +52,7 @@ func main() {
 	idle := flag.Bool("idle", false, "do nothing (the helper process)")
 	serve := flag.String("serve", "", "address to take phone alerts on, instead of grabbing")
 	finder := flag.Bool("finder", false, "have Finder copy each file")
+	write := flag.Bool("write", false, "open each file only to write to it, instead of reading it")
 	flag.StringVar(&beacon, "beacon", "", "an address to keep in memory, the way a stealer keeps where it sends")
 	flag.Parse()
 	held = []byte(beacon)
@@ -93,6 +94,17 @@ func main() {
 	}
 	time.Sleep(time.Duration(*wait) * time.Millisecond)
 	for i, p := range flag.Args() {
+		if *write {
+			// What ransomware asks for: to write, not to read. (Nothing is
+			// written: asking is what's caught.)
+			if f, err := os.OpenFile(p, os.O_WRONLY, 0); err != nil {
+				note("ERR %s %v", p, err)
+			} else {
+				f.Close()
+				note("OPENED-TO-WRITE %s", p)
+			}
+			continue
+		}
 		name := p
 		if *link {
 			name = filepath.Join(filepath.Dir(*out), fmt.Sprintf("grabbed-%d-%d.tmp", os.Getpid(), i))

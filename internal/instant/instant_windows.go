@@ -336,13 +336,15 @@ func selfIn(stuck []Thread, self uint32) bool {
 type Watcher struct {
 	// OnOpen gets the program(s) that opened the bait, identified by waking up
 	// exactly when ABA let go. It runs a few ms after the open.
-	OnOpen func(path string, at time.Time, pids []uint32)
+	// intent is what the open asked for (see Intent).
+	OnOpen func(path string, at time.Time, intent Intent, pids []uint32)
 	// OnGhost gets the program(s) that opened the bait without letting Windows
 	// pause them (see the package comment): found by who holds the file, not by
 	// who woke. When ahead is true it runs before ABA lets go, so they haven't
 	// read through that handle yet.
-	OnGhost func(path string, at time.Time, pids []uint32, ahead bool)
-	// OnOther runs for opens that don't read contents (delete, security checks).
+	OnGhost func(path string, at time.Time, intent Intent, pids []uint32, ahead bool)
+	// OnOther runs for opens that neither read the contents nor change or
+	// delete the file (security checks, attributes).
 	OnOther func(path string, access uint32)
 	// OnBlocked runs when a bait can't be guarded because some program keeps it
 	// open (pids), which switches instant freeze off for that file.
@@ -523,11 +525,13 @@ func (w *Watcher) guard(path string, stop windows.Handle) {
 			return
 		}
 		tick0, at := Tick(), time.Now()
-		// Only opens that can read the contents count. Windows reports the
-		// requested access for some opens (e.g. delete) but not for plain reads,
-		// so "unknown" is treated as a possible read.
+		// Only opens that can read the contents, change them or delete the
+		// file count. Windows reports the requested access for some opens
+		// (e.g. delete) but not for plain reads, so "unknown" is treated as a
+		// possible read.
 		access, known := g.OpenerAccess()
-		if known && !WantsContents(access) {
+		intent := intentOf(access, known)
+		if known && !WantsContents(access) && !WantsChange(access) {
 
 			if w.OnOther != nil {
 				w.OnOther(path, access)
@@ -555,7 +559,7 @@ func (w *Watcher) guard(path string, stop windows.Handle) {
 		// returned). Reported before letting go, so it hasn't read yet.
 		if !own && len(holders) > 0 && (len(stuck) == 0 || (len(holders) == 1 && hasPID(stuckPIDs(stuck), holders[0]))) {
 			w.logf("instant: %s opened by %v without being paused (ghost open)", path, holders)
-			w.ghost(path, at, holders, true)
+			w.ghost(path, at, intent, holders, true)
 			g.Release()
 			if stopped(150 * time.Millisecond) {
 				return
@@ -567,7 +571,7 @@ func (w *Watcher) guard(path string, stop windows.Handle) {
 		if w.Suspect != nil && !own {
 			if p := w.Suspect(path, stuckPIDs(stuck)); p != 0 {
 				w.logf("instant: %s opened while pid %d (already sweeping) was paused in it", path, p)
-				w.report(path, at, []uint32{p})
+				w.report(path, at, intent, []uint32{p})
 				g.Release()
 				if stopped(150 * time.Millisecond) {
 					return
@@ -592,10 +596,10 @@ func (w *Watcher) guard(path string, stop windows.Handle) {
 			// returned; it was waiting in a read), or threads were stuck but none
 			// woke when ABA let go, so none was the opener: it's whoever holds the file.
 			w.logf("instant: %s opened by %v without being paused (ghost open)", path, holders)
-			w.ghost(path, at, holders, false)
+			w.ghost(path, at, intent, holders, false)
 			pids = nil
 		}
-		w.report(path, at, pids)
+		w.report(path, at, intent, pids)
 		// Give the opener time to finish before re-arming (a trusted reader may
 		// still hold the file; Arm just retries until it's free).
 		if stopped(150 * time.Millisecond) {
@@ -604,7 +608,7 @@ func (w *Watcher) guard(path string, stop windows.Handle) {
 	}
 }
 
-func (w *Watcher) report(path string, at time.Time, pids []uint32) {
+func (w *Watcher) report(path string, at time.Time, intent Intent, pids []uint32) {
 	if w.OnOpen == nil {
 		return
 	}
@@ -613,10 +617,10 @@ func (w *Watcher) report(path string, at time.Time, pids []uint32) {
 			w.logf("instant freeze handler panicked: %v", p)
 		}
 	}()
-	w.OnOpen(path, at, pids)
+	w.OnOpen(path, at, intent, pids)
 }
 
-func (w *Watcher) ghost(path string, at time.Time, pids []uint32, ahead bool) {
+func (w *Watcher) ghost(path string, at time.Time, intent Intent, pids []uint32, ahead bool) {
 	if w.OnGhost == nil {
 		return
 	}
@@ -625,7 +629,7 @@ func (w *Watcher) ghost(path string, at time.Time, pids []uint32, ahead bool) {
 			w.logf("instant freeze handler panicked: %v", p)
 		}
 	}()
-	w.OnGhost(path, at, pids, ahead)
+	w.OnGhost(path, at, intent, pids, ahead)
 }
 
 func hasPID(pids []uint32, pid uint32) bool {
@@ -657,6 +661,47 @@ func (g *Guard) OpenerAccess() (uint32, bool) {
 		return 0, false
 	}
 	return g.out.AccessMode, true
+}
+
+// Intent is what an open of a bait asked for.
+type Intent int
+
+const (
+	// Read: it can read the contents (or Windows didn't say what it asked
+	// for, which is how plain reads arrive).
+	Read Intent = iota
+	// Write: it can change the contents and can't read them: an overwrite.
+	Write
+	// Delete: it can only delete or rename the file.
+	Delete
+)
+
+func (i Intent) String() string { return [...]string{"read", "write", "delete"}[i] }
+
+func intentOf(access uint32, known bool) Intent {
+	switch {
+	case !known || WantsContents(access):
+		return Read
+	case access&(fileWriteData|fileAppendData|genericWrite) != 0:
+		return Write
+	case access&accessDelete != 0:
+		return Delete
+	}
+	return Read
+}
+
+const (
+	fileWriteData  = 0x00000002
+	fileAppendData = 0x00000004
+	accessDelete   = 0x00010000
+	genericWrite   = 0x40000000
+)
+
+// WantsChange reports whether an access mask can change the file's data or
+// delete the file: what ransomware and wipers ask for. (Changing attributes
+// or permissions doesn't count: backup and sync tools do that all day.)
+func WantsChange(access uint32) bool {
+	return access&(fileWriteData|fileAppendData|accessDelete|genericWrite) != 0
 }
 
 // WantsContents reports whether an access mask can read the file's data.

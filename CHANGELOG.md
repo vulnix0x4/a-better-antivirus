@@ -43,6 +43,24 @@ cookies or keys?
   automatic kill waits for the autopsy.
 - **Alerts say that only connections still open are known**: one the program had already closed isn't.
 
+**Ransomware and wipers**
+
+- **A program that destroys a bait is stopped like one that reads it.** Until now an open that couldn't
+  read the bait was let through: opening it only to write, or deleting it, was at most reported. Now a
+  program that would be stopped for reading a bait (unsigned in a user-writable folder, a script host) is
+  stopped for going to overwrite or delete one, on Windows inside the open, before it can write. The alert
+  says "Possible ransomware" or "Possible wiper or ransomware", and what it went to do.
+- **Rewriting your documents in folder after folder is ransomware, whatever does it.** A program that goes
+  to overwrite document baits in two different folders within two minutes is stopped even if it's signed
+  or trusted by a rule: ransomware often runs inside a legitimate program. The system's own sync (OneDrive,
+  iCloud) is exempt, and so is anything you've allowed to read everything.
+- **A program that looks legitimate deleting a bait** (you in Explorer, a cleaner, a sync client) is still
+  only reported, and the bait put back.
+- **Windows** audits writes to a bait as well as reads and deletes (existing baits get the new rule when
+  the service starts). **macOS** reports an open that only writes. **Linux** already held every open of a
+  bait; a program that deletes one is now frozen when it's one that would be for reading it.
+- ABA still doesn't bring back files ransomware reached before a bait: see *Honest limitations*.
+
 **macOS**
 
 - Built with cgo (one package, for reading a frozen program's memory) for macOS 14 and later, signed with

@@ -146,6 +146,10 @@ func (c *Classifier) SystemBinary(image string) bool {
 	return c.Env.locate(image, 1) == locSystem
 }
 
+// OSVendorSigned reports whether sig is a valid signature of the operating
+// system's own maker (Microsoft on Windows, Apple on macOS).
+func OSVendorSigned(sig provenance.Result) bool { return sig.Valid && osVendor(sig.Signer) }
+
 // Prelim is the instant verdict before the (slower) signature check, assuming
 // the binary is unsigned. Used to decide whether to freeze immediately.
 func (c *Classifier) Prelim(image string, pid uint32, bait Bait) Verdict {
