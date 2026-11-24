@@ -80,6 +80,9 @@ func decide(f facts, a *alerts.Autopsy) {
 		if c.Absent && !c.Watched {
 			continue
 		}
+		if c.Watched && c.Files == 0 {
+			continue // its folder is watched, and there's nothing in it yet
+		}
 		present++
 		if c.Watched {
 			watched = append(watched, c.Name)
