@@ -14,6 +14,17 @@
 //	ghost holders  <file>   for a failing test: whether the file can still be
 //	                        opened (a deleted file that something keeps open
 //	                        can't), and which programs have it open
+//	ghost browser-suspended <browser.exe> <file> [status file]
+//	                        what a cookie stealer does to a browser: start
+//	                        the genuine browser suspended (it never runs, no
+//	                        window), have a thread put into it open <file>,
+//	                        wait a few seconds, then end the browser
+//	ghost browser-inject <pid> <file> [status file]
+//	                        the same thread, put into a browser that's already
+//	                        running (one the test itself started)
+//
+// The browser modes read nothing for themselves: see browser_windows.go.
+// They write both PIDs to the status file ("browser pid N", "ghost pid M").
 //
 // With a third argument, a file, the reader appends a line to it ten times a
 // second after its read: a heartbeat that shows whether it's running or frozen.
@@ -128,7 +139,70 @@ func holders(path string) string {
 	return out
 }
 
+// browser runs the browser modes (see the top of this file).
+func browser(mode, target, file, status string) error {
+	note := func(format string, a ...any) {
+		fmt.Printf(format+"\n", a...)
+		if status != "" {
+			if f, err := os.OpenFile(status, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
+				fmt.Fprintf(f, format+"\n", a...)
+				f.Close()
+			}
+		}
+	}
+	note("ghost pid %d", os.Getpid())
+	if mode == "browser-inject" {
+		var pid uint32
+		if _, err := fmt.Sscan(target, &pid); err != nil {
+			return err
+		}
+		const access = windows.PROCESS_CREATE_THREAD | windows.PROCESS_VM_OPERATION | windows.PROCESS_VM_WRITE | windows.PROCESS_QUERY_INFORMATION
+		h, err := windows.OpenProcess(access, false, pid)
+		if err != nil {
+			return err
+		}
+		defer windows.CloseHandle(h)
+		note("browser pid %d", pid)
+		got, err := openInside(h, file, 10*time.Second)
+		if err != nil {
+			return err
+		}
+		note("its thread read %d bytes of %s (-1: it hadn't finished)", got, file)
+		return nil
+	}
+	pi, err := startSuspended(target)
+	if err != nil {
+		return err
+	}
+	defer windows.CloseHandle(pi.Process)
+	defer windows.CloseHandle(pi.Thread)
+	note("browser pid %d", pi.ProcessId)
+	got, err := openInside(pi.Process, file, 5*time.Second)
+	if err != nil {
+		windows.TerminateProcess(pi.Process, 1)
+		return err
+	}
+	note("its thread read %d bytes of %s (-1: it hadn't finished)", got, file)
+	// Like the real thing: done with it, end it. (A stealer that ABA froze
+	// never gets here.)
+	time.Sleep(3 * time.Second)
+	windows.TerminateProcess(pi.Process, 0)
+	note("ended the browser")
+	return nil
+}
+
 func main() {
+	if len(os.Args) >= 4 && len(os.Args) <= 5 && (os.Args[1] == "browser-suspended" || os.Args[1] == "browser-inject") {
+		status := ""
+		if len(os.Args) == 5 {
+			status = os.Args[4]
+		}
+		if err := browser(os.Args[1], os.Args[2], os.Args[3], status); err != nil {
+			fmt.Fprintln(os.Stderr, "ghost:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) != 3 && len(os.Args) != 4 {
 		fmt.Fprintln(os.Stderr, "usage: ghost plain|ghost|map|link|linkgone <file> [heartbeat file]  |  ghost resume <pid>  |  ghost holders <file>")
 		os.Exit(2)
