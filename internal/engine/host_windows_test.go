@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/alerts"
+	"github.com/vulnix0x4/a-better-antivirus/internal/autopsy"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
 	"github.com/vulnix0x4/a-better-antivirus/internal/trust"
@@ -351,6 +352,95 @@ func TestInstantDecisionsForABrowser(t *testing.T) {
 	if ok, _ := e.DecideInstantOpWhy(1000, bait, 0); ok {
 		t.Fatal("a process that has exited")
 	}
+}
+
+const (
+	braveExe = `C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe`
+	edgeExe  = `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`
+)
+
+// The VM run with all three browsers open: the tool's Chrome and Brave each
+// went through their fake profile, then the person's own Edge read the
+// password-list bait as it does on every start (only "info": signed,
+// installed). Edge used to be frozen as the last of "3 programs together"
+// reading 3 apps' data. A browser the host policy dealt with is a closed
+// case: it doesn't make a stranger part of a team.
+func TestHostReadsDontMakeAStrangerATeammate(t *testing.T) {
+	e, f, bait, _ := browserUser(t, "balanced", 900, ghostExe, suspended)
+	e.cfg.InstantFreeze = true
+	// Brave too, with its own fake profile, and its own copy run by the tool.
+	braveUD := strings.Replace(strings.TrimSuffix(bait, `Profile 23\Login Data`), `Google\Chrome`, `BraveSoftware\Brave-Browser`, 1)
+	os.MkdirAll(braveUD, 0o755)
+	os.WriteFile(braveUD+"Local State", []byte(`{"profile":{"info_cache":{"Default":{}}}}`), 0o644)
+	e.cfg.User.Embedded["brave-profile"] = "Profile 13"
+	braveBait := braveUD + `Profile 13\Network\Cookies`
+	st := stateWithAll()
+	st.Baits["chrome-profile"] = &config.BaitState{ID: "chrome-profile", Name: "extra profile inside your Chrome", Files: []config.BaitFile{{Path: bait, Audit: true}}}
+	st.Baits["brave-profile"] = &config.BaitState{ID: "brave-profile", Name: "extra profile inside your Brave", Files: []config.BaitFile{{Path: braveBait, Audit: true}}}
+	e.Configure(e.cfg, st)
+	brave := &procinfo.BrowserInstance{Main: 2000, MainCreate: 1, Image: braveExe, PIDs: []uint32{2000}, CreatedSuspended: true,
+		Starter: 900, StarterImage: ghostExe, StarterCreate: 1}
+	f.browsers[2000], f.images[2000] = brave, braveExe
+	signed(f, braveExe, "Brave Software Inc")
+	f.images[3000] = edgeExe
+	signed(f, edgeExe, "Microsoft Corporation")
+
+	e.HandleAccess(ev(1000, chromeExe, bait, 1))
+	e.HandleAccess(ev(2000, braveExe, braveBait, 1))
+	if ok, why := e.DecideInstantOpWhy(3000, desktopBait, 0); ok {
+		t.Fatalf("the person's Edge frozen inside its open: %s", why)
+	}
+	e.HandleAccess(ev(3000, edgeExe, desktopBait, 1))
+	for _, a := range f.saved {
+		if a.Process.PID == 3000 && (a.Tier == config.TierCritical || len(a.Verdict.Swept) > 0) {
+			t.Fatalf("Edge convicted by the browsers' reads: %+v", a)
+		}
+	}
+	if hasP(f.suspended, 3000) || hasP(frozenPIDs(f), 3000) {
+		t.Fatalf("Edge frozen: %v", f.suspended)
+	}
+}
+
+// A genuine browser frozen for something else (a sweep it was part of) reads
+// its own profiles all day: the autopsy doesn't count those as taken. A
+// browser a stealer started and ran its code in is the stealer's: what it
+// opened counts.
+func TestAutopsyOfAGenuineBrowserLeavesItsOwnDataOut(t *testing.T) {
+	e, f := setup("balanced")
+	f.images[3000] = edgeExe
+	signed(f, edgeExe, "Microsoft Corporation")
+	for _, b := range []string{desktopBait, discordBait, awsBait} {
+		e.HandleAccess(ev(3000, edgeExe, b, 1))
+	}
+	c := waitCase(t, f)
+	if c.Own[3000] != "edge-profile" {
+		t.Fatalf("Edge's own data: %v", c.Own)
+	}
+
+	e, f, bait, _ := browserUser(t, "balanced", 900, ghostExe, suspended)
+	e.HandleAccess(ev(1000, chromeExe, bait, 1))
+	if c := waitCase(t, f); len(c.Own) != 0 {
+		t.Fatalf("the stealer's copy of Chrome: %v", c.Own)
+	}
+}
+
+func waitCase(t *testing.T, f *fakeOps) autopsy.Case {
+	t.Helper()
+	for i := 0; i < 200; i++ {
+		f.mu.Lock()
+		n := len(f.cases)
+		var c autopsy.Case
+		if n > 0 {
+			c = f.cases[n-1]
+		}
+		f.mu.Unlock()
+		if n > 0 {
+			return c
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("no autopsy")
+	return autopsy.Case{}
 }
 
 // While the open is still paused: the one genuine browser among the paused
