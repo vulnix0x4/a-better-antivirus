@@ -413,22 +413,34 @@ func runTest() error {
 }
 
 func testReaderCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:    "test-reader <path>",
+	var beacon string
+	c := &cobra.Command{
+		Use:    "test-reader <path>...",
 		Hidden: true,
-		Args:   cobra.ExactArgs(1),
+		Args:   cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// --beacon: an address to keep in memory, the way a stealer keeps
+			// where it sends (for the end-to-end test of the autopsy).
+			held := []byte(beacon)
 			time.Sleep(700 * time.Millisecond) // let `aba test` register our PID
-			f, err := os.Open(args[0])
-			if err == nil {
-				buf := make([]byte, 512)
-				f.Read(buf)
-				f.Close()
+			for i, p := range args {
+				if i > 0 {
+					time.Sleep(300 * time.Millisecond)
+				}
+				f, err := os.Open(p)
+				if err == nil {
+					buf := make([]byte, 512)
+					f.Read(buf)
+					f.Close()
+				}
 			}
 			time.Sleep(60 * time.Second) // stay alive so the freeze is real; ABA kills us
+			runtime.KeepAlive(held)
 			return nil
 		},
 	}
+	c.Flags().StringVar(&beacon, "beacon", "", "")
+	return c
 }
 
 // ---- doctor ----

