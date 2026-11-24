@@ -20,18 +20,43 @@ func TestStuckThreadsAndTick(t *testing.T) {
 	}
 }
 
-// Deleting a bait or checking its permissions must not look like a read.
-func TestNonReadOpensAreLetThrough(t *testing.T) {
+// Deleting a bait, or opening it only to write, is reported like a read, with
+// what the open asked for: that is what ransomware and wipers do to a file.
+func TestDeleteAndWriteOpensAreReported(t *testing.T) {
 	dir := t.TempDir()
 	bait := filepath.Join(dir, "passwords.txt")
 	os.WriteFile(bait, []byte("x"), 0o644)
-	reads, others := make(chan []uint32, 4), make(chan uint32, 4)
+	type open struct {
+		intent Intent
+		pids   []uint32
+	}
+	opens, others := make(chan open, 4), make(chan uint32, 4)
 	w := &Watcher{Self: uint32(os.Getpid()),
-		OnOpen:  func(_ string, _ time.Time, pids []uint32) { reads <- pids },
+		OnOpen:  func(_ string, _ time.Time, i Intent, pids []uint32) { opens <- open{i, pids} },
 		OnOther: func(_ string, access uint32) { others <- access }}
 	w.Sync([]string{bait})
 	defer w.Stop()
 	time.Sleep(100 * time.Millisecond)
+
+	// An append from another process: it asks to write, not to read.
+	app := exec.Command("cmd.exe", "/c", "echo y>>"+bait)
+	if err := app.Run(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case o := <-opens:
+		// Windows doesn't always say what an open asked for; then it counts
+		// as a read, which is reported just the same.
+		t.Logf("write open reported as %v by %v (cmd was pid %d)", o.intent, o.pids, app.Process.Pid)
+		if o.intent == Delete {
+			t.Fatal("a write was taken for a delete")
+		}
+	case a := <-others:
+		t.Fatalf("a write open was let through unreported (access 0x%x)", a)
+	case <-time.After(5 * time.Second):
+		t.Fatal("no break for the write")
+	}
+	time.Sleep(400 * time.Millisecond) // the guard is back on the bait
 
 	// A delete from another process.
 	del := exec.Command("cmd.exe", "/c", "del", "/q", bait)
@@ -39,10 +64,13 @@ func TestNonReadOpensAreLetThrough(t *testing.T) {
 		t.Fatal(err)
 	}
 	select {
+	case o := <-opens:
+		t.Logf("delete open reported as %v by %v (cmd was pid %d)", o.intent, o.pids, del.Process.Pid)
+		if o.intent != Delete {
+			t.Fatalf("a delete was reported as %v", o.intent)
+		}
 	case a := <-others:
-		t.Logf("delete open let through (access 0x%x)", a)
-	case <-reads:
-		t.Fatal("a delete was treated as a read")
+		t.Fatalf("a delete open was let through unreported (access 0x%x)", a)
 	case <-time.After(5 * time.Second):
 		t.Fatal("no break for the delete")
 	}
@@ -51,6 +79,15 @@ func TestNonReadOpensAreLetThrough(t *testing.T) {
 	}
 	if !WantsContents(0x80000000) || !WantsContents(0x1) || WantsContents(0x00110080) {
 		t.Fatal("WantsContents mask logic")
+	}
+	// Write data, append, delete and generic write change or destroy the
+	// file; reading its permissions or changing its attributes doesn't.
+	if !WantsChange(0x2) || !WantsChange(0x4) || !WantsChange(0x00010000) || !WantsChange(0x40000000) || WantsChange(0x00020000) || WantsChange(0x00000100) {
+		t.Fatal("WantsChange mask logic")
+	}
+	if intentOf(0x00010080, true) != Delete || intentOf(0x40000000, true) != Write || intentOf(0x00010002, true) != Write ||
+		intentOf(0x3, true) != Read || intentOf(0, false) != Read {
+		t.Fatal("intentOf")
 	}
 }
 
@@ -62,7 +99,7 @@ func TestOwnReadIsNotBlamedOnOthers(t *testing.T) {
 		bait := filepath.Join(dir, "passwords.txt")
 		os.WriteFile(bait, []byte("email / hunter2\r\n"), 0o644)
 		got := make(chan []uint32, 4)
-		w := &Watcher{Self: uint32(os.Getpid()), OnOpen: func(_ string, _ time.Time, pids []uint32) { got <- pids }}
+		w := &Watcher{Self: uint32(os.Getpid()), OnOpen: func(_ string, _ time.Time, _ Intent, pids []uint32) { got <- pids }}
 		w.Sync([]string{bait})
 		time.Sleep(100 * time.Millisecond)
 
@@ -116,7 +153,7 @@ func TestSuspectDecidedBeforeTheRead(t *testing.T) {
 			}
 			return 0
 		},
-		OnOpen: func(_ string, _ time.Time, pids []uint32) {
+		OnOpen: func(_ string, _ time.Time, _ Intent, pids []uint32) {
 			b, _ := os.ReadFile(out)
 			got <- seen{pids, len(b) > 0}
 		}}
@@ -151,7 +188,7 @@ func TestPinpointsOpenerNotBystander(t *testing.T) {
 		os.WriteFile(bait, []byte("email / hunter2\r\n"), 0o644)
 
 		got := make(chan []uint32, 4)
-		w := &Watcher{Self: uint32(os.Getpid()), OnOpen: func(_ string, _ time.Time, pids []uint32) { got <- pids }}
+		w := &Watcher{Self: uint32(os.Getpid()), OnOpen: func(_ string, _ time.Time, _ Intent, pids []uint32) { got <- pids }}
 		w.Sync([]string{bait})
 		time.Sleep(100 * time.Millisecond)
 

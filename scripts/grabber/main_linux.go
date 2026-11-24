@@ -51,6 +51,7 @@ func main() {
 	serve := flag.String("serve", "", "address to take phone alerts on, instead of grabbing")
 	connect := flag.String("connect", "", "address to keep trying to reach after grabbing")
 	del := flag.Bool("delete", false, "delete the files instead of reading them")
+	write := flag.Bool("write", false, "open each file only to write to it, instead of reading it")
 	flag.StringVar(&beacon, "beacon", "", "an address to keep in memory, the way a stealer keeps where it sends")
 	flag.Parse()
 	held = []byte(beacon)
@@ -92,6 +93,17 @@ func main() {
 	}
 	time.Sleep(time.Duration(*wait) * time.Millisecond)
 	for i, p := range flag.Args() {
+		if *write {
+			// What ransomware asks for: to write, not to read. (Nothing is
+			// written: asking is what's caught.)
+			if f, err := os.OpenFile(p, os.O_WRONLY, 0); err != nil {
+				note("ERR %s %v", p, err)
+			} else {
+				f.Close()
+				note("OPENED-TO-WRITE %s", p)
+			}
+			continue
+		}
 		if *del {
 			if err := os.Remove(p); err != nil {
 				note("ERR %s %v", p, err)

@@ -45,23 +45,28 @@ const (
 	SeSecurityPrivilege = "SeSecurityPrivilege"
 	SeDebugPrivilege    = "SeDebugPrivilege"
 
-	fileReadData = 0x0001
-	fileExecute  = 0x0020
-	accessDelete = 0x00010000
+	fileReadData   = 0x0001
+	fileWriteData  = 0x0002
+	fileAppendData = 0x0004
+	fileExecute    = 0x0020
+	accessDelete   = 0x00010000
 
-	// BaitAuditMask is what we audit on baits: reading content, and
-	// deletion/rename. "Execute" counts as reading: a file opened for execute
-	// only can be mapped into memory and read there without ever asking for
-	// read access, which an audit rule on ReadData alone never sees.
-	BaitAuditMask = fileReadData | fileExecute | accessDelete
+	// BaitAuditMask is what we audit on baits: reading content, changing it,
+	// and deletion/rename. "Execute" counts as reading: a file opened for
+	// execute only can be mapped into memory and read there without ever
+	// asking for read access, which an audit rule on ReadData alone never
+	// sees. Writing and appending are what ransomware and wipers do to a
+	// file, with or without reading it first.
+	BaitAuditMask = fileReadData | fileWriteData | fileAppendData | fileExecute | accessDelete
 )
 
-// AccessMaskIsRead / IsDelete interpret 4663 access masks.
+// AccessMaskIsRead / IsWrite / IsDelete interpret 4663 access masks.
 func AccessMaskIsRead(mask uint32) bool   { return mask&(fileReadData|fileExecute) != 0 }
+func AccessMaskIsWrite(mask uint32) bool  { return mask&(fileWriteData|fileAppendData) != 0 }
 func AccessMaskIsDelete(mask uint32) bool { return mask&accessDelete != 0 }
 
 // SetBaitAudit replaces the file's SACL with "audit successful ReadData,
-// Execute and DELETE by Everyone". Requires SeSecurityPrivilege (admin). Malware running as
+// WriteData, AppendData, Execute and DELETE by Everyone". Requires SeSecurityPrivilege (admin). Malware running as
 // the user can neither see nor remove this rule.
 func SetBaitAudit(path string) error {
 	if err := EnablePrivilege(SeSecurityPrivilege); err != nil {

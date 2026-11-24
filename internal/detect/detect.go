@@ -37,6 +37,10 @@ const (
 	// another one: a clipper (see package clipbait). Path is empty and Swap
 	// says what happened.
 	OpSwap
+	// OpWrite: opened to change its contents without reading them (overwrite,
+	// truncate, append). Nothing has a reason to rewrite a bait; ransomware
+	// and wipers rewrite everything.
+	OpWrite
 )
 
 // Swap is what a clipper did to the clipboard bait.

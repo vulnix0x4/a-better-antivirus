@@ -220,7 +220,7 @@ func setup(preset string) (*Engine, *fakeOps) {
 }
 
 // ev is a bait access the way the Windows event log reports it: mask is the
-// 4663 access mask (1 read, 0x20 execute, 0x10000 delete).
+// 4663 access mask (1 read, 2 write, 0x20 execute, 0x10000 delete).
 func ev(pid uint32, image, obj string, mask uint32) *detect.Access {
 	a, _ := (&evtlog.ObjectAccess{ProcessID: pid, ProcessName: image, ObjectName: obj, AccessMask: mask, Time: time.Now()}).Access()
 	return a
@@ -389,12 +389,165 @@ func TestTestModeNeverCutsNetwork(t *testing.T) {
 	}
 }
 
-func TestDeleteOnlyNotifies(t *testing.T) {
+// A program that looks legitimate deleting a bait (you in Explorer, a cleaner,
+// a sync client): the bait is put back and you're told, nothing more.
+func TestDeleteByALegitimateProgramOnlyNotifies(t *testing.T) {
 	e, f := setup("strict")
+	tool := `C:\Program Files\Tidy\tidy.exe`
+	f.sigs[tool] = provenance.Result{Signed: true, Valid: true, Signer: "Tidy Software Ltd"}
+	e.HandleAccess(ev(600, tool, desktopBait, 0x10000))
+	a := only(f)
+	if a.Kind != alerts.KindDelete || a.Tier == config.TierCritical || len(a.Actions) != 0 || len(f.suspended) != 0 {
+		t.Fatalf("delete: %+v suspended=%v", a, f.suspended)
+	}
+}
+
+// One that would be stopped for reading a bait is stopped for destroying it
+// too: a wiper, or ransomware that deletes what it has encrypted a copy of.
+func TestDeleteByAnUntrustedProgramIsStopped(t *testing.T) {
+	e, f := setup("balanced")
 	e.HandleAccess(ev(600, `C:\Users\bob\Downloads\x.exe`, desktopBait, 0x10000))
 	a := only(f)
-	if a.Kind != alerts.KindDelete || len(a.Actions) != 0 || len(f.suspended) != 0 {
+	if a.Kind != alerts.KindDelete || a.Tier != config.TierCritical || !a.Did(config.ActionFreeze) || len(f.suspended) != 1 {
 		t.Fatalf("delete: %+v suspended=%v", a, f.suspended)
+	}
+	if !strings.HasPrefix(a.Title, "Possible wiper or ransomware: x.exe deleted your bait") {
+		t.Errorf("title: %q", a.Title)
+	}
+}
+
+// Opening a bait only to write to it is what ransomware does to a file. An
+// untrusted program is stopped for it like for a read.
+func TestOverwriteByAnUntrustedProgramIsStopped(t *testing.T) {
+	e, f := setup("balanced")
+	e.HandleAccess(ev(610, `C:\Users\bob\AppData\Local\Temp\x\locker.exe`, desktopBait, 0x2))
+	a := only(f)
+	if a == nil || a.Kind != alerts.KindWrite || a.Tier != config.TierCritical || !a.Did(config.ActionFreeze) || len(f.suspended) != 1 {
+		t.Fatalf("write: %+v suspended=%v", a, f.suspended)
+	}
+	if !strings.HasPrefix(a.Title, "Possible ransomware: locker.exe changed your bait") || a.Baits[0].Access != "write" {
+		t.Errorf("title %q, access %q", a.Title, a.Baits[0].Access)
+	}
+	// Caught inside the open by instant freeze: it says what it went to do.
+	e, f = setup("balanced")
+	f.images[611] = `C:\Users\bob\AppData\Local\Temp\x\locker.exe`
+	e.HandleOpenOp(611, desktopBait, detect.OpWrite, time.Now(), []uint32{611})
+	if a := only(f); a == nil || !strings.HasPrefix(a.Title, "Possible ransomware: locker.exe went to overwrite your bait") {
+		t.Errorf("instant: %+v", a)
+	}
+}
+
+// Inside the open, where instant freeze decides: an untrusted program going to
+// delete a bait is held, a signed one isn't (not even where warnings freeze),
+// and deleting several apps' data doesn't make a sweep of it.
+func TestInstantDecisionKnowsWhatTheOpenAskedFor(t *testing.T) {
+	e, f := setup("strict")
+	e.cfg.InstantFreeze = true
+	f.images[700] = `C:\Users\bob\Downloads\x.exe`
+	if ok, why := e.DecideInstantOpWhy(700, desktopBait, detect.OpDelete); !ok {
+		t.Errorf("an untrusted program going to delete a bait was let through: %s", why)
+	}
+	tool := `C:\Program Files\Tidy\tidy.exe`
+	f.images[701] = tool
+	f.sigs[tool] = provenance.Result{Signed: true, Valid: true, Signer: "Tidy Software Ltd"}
+	e.Configure(e.cfg, stateWithAll())
+	for _, b := range []string{desktopBait, discordBait, chromeBait, metamaskBait} {
+		if ok, why := e.DecideInstantOpWhy(701, b, detect.OpDelete); ok {
+			t.Fatalf("a signed cleaner deleting %s was frozen: %s", b, why)
+		}
+	}
+	// Going to overwrite documents in a second folder is held, signed or not.
+	docs := `C:\Users\bob\Documents\passwords.txt`
+	st := stateWithAll()
+	st.Baits["documents-passwords"] = &config.BaitState{ID: "documents-passwords", Name: "passwords.txt in Documents", Files: []config.BaitFile{{Path: docs, Audit: true}}}
+	e, f = setup("balanced")
+	e.cfg.InstantFreeze = true
+	e.Configure(e.cfg, st)
+	f.images[702] = tool
+	f.sigs[tool] = provenance.Result{Signed: true, Valid: true, Signer: "Tidy Software Ltd"}
+	if ok, why := e.DecideInstantOpWhy(702, desktopBait, detect.OpWrite); ok {
+		t.Fatalf("one overwrite by a signed program was frozen: %s", why)
+	}
+	if ok, why := e.DecideInstantOpWhy(702, docs, detect.OpWrite); !ok {
+		t.Errorf("a second folder's overwrite was let through: %s", why)
+	}
+}
+
+// A program that rewrites your documents in one folder after another is
+// ransomware whatever it is: signed, trusted by you, anything but the
+// system's own sync (OneDrive puts your folders back file by file).
+func TestRewritingFolderAfterFolderIsRansomware(t *testing.T) {
+	docs := `C:\Users\bob\Documents\passwords.txt`
+	seed := `C:\Users\bob\Documents\recovery phrase.txt`
+	withDocs := func() (*Engine, *fakeOps) {
+		e, f := setup("balanced")
+		st := stateWithAll()
+		st.Baits["documents-passwords"] = &config.BaitState{ID: "documents-passwords", Name: "passwords.txt in Documents", Files: []config.BaitFile{{Path: docs, Audit: true}}}
+		st.Baits["seed-phrase"] = &config.BaitState{ID: "seed-phrase", Name: "recovery phrase", Files: []config.BaitFile{{Path: seed, Audit: true}}}
+		e.Configure(e.cfg, st)
+		return e, f
+	}
+	tool := `C:\Program Files\Tool\tool.exe`
+	signed := provenance.Result{Signed: true, Valid: true, Signer: "Tool Inc"}
+
+	e, f := withDocs()
+	f.sigs[tool] = signed
+	e.HandleAccess(ev(1600, tool, desktopBait, 0x2))
+	if a := lastAlert(f); a == nil || a.Tier == config.TierCritical || len(f.suspended) != 0 {
+		t.Fatalf("one overwrite by a signed program: %+v", a)
+	}
+	e.HandleAccess(ev(1600, tool, docs, 0x2))
+	a := lastAlert(f)
+	if a.Tier != config.TierCritical || !a.Did(config.ActionFreeze) || !strings.Contains(a.Summary, "2 different folders") {
+		t.Fatalf("overwrites in two folders: %+v", a)
+	}
+	if !strings.HasPrefix(a.Title, "Possible ransomware: ") {
+		t.Errorf("title: %q", a.Title)
+	}
+
+	// Two files in the same folder: an editor saving two documents.
+	e, f = withDocs()
+	f.sigs[tool] = signed
+	e.HandleAccess(ev(1601, tool, docs, 0x2))
+	e.HandleAccess(ev(1601, tool, seed, 0x2))
+	for _, a := range f.saved {
+		if a.Tier == config.TierCritical {
+			t.Fatalf("two files in one folder: %+v", a)
+		}
+	}
+
+	// Reading in two folders isn't rewriting them (a backup, a search).
+	e, f = withDocs()
+	f.sigs[tool] = signed
+	e.HandleAccess(ev(1602, tool, desktopBait, 1))
+	e.HandleAccess(ev(1602, tool, docs, 1))
+	for _, a := range f.saved {
+		if a.Tier == config.TierCritical {
+			t.Fatalf("reads in two folders: %+v", a)
+		}
+	}
+
+	// OneDrive restoring Desktop and Documents writes in both.
+	e, f = withDocs()
+	od := `C:\Users\bob\AppData\Local\Microsoft\OneDrive\OneDrive.exe`
+	f.sigs[od] = provenance.Result{Signed: true, Valid: true, Signer: "Microsoft Corporation"}
+	e.HandleAccess(ev(1603, od, desktopBait, 0x2))
+	e.HandleAccess(ev(1603, od, docs, 0x2))
+	for _, a := range f.saved {
+		if a.Tier == config.TierCritical || len(f.suspended) != 0 {
+			t.Fatalf("OneDrive writing in two folders: %+v", a)
+		}
+	}
+
+	// An app's own data doesn't count: only your documents do.
+	e, f = withDocs()
+	f.sigs[tool] = signed
+	e.HandleAccess(ev(1604, tool, discordBait, 0x2))
+	e.HandleAccess(ev(1604, tool, chromeBait, 0x2))
+	for _, a := range f.saved {
+		if a.Tier == config.TierCritical {
+			t.Fatalf("two apps' data rewritten: %+v", a)
+		}
 	}
 }
 
