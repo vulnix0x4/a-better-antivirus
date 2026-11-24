@@ -5,6 +5,28 @@
 After a catch, ABA answers the question it used to leave you with: did it already take my real passwords,
 cookies or keys?
 
+**A stealer running inside the genuine browser (Windows)**
+
+- **The browser opening the fake profile inside it is critical now, not a warning.** Cookie stealers get past
+  the browser's own encryption by starting the genuine browser themselves, suspended and without a window,
+  and running their code inside it; that code goes through every profile, the fake one included.
+- **Which browser it is decides what happens.** One that was started suspended and never ran, started
+  hidden, has no window on your screen, or was started by a program ABA would stop itself is nobody's
+  browser: it's frozen whole, from its main process, together with what started it (even a signed runtime
+  like Python, when it created the browser suspended). The starter's internet is cut, never the browser's.
+  A browser created suspended is frozen while its open of the fake profile is still held, so the code
+  inside gets nothing.
+- **The browser window you're using is never frozen or killed**, whatever the preset: ABA cuts the internet
+  of every window of that browser and tells you so. The popup's *Yes* gives it back (`aba resume`); nothing
+  gets trusted. ABA first gives it a moment, in case you just added a profile and it's taking the folder as
+  its own, and skips the autopsy (your browser reads your real cookies all day).
+- **One that had already exited when ABA looked** is reported as critical, with nothing left to freeze.
+- **One alert and one freeze per browser**, however many of its processes open the fake profile. Such an
+  alert is never trusted from the popup or `aba trust`: that would let every later stealer inside the same
+  browser through.
+- **A browser installed in your own folders** is no longer frozen for a moment on the first,
+  unsigned-looking guess before its signature is checked.
+
 **The flight recorder**
 
 - **ABA quietly notes who opens your real secrets**: the browser profiles, wallets, Telegram and Discord
