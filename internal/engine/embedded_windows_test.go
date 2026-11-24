@@ -47,20 +47,19 @@ func TestFakeProfileInsideTheRealBrowser(t *testing.T) {
 // reading the fake one is therefore not "the app reading its own data" (which
 // would retire the bait): it's something inside Chrome going through its
 // profiles. Only once Chrome has taken the folder as a profile is it Chrome's.
+// (What's done about it depends on which Chrome: see host_windows_test.go.)
 func TestTheBrowserReadingAProfileItDoesntKnow(t *testing.T) {
-	e, f := setup("balanced")
-	bait, localState := chromeUser(t, e)
-	chrome := `C:\Program Files\Google\Chrome\Application\chrome.exe`
-	signed(f, chrome, "Google LLC")
-	e.HandleAccess(ev(200, chrome, bait, 1))
+	e, f, bait, _ := browserUser(t, "balanced", 4410, explorerExe, nil)
+	f.visible[1000] = true
+	e.HandleAccess(ev(1000, chromeExe, bait, 1))
 	a := only(f)
-	if a == nil || len(f.retired) != 0 || a.Kind != alerts.KindRead || a.Tier != config.TierWarn || !strings.Contains(a.Summary, "isn't one of its own") {
+	if a == nil || len(f.retired) != 0 || a.Kind != alerts.KindRead || a.Tier != config.TierCritical || !strings.Contains(strings.Join(a.Verdict.Reasons, " "), "isn't one of its own") {
 		t.Fatalf("chrome.exe opening a profile Chrome doesn't know: %+v retired=%v", a, f.retired)
 	}
 	if len(f.desktop) != 1 {
 		t.Fatal("that deserves a popup, not a quiet note")
 	}
-	_ = localState
+	chrome := chromeExe
 	// You created profiles until Chrome reached that folder and adopted it.
 	e2, f2 := setup("balanced")
 	bait2, ls2 := chromeUser(t, e2)

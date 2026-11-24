@@ -49,6 +49,16 @@ type Verdict struct {
 	ByRule     bool        `json:"byRule,omitempty"`     // ignored because of one of your rules
 	Swept      []string    `json:"swept,omitempty"`      // bait IDs it went through (a sweep: several apps' data)
 	Evasion    bool        `json:"evasion,omitempty"`    // it used a trick meant to dodge detection
+	// Host: the genuine browser opened a fake profile it doesn't know (see
+	// Bait.Unadopted): something is running inside it. What the engine does
+	// about that depends on which browser it is: one started hidden, suspended
+	// or by an untrusted program is a stealer's throwaway copy, the window
+	// you're using is yours (see engine's host policy).
+	Host bool `json:"host,omitempty"`
+	// KeepRunning: never freeze or kill it, whatever the response for its
+	// tier says (it's the browser you're using: its internet is cut instead).
+	// Only the engine sets it, for a Host verdict.
+	KeepRunning bool `json:"keepRunning,omitempty"`
 }
 
 // ScriptHost reports whether name (an executable's file name) runs code it's
@@ -192,7 +202,7 @@ func (c *Classifier) decide(image string, pid uint32, bait Bait, sig *provenance
 	if sig != nil && valid && bait.OwnerSigner != "" && contains(bait.OwnerExes, name) &&
 		strings.Contains(strings.ToLower(signer), strings.ToLower(bait.OwnerSigner)) && c.installedAt(image, bait.OwnerDirs) {
 		if bait.Unadopted {
-			return Verdict{Tier: config.TierWarn, Reasons: []string{
+			return Verdict{Tier: config.TierWarn, Host: true, Reasons: []string{
 				name + " opened a fake profile that isn't one of its own: the browser only opens the profiles it knows, so this is something else going through its data (an add-on tool, or code running inside it)", sig.String()}}
 		}
 		// A warning, not a note: you should hear about a bait going away. Running
@@ -272,6 +282,13 @@ func (c *Classifier) ruleMatches(r config.IgnoreRule, image string, pid uint32, 
 		return false
 	}
 	return true
+}
+
+// OwnerCandidate reports whether image could be the genuine app the bait
+// imitates, going by its name and folder alone (its signature not checked
+// yet): what Prelim can't tell from a copy dropped elsewhere.
+func (c *Classifier) OwnerCandidate(image string, bait Bait) bool {
+	return image != "" && contains(bait.OwnerExes, strings.ToLower(filepath.Base(image))) && c.installedAt(image, bait.OwnerDirs)
 }
 
 // installedAt reports whether image sits where the genuine app installs:

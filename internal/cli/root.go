@@ -75,6 +75,7 @@ func newRoot() *cobra.Command {
 	add("setup", installCmd(), configureCmd(), updateCmd(), baitCmd(), ignoreCmd(), instantCmd(), recorderCmd(), clipboardCmd(), phoneCmd(), uninstallCmd())
 	root.AddCommand(serviceCmd(), notifyCmd(), testReaderCmd())
 	root.AddCommand(clipGuardCmds()...)
+	root.AddCommand(windowCheckCmds()...)
 	return root
 }
 

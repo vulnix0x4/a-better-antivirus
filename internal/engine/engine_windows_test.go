@@ -49,12 +49,20 @@ type fakeOps struct {
 	// pendingAtAutopsy: whether a test request was still there when each
 	// autopsy began.
 	pendingAtAutopsy []bool
+	// browsers: the browser instance each process belongs to (none: it has
+	// exited); visible: whether that instance shows a window (absent:
+	// unknown); onVisible runs when the engine asks.
+	browsers  map[uint32]*procinfo.BrowserInstance
+	visible   map[uint32]bool // by main pid
+	onVisible func()
+	asked     int // window checks
 }
 
 func newFake() *fakeOps {
 	return &fakeOps{images: map[uint32]string{}, sigs: map[string]provenance.Result{}, saved: map[string]*alerts.Alert{}, state: config.NewState(),
 		hashes: map[string]string{}, cmdlines: map[uint32]string{}, injected: map[uint32]string{}, elevated: map[uint32]bool{}, gone: map[uint32]bool{},
-		parents: map[uint32][]procinfo.Ancestor{}, running: map[string][]uint32{}, sideDLL: map[uint32]string{}}
+		parents: map[uint32][]procinfo.Ancestor{}, running: map[string][]uint32{}, sideDLL: map[uint32]string{},
+		browsers: map[uint32]*procinfo.BrowserInstance{}, visible: map[uint32]bool{}}
 }
 
 func (f *fakeOps) ImagePath(pid uint32) (string, error) {
@@ -126,6 +134,28 @@ func (f *fakeOps) NotifyAutopsy(a *alerts.Alert) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.told = append(f.told, a.ID)
+}
+
+func (f *fakeOps) Browser(pid uint32, image string) (*procinfo.BrowserInstance, error) {
+	if b := f.browsers[pid]; b != nil && !f.gone[pid] {
+		cp := *b
+		return &cp, nil
+	}
+	return nil, procinfo.ErrGone
+}
+
+func (f *fakeOps) VisibleWindow(pids []uint32) (bool, bool) {
+	f.asked++
+	if f.onVisible != nil {
+		f.onVisible()
+	}
+	for _, b := range f.browsers {
+		if len(pids) > 0 && b.Main == pids[0] {
+			v, ok := f.visible[b.Main]
+			return v, ok
+		}
+	}
+	return false, false
 }
 
 // The autopsy runs once the alert is out, with what it needs copied out of

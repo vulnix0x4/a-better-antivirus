@@ -53,6 +53,11 @@ const (
 
 var AllActions = []Action{ActionFreeze, ActionBlockProgram, ActionKill, ActionIsolate, ActionDisableAdapters}
 
+// ActionLeftRunning isn't a response you choose: it's on record when ABA
+// would have frozen a program but didn't, because it's the browser you're
+// using (its internet is cut instead, where that's configured).
+const ActionLeftRunning Action = "left-running"
+
 func (a Action) Describe() string {
 	switch a {
 	case ActionFreeze:
@@ -65,6 +70,8 @@ func (a Action) Describe() string {
 		return "Isolate the " + platform.PC + " from the network (ABA alerts still get out)"
 	case ActionDisableAdapters:
 		return "Disable network adapters (blunt fallback)"
+	case ActionLeftRunning:
+		return "Left it running: it's the browser you're using"
 	}
 	return string(a)
 }
@@ -375,6 +382,8 @@ func (a Action) Verb() string {
 		return "isolate this " + platform.PC
 	case ActionDisableAdapters:
 		return "turn off the network adapters"
+	case ActionLeftRunning:
+		return "leave it running"
 	}
 	return string(a)
 }
@@ -400,6 +409,11 @@ func (a Action) Done(detail string) string {
 			return "Turned off network adapters: " + detail
 		}
 		return "Turned off network adapters"
+	case ActionLeftRunning:
+		if detail != "" {
+			return "Left it running: " + detail
+		}
+		return "Left it running: it's the browser you're using"
 	}
 	return string(a)
 }

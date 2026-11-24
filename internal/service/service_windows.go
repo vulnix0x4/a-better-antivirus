@@ -150,8 +150,19 @@ func (s *server) initWatchers() {
 	s.baitIDs, s.notBait, s.opens = map[string]string{}, map[string]time.Time{}, map[uint32]openSeen{}
 	s.recDirs, s.recBusy, s.recCount = map[string]string{}, map[string]time.Time{}, map[string]*recCounter{}
 	s.watch = &instant.Watcher{Self: uint32(os.Getpid()), OnOpen: s.onOpen, OnGhost: s.onGhost, OnBlocked: s.onBlocked,
-		Suspect: s.eng.SweepSuspect, Logf: s.log.Printf}
+		Suspect: s.suspect, Logf: s.log.Printf}
 	s.admit = s.admitAudited
+}
+
+// suspect names, among the programs paused inside an open of a bait, one
+// already known to be a stealer, so it's stopped before the open goes
+// through: one that has been sweeping other apps' data, or a genuine browser
+// created suspended going through a fake profile (code a stealer put into it).
+func (s *server) suspect(path string, pids []uint32) uint32 {
+	if p := s.eng.SweepSuspect(path, pids); p != 0 {
+		return p
+	}
+	return s.eng.HostSuspect(path, pids)
 }
 
 // prepare gets the process ready to protect, before anything else runs.
