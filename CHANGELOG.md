@@ -26,6 +26,14 @@ cookies or keys?
   browser through.
 - **A browser installed in your own folders** is no longer frozen for a moment on the first,
   unsigned-looking guess before its signature is checked.
+- **Adding a profile in your browser no longer walks into the fake one.** Chrome, Edge and Brave name a new
+  profile after how many they have ever made; when that count comes near the fake profile's number, ABA
+  moves the fake further out. If the browser takes its folder all the same, ABA says so in plain words,
+  cuts nothing, and puts a new fake profile under another name instead of retiring it.
+- **A browser's fake-profile read no longer counts toward a sweep split over several programs.** Your own
+  browser reading a bait once could be frozen as the "last member" of a stealer's team; and the autopsy no
+  longer counts a genuine browser's opens of its own data as taken.
+- **`aba alerts show`** prints when each bait was touched in local time, like the rest of the alert.
 
 **The flight recorder**
 
