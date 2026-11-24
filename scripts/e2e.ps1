@@ -215,10 +215,21 @@ if (Test-Path $realKey) { Fail "$realKey exists already" }
 Set-Content -Path $realKey -Value "-----BEGIN OPENSSH PRIVATE KEY-----`nnot a real key: ABA end-to-end test`n-----END OPENSSH PRIVATE KEY-----" -NoNewline
 # The flight recorder's audit rule: read data, by Everyone, inherited by the
 # files directly in the folder only. (See winsec.SetRecorderAudit.)
+# Compared as numbers and by SID, not by name: "read data" and "list folder"
+# are the same bit, and which of the two names .NET prints isn't fixed.
+# (Inheritance 2 is "the files in it"; propagation 3 is "only those, and not
+# the folder itself".)
 function RecorderRule([string]$dir) {
-    @((Get-Acl -Audit $dir).Audit | Where-Object {
-        $_.IdentityReference -match 'Everyone' -and $_.FileSystemRights -match 'ReadData' -and -not $_.IsInherited -and
-        $_.InheritanceFlags -match 'ObjectInherit' -and $_.PropagationFlags -match 'NoPropagateInherit' -and $_.PropagationFlags -match 'InheritOnly' })
+    @((Get-Acl -Audit $dir).GetAuditRules($true, $false, [System.Security.Principal.SecurityIdentifier]) | Where-Object {
+        $_.IdentityReference.Value -eq 'S-1-1-0' -and [int]$_.FileSystemRights -eq 1 -and
+        ([int]$_.AuditFlags -band 1) -and [int]$_.InheritanceFlags -eq 2 -and [int]$_.PropagationFlags -eq 3 })
+}
+# What to print when a check on the rule fails.
+function RecorderRuleReport([string]$dir) {
+    "  audit rules on ${dir}:" | Out-Host
+    (Get-Acl -Audit $dir).GetAuditRules($true, $true, [System.Security.Principal.SecurityIdentifier]) | ForEach-Object {
+        "    $($_.IdentityReference.Value) rights=$([int]$_.FileSystemRights) ($($_.FileSystemRights)) audit=$($_.AuditFlags) inherit=$($_.InheritanceFlags) propagate=$($_.PropagationFlags) inherited=$($_.IsInherited)" } | Out-Host
+    "  recorder folders on record: $(((State).recorderDirs) -join '; ')" | Out-Host
 }
 Check ((RecorderRule $sshDir).Count -eq 0) 'no audit rule of ABA''s on the .ssh folder before the install'
 
@@ -321,7 +332,8 @@ Check (WaitFor { NtfyMessages | Where-Object { $_.message -match $a1.id } } 60) 
 Step 'Autopsy: a stealer that read a real key before the bait'
 # The answer has to be "it read your real SSH keys", with the evidence saved,
 # the bot token in its memory found, and a shareable file with nothing of yours.
-Check (WaitFor { (RecorderRule $sshDir).Count -eq 1 } 30) 'the flight recorder''s audit rule is on the .ssh folder'
+if (-not (WaitFor { (RecorderRule $sshDir).Count -eq 1 } 30)) { RecorderRuleReport $sshDir }
+Check ((RecorderRule $sshDir).Count -eq 1) 'the flight recorder''s audit rule is on the .ssh folder'
 $token = '7134567890:AAHk3n2Lq9xZr8Yv6Tt5Ww4Uu3Ss2Rr1Qq0'
 # Readers: copies of aba.exe (unsigned, in Temp) running test-reader, which
 # reads each file it's given in turn, then waits to be frozen.
