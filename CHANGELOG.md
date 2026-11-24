@@ -1,5 +1,53 @@
 # Changelog
 
+## Unreleased
+
+After a catch, ABA answers the question it used to leave you with: did it already take my real passwords,
+cookies or keys?
+
+**The flight recorder**
+
+- **ABA quietly notes who opens your real secrets**: the browser profiles, wallets, Telegram and Discord
+  sessions, SSH and cloud keys, and the system's own password store, in the places the baits already know
+  about. It keeps that in memory and never alerts on it; it's only read after ABA has caught something.
+  `aba recorder on|off` (on by default).
+- **On Windows** it's an audit rule on the folders those files are in, inherited only by the files directly
+  in each folder and only for reading data, added beside any rules already there. Browsers replace some of
+  these files all the time, which takes a rule on the file itself with it; a rule on the folder covers the
+  new file at once. A folder that logs more than 600 opens in an hour is let go of for a day, so the
+  Security log keeps room for the baits. The folders are listed in ABA's state and the rules come off on
+  uninstall.
+- **On Linux** it's fanotify marks on the same folders, reporting opens of the files in them (never reads,
+  and nothing is held). **On macOS** it's the same eslogger stream the baits use, whose filter is now about
+  ten times cheaper per line than before, with the recorder's paths included.
+
+**The autopsy**
+
+- **A moment after the alert, while the program is still frozen,** ABA looks into it: which real stores it,
+  or something it started, opened and when (relative to the bait); the files it has open; files that
+  appeared where stealers stage what they collect, and the names inside an archive it made (each marked as
+  a bait, a byte-for-byte copy of your real file, or merely named like one); and where it was sending, from
+  its open connections and from the shapes of a Telegram bot, a Discord webhook or a web address in its
+  memory and its program file. Never per-family config parsing.
+- **One of three answers, in the alert:** it read these real things (and what to do about each, now); no
+  sign it read anything real, with what ABA was watching and since when; or ABA can't tell, and why (the
+  recorder was off or started after the program, an opener it couldn't pin down, a store that wasn't
+  watched the whole time). "It read" needs proof; "no sign" is never worded as "nothing was taken".
+- **When it read real data, you're told again,** on the desktop and the phone, with the first thing to do.
+- **`aba autopsy <id>`** shows everything found. **`aba export-ioc <id>`** writes a local file of what's safe
+  to share: the program's fingerprint, the bot tokens, webhooks and addresses that are certainly the
+  attacker's, the attacker's wallet for a clipper, and nothing of yours. Nothing is ever uploaded.
+- **An evidence folder** (administrators only) is saved before anything can end the program: what was found,
+  a copy of the program, copies of what it staged, and a copy of its memory. The last two may hold your own
+  passwords and cookies, and say so. **`aba kill`** waits for it (or saves it itself), and a configured
+  automatic kill waits for the autopsy.
+- **Alerts say that only connections still open are known**: one the program had already closed isn't.
+
+**macOS**
+
+- Built with cgo (one package, for reading a frozen program's memory) for macOS 14 and later, signed with
+  one hardened-runtime exception (`com.apple.security.cs.debugger`) that macOS requires for that.
+
 ## v0.7.1
 
 The clipboard bait now works on real copies, and alerts say where a program came from.
