@@ -240,6 +240,37 @@ func FreeProfile(s Spec, u config.UserInfo) string {
 	return fmt.Sprintf("Profile %d", base+20+rint(900))
 }
 
+// profileMargin is how close a Chromium browser's count of profiles ever
+// created may come to the fake profile's number before the fake is moved
+// further out (see Crowded). FreeProfile starts it at least 8 past.
+const profileMargin = 4
+
+// Crowded reports whether the real browser is about to name a new profile
+// after an embedded bait's folder. A Chromium browser names the profile you
+// add "Profile N", N from the count of profiles it has ever created
+// (profile.profiles_created in Local State, absent until the first one: 1),
+// skipping the names it has registered but not folders that merely exist: it
+// would wipe the fake profile and take its folder. Abandoned profiles count
+// too, so the count only grows. Firefox names profiles at random: never.
+func Crowded(s Spec, u config.UserInfo) bool {
+	if s.Inside == nil || s.profilesFile() == firefoxIndex {
+		return false
+	}
+	var n int
+	if _, err := fmt.Sscanf(ProfileFolder(u, s.ID), "Profile %d", &n); err != nil {
+		return false
+	}
+	ls, ok := readLocalState(s.Inside(u))
+	if !ok {
+		return false
+	}
+	created := ls.Profile.Created
+	if created < 1 {
+		created = 1
+	}
+	return created+profileMargin >= n
+}
+
 // Adopted reports whether the real browser has taken an embedded bait's
 // folder as one of its own profiles (it's listed in Local State).
 func Adopted(s Spec, u config.UserInfo) bool {
