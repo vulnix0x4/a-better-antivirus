@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -147,7 +148,10 @@ func TestRunFindsAStagedCopyOfTheRealFile(t *testing.T) {
 	if json.Unmarshal(b, &saved) != nil || saved.Answer != alerts.AnswerRead || saved.Finished.IsZero() {
 		t.Errorf("autopsy.json: %s", b)
 	}
-	if fi, _ := os.Stat(a.Evidence); fi.Mode().Perm()&0o077 != 0 {
+	// On Windows the mode bits say nothing: the folder is kept to SYSTEM and
+	// Administrators by the access list it inherits from ABA's data folder
+	// (config.LockDataDir).
+	if fi, _ := os.Stat(a.Evidence); runtime.GOOS != "windows" && fi.Mode().Perm()&0o077 != 0 {
 		t.Errorf("evidence folder is %v", fi.Mode().Perm())
 	}
 
