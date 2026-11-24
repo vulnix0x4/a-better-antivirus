@@ -77,16 +77,37 @@ else
   say "No Developer ID certificates: building unsigned"
 fi
 
+# One exception to the hardened runtime: the service may look into another
+# process's memory (task_for_pid), which the autopsy of a caught stealer
+# does while it's frozen (see internal/machmem). Without it macOS refuses
+# that to a program with the hardened runtime, even running as root.
+cat > "$WORK/entitlements.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.cs.debugger</key>
+	<true/>
+</dict>
+</plist>
+PLIST
+
 sign() { # sign FILE: Developer ID and the hardened runtime, or nothing
   [ -n "$SIGNED" ] || return 0
-  codesign --force --options runtime --timestamp --sign "$APP_ID" --identifier "$BUNDLE_ID" "$1"
+  codesign --force --options runtime --timestamp --entitlements "$WORK/entitlements.plist" --sign "$APP_ID" --identifier "$BUNDLE_ID" "$1"
   codesign --verify --strict --verbose=2 "$1"
 }
 
 # ---- the programs ----
+# With cgo (only package machmem uses it), for macOS 14 and later whatever
+# this Mac's SDK is: without the deployment target, the program would ask
+# for the macOS the build machine runs.
 say "Building $TAG"
+export MACOSX_DEPLOYMENT_TARGET=14.0
 for arch in arm64 amd64; do
-  CGO_ENABLED=0 GOOS=darwin GOARCH=$arch go build -trimpath -ldflags "-s -w -X main.version=$TAG" -o "$OUT/aba_${TAG}_darwin_$arch" ./cmd/aba
+  CGO_ENABLED=1 CGO_CFLAGS="-O2 -mmacosx-version-min=14.0" CGO_LDFLAGS="-mmacosx-version-min=14.0" \
+    GOOS=darwin GOARCH=$arch go build -trimpath -ldflags "-s -w -X main.version=$TAG" -o "$OUT/aba_${TAG}_darwin_$arch" ./cmd/aba
+  otool -l "$OUT/aba_${TAG}_darwin_$arch" | grep -A3 LC_BUILD_VERSION | grep -q 'minos 14.0' || { echo "aba_${TAG}_darwin_$arch doesn't say macOS 14"; exit 1; }
   sign "$OUT/aba_${TAG}_darwin_$arch"
 done
 "$OUT/aba_${TAG}_darwin_$(uname -m | sed 's/x86_64/amd64/')" --version
@@ -129,7 +150,7 @@ cat > "$APP/Contents/Info.plist" <<EOF
 </plist>
 EOF
 if [ -n "$SIGNED" ]; then
-  codesign --force --options runtime --timestamp --sign "$APP_ID" --identifier "$BUNDLE_ID" "$APP"
+  codesign --force --options runtime --timestamp --entitlements "$WORK/entitlements.plist" --sign "$APP_ID" --identifier "$BUNDLE_ID" "$APP"
   codesign --verify --strict --verbose=2 "$APP"
 fi
 
