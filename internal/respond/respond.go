@@ -217,7 +217,11 @@ func Resume(alertID string) (*Report, error) {
 		return nil
 	})
 	released()
-	alerts.Update(a.ID, func(x *alerts.Alert) { x.Status, x.Note = "resolved", "you said it was yours" })
+	note := "you said it was yours"
+	if a.Verdict.KeepRunning {
+		note = "you gave " + alerts.BrowserName(a.ExeName()) + " its internet back"
+	}
+	alerts.Update(a.ID, func(x *alerts.Alert) { x.Status, x.Note = "resolved", note })
 	return rep, err
 }
 
