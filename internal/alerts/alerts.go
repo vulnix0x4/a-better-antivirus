@@ -224,9 +224,14 @@ func (a *Alert) ExeName() string {
 }
 
 // BrowserName is what people call the browser whose executable is image
-// ("Chrome" for chrome.exe), or else the executable's name.
+// ("Chrome" for chrome.exe), or else the executable's name. image may be a
+// Windows path on any system (an alert shown elsewhere, a test), so both
+// separators count: no browser's file name has either.
 func BrowserName(image string) string {
-	base := procinfo.BaseName(image)
+	base := image
+	if i := strings.LastIndexAny(base, `\/`); i >= 0 {
+		base = base[i+1:]
+	}
 	switch strings.TrimSuffix(strings.ToLower(base), ".exe") {
 	case "chrome", "google-chrome", "google chrome":
 		return "Chrome"

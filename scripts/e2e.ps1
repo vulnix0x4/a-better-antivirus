@@ -60,9 +60,17 @@ function Step($n) { Write-Host "`n=== $n ===" -ForegroundColor Cyan; Report "===
 # (Passed checks aren't reported: ntfy.sh limits requests per address, and the
 # phone-alert checks below need that allowance.)
 function Ok($m)   { Write-Host "  ok  $m" -ForegroundColor Green }
+# Processes a step started that must not outlive a failed check (a browser
+# and what started it): ended, with what they started, before Fail exits.
+$script:leftovers = @()
+function EndLeftovers {
+    foreach ($p in $script:leftovers) { if ($p) { & taskkill.exe /T /F /PID $p 2>&1 | Out-Null } }
+    $script:leftovers = @()
+}
 function Fail($m) {
     Write-Host "  FAIL $m" -ForegroundColor Red
     Report "FAIL $m"
+    EndLeftovers
     # Never leave the runner isolated or anything frozen: it would go offline
     # and GitHub could neither cancel the job nor show its log.
     $r = Start-Process -FilePath $Aba -ArgumentList 'release' -NoNewWindow -PassThru
@@ -543,18 +551,34 @@ if (-not $hostBait) {
 } else {
     $bexe = $hostBrowser.exe
     $bname = $hostBrowser.name
+    # ghost writes its progress to a status file it creates itself: until it
+    # has, there's nothing to read (never an error).
+    function GhostSays([string]$file, [string]$pattern) {
+        if (-not (Test-Path -LiteralPath $file)) { return $null }
+        $m = Select-String -LiteralPath $file -Pattern $pattern -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($m) { return [int]$m.Matches[0].Groups[1].Value }
+        return $null
+    }
+    function ShowGhost([string]$file) {
+        if (Test-Path -LiteralPath $file) { Get-Content -LiteralPath $file -ErrorAction SilentlyContinue | ForEach-Object { "  ghost: $_" } | Out-Host }
+    }
     Start-Sleep -Seconds 2   # the guard on the bait is back after the step before
     $status = Join-Path $env:TEMP 'ghost-browser-suspended.txt'
-    Remove-Item $status -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $status -ErrorAction SilentlyContinue
     Snap
     $gp = & $Medium $Ghost browser-suspended $bexe $hostBait $status
-    if ($LASTEXITCODE -or -not $gp) { Fail "ghost browser-suspended didn't start" }
-    $gp = [int]$gp
-    $bp = WaitFor { $m = Select-String -Path $status -Pattern 'browser pid (\d+)' -ErrorAction SilentlyContinue; if ($m) { [int]$m.Matches[0].Groups[1].Value } } 10
+    if ($LASTEXITCODE -or -not "$gp".Trim()) { Fail "ghost browser-suspended didn't start" }
+    $gp = [int]"$gp".Trim()
+    $script:leftovers = @($gp)
+    $bp = WaitFor { GhostSays $status 'browser pid (\d+)' } 15
+    if ($bp) { $script:leftovers += $bp }
+    ShowGhost $status
     Check ($bp) "ghost (pid $gp) started $bname suspended (pid $bp)"
     $ah = WaitFor { Fresh | Where-Object { $_.verdict.host -and $_.tier -eq 'critical' } | Select-Object -Last 1 } 25
-    if (Test-Path $status) { Get-Content $status | ForEach-Object { "  ghost: $_" } | Out-Host }
-    Select-String -Path "$data\service.log" -Pattern 'instant|window check|joins the alert' | Select-Object -Last 10 | ForEach-Object { "  log: " + $_.Line } | Out-Host
+    ShowGhost $status
+    if (Test-Path "$data\service.log") {
+        Select-String -Path "$data\service.log" -Pattern 'instant|window check|joins the alert' | Select-Object -Last 10 | ForEach-Object { "  log: " + $_.Line } | Out-Host
+    }
     Check ($ah) "critical alert about the $bname a stealer started: $($ah.summary)"
     Check (-not $ah.verdict.keepRunning) 'not taken for the browser you use'
     Check (Did $ah 'freeze') "froze it: $(($ah.actions | Where-Object action -eq 'freeze').detail)"
@@ -565,6 +589,7 @@ if (-not $hostBait) {
     Check ($blockedNow | Where-Object { $_ -eq $Ghost }) 'ghost''s internet is cut'
     Aba kill $ah.id
     Check (WaitFor { -not (Get-Process -Id $bp -ErrorAction SilentlyContinue) -and -not (Get-Process -Id $gp -ErrorAction SilentlyContinue) } 10) "aba kill ended that $bname and ghost"
+    $script:leftovers = @()
 
     # The browser you're using: only on a machine with a desktop someone is
     # signed in to (its windows have to be on a screen to count).
@@ -572,22 +597,26 @@ if (-not $hostBait) {
         Ok 'skipped the browser-you-use half: no desktop session on this machine'
     } else {
         $vp = & $Medium -shell $bexe --no-first-run --no-default-browser-check --new-window about:blank
-        if ($LASTEXITCODE -or -not $vp) { $vp = & $Medium $bexe --no-first-run --no-default-browser-check --new-window about:blank }
-        $vp = [int]$vp
-        $shown = WaitFor { $p = Get-Process -Id $vp -ErrorAction SilentlyContinue; $p -and $p.MainWindowHandle -ne 0 } 30
+        if ($LASTEXITCODE -or -not "$vp".Trim()) { $vp = & $Medium $bexe --no-first-run --no-default-browser-check --new-window about:blank }
+        $vp = if ("$vp".Trim() -match '^\d+$') { [int]"$vp".Trim() } else { 0 }
+        $script:leftovers = @($vp)
+        $shown = if ($vp) { WaitFor { $p = Get-Process -Id $vp -ErrorAction SilentlyContinue; $p -and $p.MainWindowHandle -ne 0 } 30 } else { $null }
         if (-not $shown) {
             Ok "skipped the browser-you-use half: $bname (pid $vp) showed no window here"
         } else {
             Start-Sleep -Seconds 3
             $rulesBefore = WfpRules
             $status = Join-Path $env:TEMP 'ghost-browser-inject.txt'
-            Remove-Item $status -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $status -ErrorAction SilentlyContinue
             Snap
             $ip = & $Medium $Ghost browser-inject $vp $hostBait $status
-            if ($LASTEXITCODE -or -not $ip) { Fail "ghost browser-inject didn't start" }
+            if ($LASTEXITCODE -or -not "$ip".Trim()) { Fail "ghost browser-inject didn't start" }
+            $script:leftovers += [int]"$ip".Trim()
             $ak = WaitFor { Fresh | Where-Object { $_.verdict.keepRunning } | Select-Object -Last 1 } 30
-            if (Test-Path $status) { Get-Content $status | ForEach-Object { "  ghost: $_" } | Out-Host }
-            Select-String -Path "$data\service.log" -Pattern 'window check|instant' | Select-Object -Last 6 | ForEach-Object { "  log: " + $_.Line } | Out-Host
+            ShowGhost $status
+            if (Test-Path "$data\service.log") {
+                Select-String -Path "$data\service.log" -Pattern 'window check|instant' | Select-Object -Last 6 | ForEach-Object { "  log: " + $_.Line } | Out-Host
+            }
             Check ($ak -and $ak.tier -eq 'critical') "critical alert, left running: $($ak.summary)"
             Check (-not (Did $ak 'freeze')) 'not frozen'
             Check (-not (IsSuspended $vp)) "your $bname is still running"
@@ -598,7 +627,7 @@ if (-not $hostBait) {
             Check (-not ((State).blocked | Where-Object { $_.path -eq $bexe })) 'aba resume gave it its internet back'
             Check ((WfpRules) -eq $rulesBefore) 'and its WFP rule is gone'
         }
-        & taskkill.exe /T /F /PID $vp 2>&1 | Out-Null
+        EndLeftovers
     }
 }
 
