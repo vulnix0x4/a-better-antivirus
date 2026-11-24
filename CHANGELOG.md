@@ -33,6 +33,8 @@ cookies or keys?
 - **A browser's fake-profile read no longer counts toward a sweep split over several programs.** Your own
   browser reading a bait once could be frozen as the "last member" of a stealer's team; and the autopsy no
   longer counts a genuine browser's opens of its own data as taken.
+- **After you resume or release an alert, the same program going for a bait again is a new alert** with a new
+  response; it used to be added quietly to the old one for two minutes.
 - **`aba alerts show`** prints when each bait was touched in local time, like the rest of the alert.
 
 **The flight recorder**
