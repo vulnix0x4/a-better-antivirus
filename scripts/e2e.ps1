@@ -399,17 +399,20 @@ if (-not $docBait) { Fail 'no bait in Documents to try this on' }
 $pw = Reader 'locker-a' @($docBait) '' 'overwrite'
 $aw = AlertFor $pw
 Check ($aw -and $aw.tier -eq 'critical' -and (Did $aw 'freeze')) "caught and frozen ($($aw.id)): $($aw.title)"
-# Windows doesn't always say what an open asked for; then it counts as a read,
-# and is stopped just the same.
-if ($aw.kind -eq 'write') { Ok 'reported as an overwrite' } else { Ok "Windows didn't say what the open asked for: reported as a $($aw.kind)" }
+# Windows doesn't always say what an open asked for; then it's caught as an
+# open, and the alert says what it did once the event log does.
+$aw = WaitFor { Alerts | Where-Object { $_.id -eq $aw.id -and $_.kind -eq 'write' } } 20
+Check ($aw) "the alert says it overwrote the bait: $($aw.title)"
 Aba kill $aw.id
+Aba doctor --fix
 
 Step 'Wiper: a program that deletes a bait is stopped, and the bait put back'
 Check (WaitFor { Test-Path $docBait } 10) 'the bait is there'
 $pd = Reader 'wiper-a' @($docBait) '' 'delete'
 $ad = AlertFor $pd
 Check ($ad -and $ad.tier -eq 'critical' -and (Did $ad 'freeze')) "caught and frozen ($($ad.id)): $($ad.title)"
-Check ($ad.kind -eq 'delete') "reported as a delete (it's a $($ad.kind))"
+$ad = WaitFor { Alerts | Where-Object { $_.id -eq $ad.id -and $_.kind -eq 'delete' } } 20
+Check ($ad) "the alert says it deleted the bait: $($ad.title)"
 Aba kill $ad.id
 Aba doctor --fix
 Check (WaitFor { Test-Path $docBait } 30) 'the deleted bait was put back'
