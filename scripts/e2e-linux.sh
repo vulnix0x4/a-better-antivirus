@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # End-to-end test of ABA on Linux, in the spirit of scripts/e2e.ps1: install,
 # fake stealers, freeze, kill, a legitimate reader let through, resume, trust,
-# release, a sweep, a hard-link trick, bait repair, uninstall, and a check
-# that nothing is left behind.
+# release, a sweep, a hard-link trick, bait repair, the autopsy of a stealer
+# that read a real key before the bait and of one that didn't, uninstall,
+# and a check that nothing is left behind.
 #
 #   scripts/e2e-linux.sh <aba binary> <grabber binary> <notifyd binary>
 #
