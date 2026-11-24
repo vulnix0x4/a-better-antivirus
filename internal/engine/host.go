@@ -329,17 +329,72 @@ func (e *Engine) addHit(a *alerts.Alert, hit alerts.BaitHit) (*alerts.Alert, boo
 	return &cp, true
 }
 
+// takeWait is how long ABA watches the browser you're using, after it went
+// to delete or overwrite a fake profile's files, for it to finish making that
+// folder a profile of its own (you added a profile, and it reached that
+// folder's name). It wipes the folder, makes a real profile in it and writes
+// that down in its list of profiles seconds later.
+const takeWait = 12 * time.Second
+
 // stillUnadopted looks again, a moment later, whether the browser has taken
 // the fake profile as its own after all (you added a profile, and it reached
-// that folder's name): then it's the genuine app reading its own data.
-func (e *Engine) stillUnadopted(baitID string) bool {
+// that folder's name): then it's the genuine app at work on its own data. A
+// browser that went to delete or overwrite the fake's files (destructive) is
+// most likely doing just that, so it's given longer, and its making the
+// folder a real profile on disk counts as soon as it's seen.
+func (e *Engine) stillUnadopted(baitID string, destructive bool) bool {
 	e.mu.Lock()
-	wait := e.adoptWait
+	wait, long := e.adoptWait, e.takeWait
 	e.mu.Unlock()
-	if wait > 0 {
-		time.Sleep(wait)
+	if !destructive {
+		if wait > 0 {
+			time.Sleep(wait)
+		}
+		return e.baitRef(baitID).Unadopted
 	}
-	return e.baitRef(baitID).Unadopted
+	deadline := time.Now().Add(long)
+	for {
+		if e.takenOver(baitID) {
+			return false
+		}
+		if !time.Now().Before(deadline) {
+			return true
+		}
+		time.Sleep(min(300*time.Millisecond, time.Until(deadline)+time.Millisecond))
+	}
+}
+
+// takenOver: the real browser has made the fake profile's folder a profile
+// of its own, listed or (so far) only on disk.
+func (e *Engine) takenOver(baitID string) bool {
+	s, ok := baits.ByID(baitID)
+	e.mu.Lock()
+	cfg := e.cfg
+	e.mu.Unlock()
+	return ok && cfg != nil && s.Inside != nil && (baits.Adopted(s, cfg.User) || baits.TakenOver(s, cfg.User))
+}
+
+// embedded: the bait is a fake profile inside a real browser.
+func embedded(baitID string) bool {
+	s, ok := baits.ByID(baitID)
+	return ok && s.Inside != nil
+}
+
+// tookVerdict is the verdict for the real browser taking a fake profile's
+// folder as a profile of its own: nothing wrong, and ABA puts a new fake
+// profile under another name (see the service's RetireDecoy).
+func (e *Engine) tookVerdict(image, baitID string) classify.Verdict {
+	name := alerts.BrowserName(image)
+	folder := "its folder"
+	e.mu.Lock()
+	cfg := e.cfg
+	e.mu.Unlock()
+	if cfg != nil {
+		folder = baits.ProfileFolder(cfg.User, baitID)
+	}
+	why := fmt.Sprintf("%s used the name of ABA's fake profile (%s) for a profile you added, and made that folder a real profile of its own. ABA puts a new fake profile next to your real ones, under another name: nothing for you to do. (If you didn't just add a profile in %s, something else made it take that folder.)",
+		name, folder, name)
+	return classify.Verdict{Tier: config.TierInfo, DecoyOwner: true, Host: true, Reasons: []string{why}}
 }
 
 // ClaimAll claims the processes the instant path froze for a browser

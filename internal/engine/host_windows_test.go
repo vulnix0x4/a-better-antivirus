@@ -354,6 +354,56 @@ func TestInstantDecisionsForABrowser(t *testing.T) {
 	}
 }
 
+// You add a profile and the browser reaches the fake's folder name: the
+// browser you're using deletes the fake's files, makes the folder a real
+// profile, and lists it seconds later. That's the browser at work, not a
+// stealer: no internet cut, plain words, and the fake profile is moved.
+func TestBrowserTakingTheFolderForANewProfile(t *testing.T) {
+	e, f, bait, _ := browserUser(t, "balanced", 4410, explorerExe, nil)
+	f.visible[1000] = true
+	e.takeWait = 3 * time.Second
+	prof := strings.TrimSuffix(bait, `\Login Data`)
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		os.MkdirAll(prof+`\Sessions`, 0o755)
+		os.WriteFile(prof+`\Secure Preferences`, []byte("{}"), 0o644)
+	}()
+	e.HandleAccess(ev(1000, chromeExe, bait, 0x10000))            // delete
+	e.HandleAccess(ev(1000, chromeExe, cookiesOf(bait), 0x10000)) // and the next file: same alert
+	a := only(f)
+	if a == nil || len(f.saved) != 1 || a.Kind != alerts.KindDecoyRetired || len(f.retired) != 1 || len(f.blocked) != 0 || len(f.suspended) != 0 {
+		t.Fatalf("alert %+v, alerts %d, retired %v, blocked %v", a, len(f.saved), f.retired, f.blocked)
+	}
+	for _, bad := range []string{"stealer", "Possible", "wiper", "ransomware"} {
+		if strings.Contains(a.Title+" "+a.Summary, bad) {
+			t.Errorf("%q in %q / %q", bad, a.Title, a.Summary)
+		}
+	}
+	if !strings.Contains(a.Summary, "for a profile you added") || !strings.Contains(a.Summary, "new fake profile") {
+		t.Errorf("summary: %q", a.Summary)
+	}
+
+	// Going to delete the fake's files without making the folder a profile:
+	// after the longer wait, the browser you use is cut off as usual.
+	e, f, bait, _ = browserUser(t, "balanced", 4410, explorerExe, nil)
+	f.visible[1000] = true
+	e.takeWait = 200 * time.Millisecond
+	e.HandleAccess(ev(1000, chromeExe, bait, 0x10000))
+	if a := only(f); a == nil || !a.Verdict.KeepRunning || len(f.blocked) != 1 || len(f.retired) != 0 {
+		t.Fatalf("not taken: %+v, blocked %v", a, f.blocked)
+	}
+
+	// A plain read isn't given the long wait.
+	e, f, bait, _ = browserUser(t, "balanced", 4410, explorerExe, nil)
+	f.visible[1000] = true
+	e.takeWait = 5 * time.Second
+	start := time.Now()
+	e.HandleAccess(ev(1000, chromeExe, bait, 1))
+	if time.Since(start) > 2*time.Second || !only(f).Verdict.KeepRunning {
+		t.Fatalf("a read waited %v", time.Since(start))
+	}
+}
+
 const (
 	braveExe = `C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe`
 	edgeExe  = `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`

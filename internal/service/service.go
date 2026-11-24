@@ -489,6 +489,17 @@ func (s *server) RetireDecoy(id, why string) {
 	if err != nil {
 		return
 	}
+	s.mu.Lock()
+	cfg := s.cfg
+	s.mu.Unlock()
+	if cfg != nil && st.Baits[id] != nil {
+		if spec, ok := baits.SpecByID(cfg, id); ok && spec.Inside != nil {
+			// A fake profile the real browser took for one you added: it gets
+			// a new folder, it isn't retired.
+			s.moveCrowdedProfiles(cfg)
+			return
+		}
+	}
 	if bs := st.Baits[id]; bs == nil || !s.mayRetire(baits.RecentlyRetired(st, retireLimit), id, bs.Name) {
 		return
 	}

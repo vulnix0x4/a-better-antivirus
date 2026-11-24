@@ -271,6 +271,44 @@ func Crowded(s Spec, u config.UserInfo) bool {
 	return created+profileMargin >= n
 }
 
+// TakenOver reports whether the real browser has made an embedded bait's
+// folder a profile of its own on disk, whether or not it has written that
+// down in its list of profiles yet (it does so lazily, seconds later): the
+// folder now holds at least two things the fake profile never had (a real
+// profile's settings, caches, sessions…). A stealer only reads the fake; a
+// database it opens may leave a journal beside it, which doesn't count.
+func TakenOver(s Spec, u config.UserInfo) bool {
+	if s.Inside == nil {
+		return false
+	}
+	files := s.Files(u)
+	if len(files) == 0 {
+		return false
+	}
+	dir := filepath.Dir(files[0].Path)
+	ours := map[string]bool{}
+	for _, f := range files {
+		rel, err := filepath.Rel(dir, f.Path)
+		if err != nil {
+			continue
+		}
+		ours[strings.ToLower(strings.SplitN(filepath.ToSlash(rel), "/", 2)[0])] = true
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	foreign := 0
+	for _, e := range entries {
+		n := strings.ToLower(e.Name())
+		if ours[n] || strings.HasSuffix(n, "-journal") || strings.HasSuffix(n, "-wal") || strings.HasSuffix(n, "-shm") {
+			continue
+		}
+		foreign++
+	}
+	return foreign >= 2
+}
+
 // Adopted reports whether the real browser has taken an embedded bait's
 // folder as one of its own profiles (it's listed in Local State).
 func Adopted(s Spec, u config.UserInfo) bool {

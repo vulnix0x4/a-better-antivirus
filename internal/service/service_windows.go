@@ -645,7 +645,25 @@ func (s *server) onBlocked(path string, pids []uint32) {
 		img, _ := procinfo.ImagePath(pid)
 		who = append(who, fmt.Sprintf("%s (pid %d)", img, pid))
 	}
-	if len(who) == 0 || !s.once("blocked|"+strings.ToLower(path), time.Hour) {
+	if len(who) == 0 {
+		return
+	}
+	if s.tookProfile(path, st) {
+		// The real browser made that fake profile's folder its own (for a
+		// profile you added) and has its files open: nothing's wrong, and the
+		// fake profile is moved (see moveProfiles).
+		s.log.Printf("instant: %s is held open by the browser that made its folder a profile: moving the fake profile", path)
+		go s.safe("move fake profile", func() {
+			s.mu.Lock()
+			cfg := s.cfg
+			s.mu.Unlock()
+			if cfg != nil {
+				s.moveCrowdedProfiles(cfg)
+			}
+		})
+		return
+	}
+	if !s.once("blocked|"+strings.ToLower(path), time.Hour) {
 		return
 	}
 	name := filepath.Base(path)

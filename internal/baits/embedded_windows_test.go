@@ -144,6 +144,32 @@ func TestCrowdedProfileBait(t *testing.T) {
 	}
 }
 
+// The browser wiping the fake profile and making the folder a real one:
+// seen on disk before it lists the folder in Local State.
+func TestTakenOverProfileBait(t *testing.T) {
+	u := testUser(t)
+	ud := realBrowser(t, u, `{"profile":{"info_cache":{"Default":{}}}}`, "Default")
+	spec, _ := ByID("chrome-profile")
+	u.Embedded = map[string]string{"chrome-profile": "Profile 13"}
+	prof := filepath.Join(ud, "Profile 13")
+	if TakenOver(spec, u) {
+		t.Fatal("no folder at all")
+	}
+	for _, f := range spec.Files(u) {
+		os.MkdirAll(filepath.Dir(f.Path), 0o755)
+		os.WriteFile(f.Path, []byte("x"), 0o644)
+	}
+	os.WriteFile(filepath.Join(prof, "Login Data-journal"), nil, 0o644)
+	if TakenOver(spec, u) {
+		t.Fatal("only the fake profile (and a journal a reader left)")
+	}
+	os.WriteFile(filepath.Join(prof, "Secure Preferences"), []byte("{}"), 0o644)
+	os.MkdirAll(filepath.Join(prof, "Sessions"), 0o755)
+	if !TakenOver(spec, u) {
+		t.Fatal("the browser is making it a profile of its own")
+	}
+}
+
 func itoa(n int) string {
 	if n < 10 {
 		return string(rune('0' + n))

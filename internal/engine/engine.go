@@ -129,6 +129,7 @@ type Engine struct {
 	hostLocks map[string]*hostLock // one decision at a time per browser instance
 	roots     map[uint32][]uint32  // what the instant path is to freeze for an opener it decided on (see InstantRoots)
 	adoptWait time.Duration        // how long to give a browser that may be taking a fake profile as its own (see host.go)
+	takeWait  time.Duration        // the same, when it went to delete or overwrite the fake's files
 }
 
 // mark notes that a process did something only evasion explains.
@@ -176,7 +177,7 @@ func New(ops Ops, selfPID uint32) *Engine {
 	return &Engine{Ops: ops, SelfPID: selfPID, incidents: map[uint32]*incident{}, claimed: map[uint32]time.Time{},
 		seen: map[string]time.Time{}, touched: map[uint32]*sweep{}, wrecked: map[uint32]*sweep{}, sids: map[uint32]string{},
 		pending: map[uint32]chan struct{}{}, later: map[uint32][]alerts.BaitHit{}, eventFrozen: map[uint32]time.Time{}, marks: map[uint32]mark{},
-		hosts: map[uint32]hostSeen{}, hostLocks: map[string]*hostLock{}, roots: map[uint32][]uint32{}, adoptWait: adoptWait}
+		hosts: map[uint32]hostSeen{}, hostLocks: map[string]*hostLock{}, roots: map[uint32][]uint32{}, adoptWait: adoptWait, takeWait: takeWait}
 }
 
 // Configure (re)loads config and the bait index.
@@ -828,9 +829,11 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	// The genuine browser went through a fake profile: which browser is it?
 	// (See host.go.) Its other processes' reads join the one alert.
 	var host *hostPlan
+	var hostInst *procinfo.BrowserInstance // the browser instance, whatever came of it
 	if v.Host && !test {
 		inst, err := e.hostFacts(oa.PID, image)
 		if inst != nil && err == nil {
+			hostInst = inst
 			unlock := e.lockHost(inst)
 			defer unlock()
 			if !instant && e.joinHost(inst, oa.PID, hit) {
@@ -849,14 +852,17 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 			v = goneVerdict(v, image)
 		case host.stop:
 			v = host.stopVerdict(v)
-		case e.stillUnadopted(baitID):
+		case e.stillUnadopted(baitID, access == "delete" || access == "write"):
 			v = host.keepVerdict(v)
 		default:
 			// It took the folder as a profile of its own meanwhile (you added
-			// one): the genuine app reading its own data.
-			v = cls.Final(image, oa.PID, e.baitRef(baitID), sig)
+			// one): the genuine app at work on its own data.
+			v = e.tookVerdict(image, baitID)
 			host = nil
 		}
+	}
+	if v.DecoyOwner && !v.Host && embedded(baitID) {
+		v = e.tookVerdict(image, baitID) // listed as its own before ABA even looked
 	}
 	if startedAs != "" {
 		v.Reasons = append(v.Reasons, "its file was renamed after it started (it was started as "+startedAs+")")
@@ -1141,13 +1147,13 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	// The alert is the whole browser instance's, and its starter's: what
 	// any of them does next joins it (see joinHost, noteAfter).
 	members := map[uint32]int64{oa.PID: createTime}
-	if host != nil && host.inst != nil {
-		for _, p := range host.inst.PIDs {
+	if hostInst != nil {
+		for _, p := range hostInst.PIDs {
 			if _, ok := members[p]; !ok {
 				members[p] = e.Ops.CreateTime(p)
 			}
 		}
-		members[host.inst.Main] = host.inst.MainCreate
+		members[hostInst.Main] = hostInst.MainCreate
 		for _, p := range frozen {
 			if _, ok := members[p]; !ok {
 				members[p] = e.Ops.CreateTime(p)
@@ -1714,6 +1720,8 @@ func (e *Engine) describe(a *alerts.Alert, v classify.Verdict) {
 		a.Title = "Test detection: " + exe + " was frozen the moment it opened a bait"
 	case a.Test:
 		a.Title = "Test detection: " + exe + " read a bait"
+	case v.DecoyOwner && v.Host:
+		a.Title = alerts.BrowserName(exe) + " made a fake profile's folder its own: ABA moved the fake profile"
 	case v.DecoyOwner:
 		a.Title = exe + " is installed: retiring its decoy"
 	case v.KeepRunning:
