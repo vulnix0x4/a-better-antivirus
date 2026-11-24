@@ -32,6 +32,7 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
 	"github.com/vulnix0x4/a-better-antivirus/internal/provenance"
+	"github.com/vulnix0x4/a-better-antivirus/internal/recorder"
 	"github.com/vulnix0x4/a-better-antivirus/internal/session"
 	"github.com/vulnix0x4/a-better-antivirus/internal/svcctl"
 )
@@ -64,6 +65,7 @@ type server struct {
 	pubMu sync.Mutex
 
 	watchers // this operating system's way of noticing bait opens: service_<os>.go
+	recorderState
 }
 
 func newServer(echo bool) *server {
@@ -76,6 +78,7 @@ func newServer(echo bool) *server {
 		s.cliExe = exe // dev builds: one binary
 	}
 	s.eng = engine.New(s, uint32(os.Getpid()))
+	s.rec = recorder.New()
 	s.initWatchers()
 	config.SlowLock = func(d time.Duration, caller string) {
 		s.log.Printf("state lock held %v by %s", d.Round(time.Millisecond), caller)
@@ -120,6 +123,7 @@ func (s *server) reload() error {
 	s.guard(guarded)
 	s.clipboardBait(cfg.ClipboardBait)
 	s.baitsChanged(st)
+	s.syncRecorder(st)
 	return nil
 }
 

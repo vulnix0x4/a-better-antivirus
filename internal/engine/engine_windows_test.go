@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/alerts"
+	"github.com/vulnix0x4/a-better-antivirus/internal/autopsy"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/detect"
 	"github.com/vulnix0x4/a-better-antivirus/internal/evtlog"
@@ -40,6 +41,14 @@ type fakeOps struct {
 	parents   map[uint32][]procinfo.Ancestor
 	running   map[string][]uint32 // image -> pids running it
 	sideDLL   map[uint32]string
+	// autopsy (if set) is what Autopsy returns; cases and told record the
+	// autopsies asked for and the ones notified.
+	autopsy *alerts.Autopsy
+	cases   []autopsy.Case
+	told    []string
+	// pendingAtAutopsy: whether a test request was still there when each
+	// autopsy began.
+	pendingAtAutopsy []bool
 }
 
 func newFake() *fakeOps {
@@ -104,6 +113,83 @@ func (f *fakeOps) SuspendMore(root uint32, already []uint32) []uint32 {
 	return []uint32{root}
 }
 func (f *fakeOps) UpdateState(fn func(*config.State) error) error { return fn(f.state) }
+
+func (f *fakeOps) Autopsy(c autopsy.Case) *alerts.Autopsy {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cases = append(f.cases, c)
+	f.pendingAtAutopsy = append(f.pendingAtAutopsy, f.test != nil)
+	return f.autopsy
+}
+
+func (f *fakeOps) NotifyAutopsy(a *alerts.Alert) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.told = append(f.told, a.ID)
+}
+
+// The autopsy runs once the alert is out, with what it needs copied out of
+// the alert, and only a read of real data is notified again.
+func TestAutopsyAfterTheAlert(t *testing.T) {
+	e, f := setup("balanced")
+	f.autopsy = &alerts.Autopsy{Answer: alerts.AnswerRead, Headline: "It opened your Chrome."}
+	img := `C:\Users\bob\AppData\Local\Temp\x\stealer.exe`
+	e.HandleAccess(ev(100, img, desktopBait, 1))
+	var told int
+	for i := 0; i < 100; i++ {
+		f.mu.Lock()
+		told = len(f.told)
+		f.mu.Unlock()
+		if told > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.cases) != 1 || f.cases[0].PID != 100 || f.cases[0].Image != img || len(f.cases[0].Frozen) == 0 {
+		t.Fatalf("cases = %+v", f.cases)
+	}
+	if told != 1 || len(f.desktop) != 1 {
+		t.Fatalf("told %d, desktop %v", told, f.desktop)
+	}
+	for _, a := range f.saved {
+		if a.Autopsy == nil || a.Autopsy.Answer != alerts.AnswerRead {
+			t.Errorf("saved alert has no autopsy: %+v", a.Autopsy)
+		}
+	}
+
+	// A signed program merely noted: no autopsy.
+	e, f = setup("balanced")
+	signed := `C:\Program Files\Backup\backup.exe`
+	f.sigs[signed] = provenance.Result{Signed: true, Valid: true, Signer: "Backup Inc"}
+	e.HandleAccess(ev(200, signed, desktopBait, 1))
+	time.Sleep(50 * time.Millisecond)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.cases) != 0 {
+		t.Errorf("an autopsy of a program that wasn't caught: %+v", f.cases)
+	}
+}
+
+// A test's request is cleared before its autopsy starts: the autopsy takes a
+// second or two, `aba test` returns as soon as it has its alert, and the next
+// test (`aba clipboard test` right after it) writes a request of its own that
+// a late clear would wipe.
+func TestTestRequestClearedBeforeItsAutopsy(t *testing.T) {
+	e, f := setup("balanced")
+	f.autopsy = &alerts.Autopsy{Answer: alerts.AnswerNoSign}
+	f.test = &TestRequest{PID: 100}
+	e.HandleAccess(ev(100, `C:\Users\bob\AppData\Local\Temp\aba-test-1.exe`, desktopBait, 1))
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.pendingAtAutopsy) != 1 {
+		t.Fatalf("autopsies of the test reader: %d", len(f.pendingAtAutopsy))
+	}
+	if f.pendingAtAutopsy[0] {
+		t.Error("the test request was still there when the autopsy began")
+	}
+}
 
 const desktopBait = `C:\Users\bob\Desktop\passwords.txt`
 

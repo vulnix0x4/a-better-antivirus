@@ -73,7 +73,8 @@ func detectionSteps() []Step {
 	}}}
 }
 
-// restoreSteps undo detectionSteps on uninstall.
+// restoreSteps undo detectionSteps on uninstall, and take the flight
+// recorder's audit rules off the folders of your real data.
 func restoreSteps() []Step {
 	return []Step{{Name: "Restoring Windows audit settings", Soft: true, Run: func() (string, error) {
 		st, err := config.LoadState()
@@ -81,7 +82,37 @@ func restoreSteps() []Step {
 			return "left as is", nil
 		}
 		return "", winsec.SetFileSystemAudit(*st.AuditOriginal)
+	}}, {Name: "Removing the flight recorder's audit rules", Soft: true, Run: func() (string, error) {
+		st, err := config.LoadState()
+		if err != nil {
+			return "", err
+		}
+		return ClearRecorderRules(st.RecorderDirs)
 	}}}
+}
+
+// ClearRecorderRules takes the flight recorder's audit rule off dirs (and
+// only that rule: see winsec.ClearRecorderAudit).
+func ClearRecorderRules(dirs []string) (string, error) {
+	n, failed := 0, 0
+	var first error
+	for _, d := range dirs {
+		if err := winsec.ClearRecorderAudit(d); err != nil {
+			if errors.Is(err, windows.ERROR_FILE_NOT_FOUND) || errors.Is(err, windows.ERROR_PATH_NOT_FOUND) {
+				continue
+			}
+			failed++
+			if first == nil {
+				first = fmt.Errorf("%s: %w", d, err)
+			}
+			continue
+		}
+		n++
+	}
+	if first != nil {
+		return fmt.Sprintf("%d folder(s) done, %d not", n, failed), first
+	}
+	return fmt.Sprintf("%d folder(s)", n), nil
 }
 
 // deleteProgramFiles removes the install folder on uninstall, including the

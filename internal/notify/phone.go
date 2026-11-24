@@ -51,6 +51,25 @@ func cleanName(s string) string {
 // FromAlert builds the phone message for an alert. It names the computer,
 // for whoever gets alerts from more than one (a laptop and a desktop, a
 // parent's PC).
+// FromAutopsy is the phone message for an autopsy that found the caught
+// program had read real data.
+func FromAutopsy(a *alerts.Alert) Message {
+	m := Message{Title: "What " + a.ExeName() + " had already opened", Priority: 5}
+	if host := machineName(); host != "" {
+		m.Title += " (" + host + ")"
+	}
+	var b strings.Builder
+	if ap := a.Autopsy; ap != nil {
+		b.WriteString(ap.Headline + "\n")
+		for i, st := range ap.Steps {
+			fmt.Fprintf(&b, "%d. %s\n", i+1, st)
+		}
+	}
+	fmt.Fprintf(&b, "Details: aba autopsy %s", a.ID)
+	m.Body = b.String()
+	return m
+}
+
 func FromAlert(a *alerts.Alert) Message {
 	m := Message{Title: a.Title, Priority: 3}
 	var b strings.Builder

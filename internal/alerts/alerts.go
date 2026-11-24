@@ -86,6 +86,105 @@ type Alert struct {
 	Instant    bool             `json:"instant,omitempty"`    // caught the moment it opened the bait (instant freeze), not via the event log
 	Status     string           `json:"status"`               // open | resolved
 	Note       string           `json:"note,omitempty"`
+	// Autopsy is what ABA found out about the caught program while it was
+	// frozen: what real things it had opened, what it staged, where it was
+	// sending. Filled in a moment after the alert went out (see package autopsy).
+	Autopsy *Autopsy `json:"autopsy,omitempty"`
+}
+
+// The three answers an autopsy gives to "did it take my real data?".
+const (
+	AnswerRead    = "read"        // it opened real things: here they are, act now
+	AnswerNoSign  = "no-sign"     // no sign it did, over everything ABA was watching
+	AnswerUnknown = "cannot-tell" // ABA can't tell, and says why
+)
+
+// Autopsy is what ABA found out about a caught program while it was frozen.
+// Everything in it is something ABA saw; where it couldn't see, it says so.
+type Autopsy struct {
+	Started  time.Time `json:"started"`
+	Finished time.Time `json:"finished,omitempty"`
+
+	Answer   string   `json:"answer"`
+	Headline string   `json:"headline"`
+	Summary  []string `json:"summary,omitempty"` // a few lines that explain the answer
+	Steps    []string `json:"steps,omitempty"`   // what to do about what it read (or may have)
+	Unsure   []string `json:"unsure,omitempty"`  // why ABA can't tell, when it can't
+	Leads    []string `json:"leads,omitempty"`   // things that point to a theft without proving it
+
+	ProcessStart time.Time    `json:"processStart,omitempty"` // when the first of its processes started
+	BaitAt       time.Time    `json:"baitAt,omitempty"`
+	Reads        []StoreRead  `json:"reads,omitempty"`
+	Watched      []StoreWatch `json:"watched,omitempty"`
+	OpenFiles    []FileSeen   `json:"openFiles,omitempty"`
+	Staged       []Staged     `json:"staged,omitempty"`
+	StagedWhere  []string     `json:"stagedWhere,omitempty"` // the folders looked through for staged files
+	Addresses    []Address    `json:"addresses,omitempty"`
+
+	MemoryScanned  int64    `json:"memoryScanned,omitempty"` // bytes of its memory looked through
+	AttackerWallet string   `json:"attackerWallet,omitempty"`
+	Evidence       string   `json:"evidence,omitempty"`    // the folder the evidence was saved to
+	MemoryImage    bool     `json:"memoryImage,omitempty"` // the evidence includes a copy of its memory
+	Notes          []string `json:"notes,omitempty"`       // what couldn't be looked at, and why
+}
+
+// StoreRead is a real store's file the program opened, for certain.
+type StoreRead struct {
+	Store string    `json:"store"`
+	Name  string    `json:"name"` // "your Chrome"
+	Kind  string    `json:"kind"`
+	Path  string    `json:"path"`
+	At    time.Time `json:"at"`
+	Count int       `json:"count,omitempty"`
+	PID   uint32    `json:"pid,omitempty"`
+	Image string    `json:"image,omitempty"`
+	How   string    `json:"how"` // how ABA knows: "the flight recorder saw it open it", "it has it open"
+}
+
+// StoreWatch is how well one real store was watched while the program ran.
+type StoreWatch struct {
+	Store   string    `json:"store"`
+	Name    string    `json:"name"`
+	Kind    string    `json:"kind,omitempty"`
+	Watched bool      `json:"watched"`
+	Absent  bool      `json:"absent,omitempty"`
+	Since   time.Time `json:"since,omitempty"`
+	Why     string    `json:"why,omitempty"`
+}
+
+// FileSeen is a file the program has open.
+type FileSeen struct {
+	Path string `json:"path"`
+	PID  uint32 `json:"pid"`
+	What string `json:"what,omitempty"` // "a bait", "your real Chrome's file"
+}
+
+// Staged is a file that appeared while the program ran, where stealers put
+// what they collect.
+type Staged struct {
+	Path     string         `json:"path"`
+	Size     int64          `json:"size"`
+	Appeared time.Time      `json:"appeared"`
+	HeldOpen bool           `json:"heldOpen,omitempty"` // the program has it open: certainly its
+	What     string         `json:"what,omitempty"`
+	Archive  string         `json:"archive,omitempty"` // zip, tar…
+	Entries  []ArchiveEntry `json:"entries,omitempty"`
+	More     int            `json:"more,omitempty"`  // entries not listed
+	Saved    string         `json:"saved,omitempty"` // its copy in the evidence folder
+}
+
+// ArchiveEntry is one file inside a staged archive.
+type ArchiveEntry struct {
+	Name string `json:"name"`
+	Size int64  `json:"size"`
+	What string `json:"what,omitempty"`
+}
+
+// Address is somewhere the program may have been sending to.
+type Address struct {
+	Kind  string `json:"kind"` // telegram-bot, discord-webhook, url, connection
+	Value string `json:"value"`
+	Where string `json:"where"` // memory, file, memory+file, connection
 }
 
 // NewID returns a sortable, unique alert ID.

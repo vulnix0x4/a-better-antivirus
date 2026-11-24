@@ -16,6 +16,8 @@
 // Finder to duplicate it next to FILE), the way the Atomic stealer collects
 // documents. After DONE it writes a line to FILE.tick every 100 ms, so that a
 // test can see whether it's still running or frozen.
+// With -beacon TEXT it keeps TEXT in memory while it runs, the way a stealer
+// keeps the address it sends to (the autopsy looks for it there).
 //
 // With -serve it's the phone instead: a web server that takes what ABA would
 // post to ntfy and writes each message to FILE as "POST path | title | text",
@@ -35,6 +37,13 @@ import (
 	"time"
 )
 
+// beacon (-beacon) is kept in memory for as long as the grabber runs: the
+// autopsy of a caught stealer looks through its memory for where it sends.
+var (
+	beacon string
+	held   []byte
+)
+
 func main() {
 	child := flag.Bool("child", false, "start a helper process first")
 	link := flag.Bool("link", false, "read each file through a hard link")
@@ -43,7 +52,9 @@ func main() {
 	idle := flag.Bool("idle", false, "do nothing (the helper process)")
 	serve := flag.String("serve", "", "address to take phone alerts on, instead of grabbing")
 	finder := flag.Bool("finder", false, "have Finder copy each file")
+	flag.StringVar(&beacon, "beacon", "", "an address to keep in memory, the way a stealer keeps where it sends")
 	flag.Parse()
+	held = []byte(beacon)
 	if *serve != "" && *out != "" {
 		err := http.ListenAndServe(*serve, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			body, _ := io.ReadAll(io.LimitReader(r.Body, 64<<10))

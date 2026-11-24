@@ -21,12 +21,14 @@ import (
 	"golang.org/x/sys/windows/svc"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/alerts"
+	"github.com/vulnix0x4/a-better-antivirus/internal/baits"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/detect"
 	"github.com/vulnix0x4/a-better-antivirus/internal/evtlog"
 	"github.com/vulnix0x4/a-better-antivirus/internal/instant"
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
+	"github.com/vulnix0x4/a-better-antivirus/internal/recorder"
 	"github.com/vulnix0x4/a-better-antivirus/internal/svcctl"
 	"github.com/vulnix0x4/a-better-antivirus/internal/winsec"
 )
@@ -123,6 +125,19 @@ type watchers struct {
 	baitIDs map[string]string    // file identity -> bait path (to recognise a bait under another name)
 	notBait map[string]time.Time // audited paths that turned out not to be baits
 	opens   map[uint32]openSeen  // what instant freeze last saw each program open
+
+	// The flight recorder's folders (see watchStores): lower-case path ->
+	// path, those found too busy to audit (and since when), and how many
+	// opens each has logged this hour.
+	recDirs  map[string]string
+	recBusy  map[string]time.Time
+	recCount map[string]*recCounter
+}
+
+// recCounter counts one folder's audited opens in the current hour.
+type recCounter struct {
+	hour time.Time
+	n    int
 }
 
 // openSeen is a bait the instant path saw a program open.
@@ -133,6 +148,7 @@ type openSeen struct {
 
 func (s *server) initWatchers() {
 	s.baitIDs, s.notBait, s.opens = map[string]string{}, map[string]time.Time{}, map[uint32]openSeen{}
+	s.recDirs, s.recBusy, s.recCount = map[string]string{}, map[string]time.Time{}, map[string]*recCounter{}
 	s.watch = &instant.Watcher{Self: uint32(os.Getpid()), OnOpen: s.onOpen, OnGhost: s.onGhost, OnBlocked: s.onBlocked,
 		Suspect: s.eng.SweepSuspect, Logf: s.log.Printf}
 	s.admit = s.admitAudited
@@ -205,6 +221,12 @@ func (s *server) heard(ctx context.Context, x string) {
 	if !ok {
 		return
 	}
+	// An open of a real store's file, for the flight recorder: it goes there
+	// and nowhere else (never to the bait path, which would take it for a
+	// bait under another name and wait to find out which).
+	if s.recordAudit(oa) {
+		return
+	}
 	// Whether it's about a bait is decided on the main loop (see admitAudited),
 	// not here: this runs alongside it, and would judge an access to a bait
 	// added a moment ago against the list from before the reload.
@@ -214,6 +236,155 @@ func (s *server) heard(ctx context.Context, x string) {
 	case s.accesses <- a:
 	case <-ctx.Done():
 	}
+}
+
+// settle is how long the autopsy waits for Windows to log the moments before
+// the freeze: the Security log delivers events a few milliseconds to about a
+// second after they happen.
+const settle = 1500 * time.Millisecond
+
+// recBudget is how many opens one folder may log in an hour before ABA stops
+// auditing it: the Security log is small by default, and ABA's bait events
+// live there too. A folder a program works in all day isn't worth that.
+const recBudget = 600
+
+// recordAudit hands an audited open in one of the flight recorder's folders
+// to the recorder. It reports whether the event was one (and so dealt with).
+func (s *server) recordAudit(oa *evtlog.ObjectAccess) bool {
+	dir := strings.ToLower(filepath.Dir(oa.ObjectName))
+	s.mu.Lock()
+	_, ours := s.recDirs[dir]
+	s.mu.Unlock()
+	if !ours {
+		return false
+	}
+	if _, bait := s.eng.IsBait(oa.ObjectName); bait {
+		return false // a bait in the same folder has its own rule (none inherited)
+	}
+	if oa.ProcessID == uint32(os.Getpid()) {
+		return true // ABA's own autopsy comparing a copy with the real file
+	}
+	now := time.Now()
+	s.mu.Lock()
+	c := s.recCount[dir]
+	if c == nil || now.Sub(c.hour) > time.Hour {
+		c = &recCounter{hour: now}
+		s.recCount[dir] = c
+	}
+	c.n++
+	busy := c.n == recBudget
+	s.mu.Unlock()
+	if busy {
+		go s.safe("recorder budget", func() { s.tooBusy(dir, oa.ProcessName) })
+	}
+	if !winsec.AccessMaskIsRead(oa.AccessMask) {
+		return true
+	}
+	op := recorder.Open{At: oa.Time, Path: oa.ObjectName, PID: oa.ProcessID, Image: oa.ProcessName}
+	// The event has no start time: if the process is still there and was
+	// already running then, that's the one; the recorder judges the rest.
+	if t, err := procinfo.StartedAt(oa.ProcessID); err == nil && !t.After(oa.Time) {
+		op.Start = t
+		op.PPID = procinfo.ParentPID(oa.ProcessID)
+	}
+	s.rec.Note(op)
+	return true
+}
+
+// tooBusy stops auditing a folder that logged recBudget opens within an hour,
+// and says so in what the recorder knows about its store.
+func (s *server) tooBusy(dir, who string) {
+	s.mu.Lock()
+	path := s.recDirs[dir]
+	s.recBusy[dir] = time.Now()
+	delete(s.recDirs, dir)
+	s.mu.Unlock()
+	if err := winsec.ClearRecorderAudit(path); err != nil {
+		s.log.Printf("flight recorder: taking the audit rule off %s: %v", path, err)
+	}
+	s.log.Printf("flight recorder: %s logged %d opens within an hour (by %s, among others); not watched for a day", path, recBudget, who)
+	for _, st := range s.rec.Stores() {
+		if paths.Under(path, st.Root) || paths.Same(path, st.Root) {
+			s.rec.NotWatching(st.ID, time.Now(), "Windows was logging too many opens of it ("+filepath.Base(who)+" opens it all the time), so ABA stopped watching "+path+" for a day, to keep the Security log for the baits")
+		}
+	}
+}
+
+// watchStores puts the flight recorder's audit rule on every folder the real
+// stores' files are in (see winsec.SetRecorderAudit), takes it off folders
+// that are no longer one, and checks the rest still have it. A rule found
+// gone, or a new folder, means opens since the last check may have been
+// missed. What's armed is on record, for uninstalling.
+func (s *server) watchStores(stores []baits.Store) (why, gap map[string]string) {
+	why, gap = map[string]string{}, map[string]string{}
+	want := map[string]string{}
+	owner := map[string][]string{}
+	now := time.Now()
+	for _, st := range stores {
+		for _, d := range st.Dirs() {
+			k := strings.ToLower(d)
+			s.mu.Lock()
+			t, busy := s.recBusy[k]
+			s.mu.Unlock()
+			if busy && now.Sub(t) < 24*time.Hour {
+				why[st.ID] = "Windows was logging too many opens of " + d + ", so ABA isn't watching it until " + t.Add(24*time.Hour).Format("Jan 2 15:04")
+				continue
+			}
+			want[k] = d
+			owner[k] = append(owner[k], st.ID)
+		}
+	}
+	st, _ := config.LoadState()
+	var before []string
+	if st != nil {
+		before = st.RecorderDirs
+	}
+	for _, d := range before {
+		if _, keep := want[strings.ToLower(d)]; !keep {
+			if err := winsec.ClearRecorderAudit(d); err != nil && !errors.Is(err, windows.ERROR_FILE_NOT_FOUND) && !errors.Is(err, windows.ERROR_PATH_NOT_FOUND) {
+				s.log.Printf("flight recorder: taking the audit rule off %s: %v", d, err)
+			}
+		}
+	}
+	s.mu.Lock()
+	prev := s.recDirs
+	s.mu.Unlock()
+	armed := map[string]string{}
+	for k, d := range want {
+		has, err := winsec.HasRecorderAudit(d)
+		if err == nil && !has {
+			if _, was := prev[k]; was {
+				for _, id := range owner[k] {
+					gap[id] = "the audit rule on " + d + " was gone (taken off, or the folder made anew), and was put back"
+				}
+			} else if len(prev) > 0 {
+				for _, id := range owner[k] {
+					if gap[id] == "" {
+						gap[id] = "a new folder of it appeared (" + d + "), which ABA only watches from its next check"
+					}
+				}
+			}
+			err = winsec.SetRecorderAudit(d)
+		}
+		if err != nil {
+			for _, id := range owner[k] {
+				if why[id] == "" {
+					why[id] = "ABA couldn't put its audit rule on " + d + " (" + err.Error() + ")"
+				}
+			}
+			continue
+		}
+		armed[k] = d
+	}
+	s.mu.Lock()
+	s.recDirs = armed
+	s.mu.Unlock()
+	list := make([]string, 0, len(armed))
+	for _, d := range armed {
+		list = append(list, d)
+	}
+	config.UpdateState(func(st *config.State) error { st.RecorderDirs = list; return nil })
+	return why, gap
 }
 
 // admitAudited says whether an audited access is about a bait, and names the

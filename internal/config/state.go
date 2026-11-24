@@ -29,6 +29,10 @@ type State struct {
 	Persona          map[string]string     `json:"persona,omitempty"` // fake identity shared by all baits
 	Update           *UpdateStatus         `json:"update,omitempty"`
 	LearningNotice   time.Time             `json:"learningNotice,omitempty"` // LearningUntil we already announced the end of
+	// RecorderDirs are the folders ABA put a flight recorder audit rule on
+	// (Windows only), so that it can take them off again whatever happens to
+	// the list of stores.
+	RecorderDirs []string `json:"recorderDirs,omitempty"`
 }
 
 // UpdateStatus records what the auto-updater last did.

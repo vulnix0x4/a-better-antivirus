@@ -6,7 +6,8 @@
   Installs ABA, runs fake stealers against it and checks every response:
   freeze, per-program block, kill, resume + ignore, release, strict-mode
   isolation (with a phone alert sent *while* isolated), bait repair, decoy
-  retirement, custom baits, and a complete uninstall.
+  retirement, custom baits, the autopsy of a stealer that read a real key
+  before the bait and of one that didn't, and a complete uninstall.
 
   DO NOT run this on a PC you care about: it isolates the network for a few
   seconds and changes system settings. It's meant for CI runners.
@@ -205,6 +206,32 @@ Step 'Baseline'
 $auditBefore = AuditFS
 Ok "audit policy before install: $auditBefore"
 Check (WaitFor { Online } 45) 'machine is online'
+# A real-looking secret for the flight recorder to watch: a private key of
+# this user's, there since before the install (fake, made for this test).
+$sshDir = Join-Path $env:USERPROFILE '.ssh'
+$realKey = Join-Path $sshDir 'id_e2e_real'
+New-Item -ItemType Directory -Force $sshDir | Out-Null
+if (Test-Path $realKey) { Fail "$realKey exists already" }
+Set-Content -Path $realKey -Value "-----BEGIN OPENSSH PRIVATE KEY-----`nnot a real key: ABA end-to-end test`n-----END OPENSSH PRIVATE KEY-----" -NoNewline
+# The flight recorder's audit rule: read data, by Everyone, inherited by the
+# files directly in the folder only. (See winsec.SetRecorderAudit.)
+# Compared as numbers and by SID, not by name: "read data" and "list folder"
+# are the same bit, and which of the two names .NET prints isn't fixed.
+# (Inheritance 2 is "the files in it"; propagation 3 is "only those, and not
+# the folder itself".)
+function RecorderRule([string]$dir) {
+    @((Get-Acl -Audit $dir).GetAuditRules($true, $false, [System.Security.Principal.SecurityIdentifier]) | Where-Object {
+        $_.IdentityReference.Value -eq 'S-1-1-0' -and [int]$_.FileSystemRights -eq 1 -and
+        ([int]$_.AuditFlags -band 1) -and [int]$_.InheritanceFlags -eq 2 -and [int]$_.PropagationFlags -eq 3 })
+}
+# What to print when a check on the rule fails.
+function RecorderRuleReport([string]$dir) {
+    "  audit rules on ${dir}:" | Out-Host
+    (Get-Acl -Audit $dir).GetAuditRules($true, $true, [System.Security.Principal.SecurityIdentifier]) | ForEach-Object {
+        "    $($_.IdentityReference.Value) rights=$([int]$_.FileSystemRights) ($($_.FileSystemRights)) audit=$($_.AuditFlags) inherit=$($_.InheritanceFlags) propagate=$($_.PropagationFlags) inherited=$($_.IsInherited)" } | Out-Host
+    "  recorder folders on record: $(((State).recorderDirs) -join '; ')" | Out-Host
+}
+Check ((RecorderRule $sshDir).Count -eq 0) 'no audit rule of ABA''s on the .ssh folder before the install'
 
 Step 'Install (balanced, no learning, ntfy phone alerts)'
 Aba install --yes --preset balanced --learning 0 --ntfy-topic $topic
@@ -301,6 +328,67 @@ Aba alerts show $a1.id
 Aba kill $a1.id
 Check (WaitFor { -not (Get-Process -Id $s1.Id -ErrorAction SilentlyContinue) } 10) 'killed'
 Check (WaitFor { NtfyMessages | Where-Object { $_.message -match $a1.id } } 60) 'critical alert reached the phone (ntfy)'
+
+Step 'Autopsy: a stealer that read a real key before the bait'
+# The answer has to be "it read your real SSH keys", with the evidence saved,
+# the bot token in its memory found, and a shareable file with nothing of yours.
+if (-not (WaitFor { (RecorderRule $sshDir).Count -eq 1 } 30)) { RecorderRuleReport $sshDir }
+Check ((RecorderRule $sshDir).Count -eq 1) 'the flight recorder''s audit rule is on the .ssh folder'
+$token = '7134567890:AAHk3n2Lq9xZr8Yv6Tt5Ww4Uu3Ss2Rr1Qq0'
+# Readers: copies of aba.exe (unsigned, in Temp) running test-reader, which
+# reads each file it's given in turn, then waits to be frozen.
+function Reader([string]$name, [string[]]$files, [string]$beacon) {
+    $exe = Join-Path $env:TEMP "$name.exe"
+    Copy-Item $Aba $exe -Force
+    [IO.File]::AppendAllText($exe, [guid]::NewGuid().ToString())
+    Snap
+    $readerArgs = @($exe, 'test-reader')
+    if ($beacon) { $readerArgs += @('--beacon', $beacon) }
+    $procId = & $Medium @readerArgs @files
+    if ($LASTEXITCODE -or -not $procId) { Fail "fake stealer $name didn't start" }
+    return [int]$procId
+}
+function Autopsied([string]$id, [int]$seconds = 40) {
+    WaitFor { Alerts | Where-Object { $_.id -eq $id -and $_.autopsy -and -not "$($_.autopsy.finished)".StartsWith('0001') } | Select-Object -Last 1 } $seconds
+}
+$pa = Reader 'stealer-a' @($realKey, $desktopBait) "https://api.telegram.org/bot$token/sendDocument"
+$aa = AlertFor $pa
+Check ($aa -and $aa.tier -eq 'critical' -and (Did $aa 'freeze')) "the stealer that read a real key first is caught and frozen ($($aa.id))"
+$aa = Autopsied $aa.id
+Check ($aa) 'its autopsy finished'
+Check ($aa.autopsy.answer -eq 'read') "the autopsy says it read real data: $($aa.autopsy.headline) $($aa.autopsy.unsure -join ' ')"
+Check (@($aa.autopsy.reads | Where-Object { $_.path -match 'id_e2e_real' }).Count -ge 1) "the real key is among what it read: $(($aa.autopsy.reads.path) -join ', ')"
+Check ($aa.autopsy.steps[0] -match 'SSH') "the first thing to do is about the SSH keys: $($aa.autopsy.steps[0])"
+Check (@($aa.autopsy.addresses | Where-Object { $_.kind -eq 'telegram-bot' -and $_.value -eq $token }).Count -eq 1) "the bot token in its memory was found ($($aa.autopsy.memoryScanned) bytes looked through) $($aa.autopsy.notes -join ' ')"
+$ev = Join-Path $data "evidence\$($aa.id)"
+Check ((Test-Path "$ev\README.txt") -and (Test-Path "$ev\autopsy.json") -and @(Get-ChildItem "$ev\program\*.sample").Count -eq 1) "evidence saved to $ev"
+Aba autopsy $aa.id
+$ioc = Join-Path $env:TEMP 'aba-ioc.json'
+Aba export-ioc $aa.id -o $ioc
+$iocText = Get-Content $ioc -Raw
+$iocJson = $iocText | ConvertFrom-Json
+Check ($iocJson.file.sha256.Length -eq 64 -and $iocJson.sendingTo.value -contains $token) 'export-ioc: the fingerprint and the bot token'
+Check (-not $iocText.Contains($env:USERPROFILE) -and -not $iocText.Contains($env:USERPROFILE.Replace('\', '\\')) -and -not $iocText.Contains('BEGIN OPENSSH')) 'and nothing of yours'
+Aba kill $aa.id
+Check (Test-Path "$ev\autopsy.json") 'the evidence outlives aba kill'
+
+Step 'Autopsy: a stealer that only touched the bait'
+$pb = Reader 'stealer-b' @($desktopBait) ''
+$ab = AlertFor $pb
+Check ($ab -and (Did $ab 'freeze')) "caught and frozen ($($ab.id))"
+$ab = Autopsied $ab.id
+Check ($ab) 'its autopsy finished'
+Check ($ab.autopsy.answer -ne 'read') "it isn't said to have read anything real: $($ab.autopsy.headline)"
+Check (@($ab.autopsy.watched | Where-Object { $_.store -eq 'ssh' -and $_.watched }).Count -eq 1) "the SSH keys were watched the whole time it ran"
+if ($ab.autopsy.answer -eq 'no-sign') {
+    Ok $ab.autopsy.headline
+} else {
+    # Browsers on this runner may update in the background and make a new
+    # folder, which ABA only watches from its next check: then "can't tell"
+    # is the honest answer, as long as it isn't about what was watched.
+    Check ($ab.autopsy.answer -eq 'cannot-tell' -and -not (($ab.autopsy.unsure -join ' ') -match 'SSH')) "can't tell, for reasons that aren't the SSH keys: $($ab.autopsy.unsure -join ' | ')"
+}
+Aba kill $ab.id
 
 Step 'A signed, legit program reading a bait is let through'
 $legit = Join-Path $env:TEMP 'legit-curl.exe'   # Microsoft-signed (catalog), so "warn": notify only
@@ -543,6 +631,20 @@ Step 'Turn auto-update off unattended'
 Aba install --yes --preset balanced --learning 0 --auto-update=false
 Check ((Get-Content (Join-Path $data 'config.json') -Raw | ConvertFrom-Json).autoUpdate -eq $false) '--auto-update=false turns it off'
 
+Step 'What the flight recorder cost'
+# Informational, for deciding between audit rules and other ways of watching:
+# how many Security log entries ABA's recorder folders produced during this
+# run, and how much CPU the service used in all.
+$recDirs = @((State).recorderDirs)
+$recEvents = @(Get-WinEvent -FilterHashtable @{ LogName = 'Security'; Id = 4663; StartTime = $started } -ErrorAction SilentlyContinue |
+    Where-Object { $obj = $_.Properties[6].Value; $recDirs | Where-Object { $obj -like "$_\*" } })
+$minutes = [math]::Max(1, ((Get-Date) - $started).TotalMinutes)
+Ok "flight recorder folders: $($recDirs.Count); their Security log entries: $($recEvents.Count) in $([int]$minutes) min ($([int]($recEvents.Count * 60 / $minutes)) an hour)"
+$svc = Get-Process famsvc -ErrorAction SilentlyContinue
+if ($svc) { Ok "service CPU time so far: $([math]::Round($svc.TotalProcessorTime.TotalSeconds, 1)) s" }
+$log = Get-WinEvent -ListLog Security
+Ok "Security log: $([int]($log.FileSize / 1MB)) of $([int]($log.MaximumSizeInBytes / 1MB)) MB used"
+
 Step 'Uninstall'
 Aba uninstall --yes --purge
 Check (-not (Get-Service FileAccessMonitor -ErrorAction SilentlyContinue)) 'service removed'
@@ -555,5 +657,8 @@ Check ((AuditFS) -eq $auditBefore) "audit policy restored ($auditBefore)"
 $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
 Check (-not ($machinePath -split ';' | Where-Object { $_ -eq $installDir })) 'removed from PATH'
 Check (Online) 'still online'
+Check ((RecorderRule $sshDir).Count -eq 0) 'the flight recorder''s audit rule is gone from the .ssh folder'
+Check ((Get-Content $realKey -Raw) -match 'not a real key') 'the real-looking key was left as it was'
+Remove-Item $realKey -Force
 
 Write-Host "`nALL END-TO-END CHECKS PASSED in $([int]((Get-Date) - $started).TotalSeconds)s" -ForegroundColor Green

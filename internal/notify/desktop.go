@@ -21,6 +21,31 @@ type Envelope struct {
 	Alert         *alerts.Alert `json:"alert,omitempty"`
 	LearningEnded bool          `json:"learningEnded,omitempty"`
 	Trusted       int           `json:"trusted,omitempty"` // programs on the trust list
+	// Autopsy: show what the autopsy of the alert's program found (it read
+	// real data), not the alert itself.
+	Autopsy bool `json:"autopsy,omitempty"`
+}
+
+// ShowAutopsy tells the person what the autopsy of a caught program found:
+// that it had read real data, and what to do about it.
+func ShowAutopsy(a *alerts.Alert) {
+	ap := a.Autopsy
+	if ap == nil {
+		return
+	}
+	var b strings.Builder
+	b.WriteString(ap.Headline + "\n")
+	for _, l := range ap.Summary {
+		b.WriteString("\n" + l)
+	}
+	if len(ap.Steps) > 0 {
+		b.WriteString("\n\nFrom another device (your phone), now:")
+		for i, st := range ap.Steps {
+			fmt.Fprintf(&b, "\n%d. %s", i+1, st)
+		}
+	}
+	b.WriteString("\n\nEverything ABA found: aba autopsy " + a.ID)
+	messageBox("ABA: what "+a.ExeName()+" had already opened", b.String(), mbOK|mbIconError)
 }
 
 // What messageBox is asked to show (buttons and icon) and what it answers.
