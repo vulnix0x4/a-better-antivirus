@@ -7,6 +7,7 @@ package autopsy
 import (
 	"encoding/json"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -84,8 +85,18 @@ func redactHome(p, home string) string {
 		rel := strings.TrimPrefix(p[len(home):], string(filepath.Separator))
 		return "~" + string(filepath.Separator) + rel
 	}
+	// Any account's folder, under whatever name the path reached it by: the
+	// home folder as given can miss it (Windows also knows C:\Users\johnsmith
+	// as C:\Users\JOHNSM~1, and a program may run from another account's
+	// folder), and the name in it is still a person's.
+	if m := accountFolder.FindString(p); m != "" {
+		return "~" + p[len(m):]
+	}
 	return p
 }
+
+// accountFolder matches the start of a path inside somebody's home folder.
+var accountFolder = regexp.MustCompile(`(?i)^(?:[a-z]:\\users\\[^\\]+|/users/[^/]+|/home/[^/]+)`)
 
 // MarshalIOC is the file's contents.
 func MarshalIOC(i IOC) ([]byte, error) {
