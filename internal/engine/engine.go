@@ -322,7 +322,7 @@ func (e *Engine) DecideInstantOpWhy(pid uint32, path string, op detect.Op) (bool
 	// the open, whatever it is (see wreck).
 	if op == detect.OpWrite && !exempt && !classify.OSVendorSigned(sig) {
 		if wrecked := e.wreck(pid, baitID, path, time.Now()); len(wrecked) >= wreckFolders {
-			v = e.wreckVerdict(v, wrecked)
+			v = e.wreckVerdict(v, wrecked, "write")
 		}
 	}
 	if !v.Builtin && !v.DecoyOwner {
@@ -342,11 +342,12 @@ func (e *Engine) DecideInstantOpWhy(pid uint32, path string, op detect.Op) (bool
 			v = e.teamVerdict(v, units, 0)
 		}
 	}
-	if op == detect.OpDelete && v.Tier != config.TierCritical {
-		// A program that looks legitimate removing a file: reported (the
-		// event log names it), never frozen. See actionsFor in handle.
+	if op == detect.OpDelete && (v.Tier != config.TierCritical || classify.ScriptHost(image)) {
+		// A program that looks legitimate removing a file, or a script host
+		// removing one: reported (the event log names it), not frozen here.
+		// See actionsFor in handle, which also counts a script's deletes.
 		done(false)
-		return false, fmt.Sprintf("%s is %s; deleting a bait is only stopped when it's critical", image, v.Tier)
+		return false, fmt.Sprintf("%s is %s; deleting a bait isn't stopped inside the open for it", image, v.Tier)
 	}
 	if !config.Has(cfg.ActionsFor(v.Tier, time.Now()), config.ActionFreeze) {
 		done(false)
@@ -546,8 +547,19 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 		}
 	}
 	// Rewriting your documents in folder after folder: ransomware, or a wiper.
+	// So is a script deleting them in folder after folder. (A script host
+	// deleting one bait is you, at a prompt or in a script of your own; an
+	// ordinary program's deletes aren't counted at all, see wreck.)
+	scripted := false
+	if access == "delete" {
+		img := oa.Image
+		if live, err := e.Ops.ImagePath(oa.PID); err == nil && live != "" {
+			img = live
+		}
+		scripted = classify.ScriptHost(img)
+	}
 	var wrecked []string
-	if access == "write" {
+	if access == "write" || scripted {
 		wrecked = e.wreck(oa.PID, baitID, oa.Path, time.Now())
 		if len(wrecked) >= wreckFolders && !e.sweepable(oa.PID) {
 			wrecked = nil
@@ -565,10 +577,12 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 		// handle it again as a sweep, with the full response.
 		delete(e.incidents, oa.PID)
 	}
-	if inc := e.incidents[oa.PID]; !instant && inc != nil && len(wrecked) >= wreckFolders && !inc.wrecked && inc.alert.Tier != config.TierCritical {
+	if inc := e.incidents[oa.PID]; !instant && inc != nil && len(wrecked) >= wreckFolders && !inc.wrecked &&
+		(inc.alert.Tier != config.TierCritical || !inc.alert.Did(config.ActionFreeze)) {
 		// Same: now it's rewriting folder after folder. (Judged once: a
 		// program that's exempt, like OneDrive, isn't alerted about anew for
-		// every file after that.)
+		// every file after that. A script host's first delete made a critical
+		// alert that did nothing: that one is handled again too.)
 		delete(e.incidents, oa.PID)
 	}
 	if inc := e.incidents[oa.PID]; access == "swap" && inc != nil && inc.alert.Tier != config.TierCritical {
@@ -629,10 +643,11 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 		if test {
 			return []config.Action{config.ActionFreeze} // a test never cuts the network
 		}
-		if access == "delete" && t != config.TierCritical {
+		if access == "delete" && (t != config.TierCritical || (scripted && len(wrecked) < wreckFolders)) {
 			// A program that looks legitimate removing a file (you, in
-			// Explorer; a cleaner; a sync client moving your folders): the
-			// bait is put back and you're told. One that would be stopped for
+			// Explorer; a cleaner; a sync client moving your folders), or a
+			// script host removing one (you again, at a prompt): the bait is
+			// put back and you're told. A program that would be stopped for
 			// reading a bait is stopped for destroying it too: that's a wiper,
 			// or ransomware that deletes what it has encrypted a copy of.
 			return nil
@@ -699,8 +714,10 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	// Decided only now that the signature is known, and never for the
 	// system's own programs: OneDrive and iCloud put your Desktop and
 	// Documents back file by file, which looks the same from here.
-	if isWreck && !cls.SweepExempt(image, oa.PID, &sig) && !classify.OSVendorSigned(sig) {
-		v = e.wreckVerdict(v, wrecked)
+	// (A script host's signature says nothing about the script: Windows'
+	// own PowerShell deleting folder after folder is judged like any other.)
+	if isWreck && !cls.SweepExempt(image, oa.PID, &sig) && (scripted || !classify.OSVendorSigned(sig)) {
+		v = e.wreckVerdict(v, wrecked, access)
 	}
 	if access == "swap" {
 		v = swapVerdict(oa.Swap)
@@ -1380,7 +1397,9 @@ const wreckFolders = 2
 // documents count (the files in your Desktop, Documents and home folder):
 // that's where ransomware goes, and nothing legitimate rewrites files it
 // didn't make in one folder after another. An app's own data doesn't count:
-// the app, a cleaner or a sync client rewrites that all the time.
+// the app, a cleaner or a sync client rewrites that all the time. Deletes
+// are only counted for a script host (see handle): you delete files in
+// several folders in Explorer, and a sync client moves them, all the time.
 func (e *Engine) wreck(pid uint32, baitID, path string, now time.Time) []string {
 	if sweepUnit(baitID) != filesUnit {
 		return nil
@@ -1418,14 +1437,19 @@ func (e *Engine) wreck(pid uint32, baitID, path string, now time.Time) []string 
 }
 
 // wreckVerdict turns a verdict into a critical one: the program rewrote
-// files of yours in several folders.
-func (e *Engine) wreckVerdict(v classify.Verdict, dirs []string) classify.Verdict {
+// files of yours in several folders (access "write"), or a script deleted
+// them there ("delete").
+func (e *Engine) wreckVerdict(v classify.Verdict, dirs []string, access string) classify.Verdict {
 	names := make([]string, len(dirs))
 	for i, d := range dirs {
 		names[i] = filepath.Base(d)
 	}
-	why := fmt.Sprintf("it went to overwrite files of yours in %d different folders within %d minutes (%s): ransomware and wipers rewrite everything they find, real programs only change what you open in them",
-		len(dirs), int(window.Minutes()), strings.Join(names, ", "))
+	did, moral := "went to overwrite", "ransomware and wipers rewrite everything they find, real programs only change what you open in them"
+	if access == "delete" {
+		did, moral = "deleted", "a wiper, or ransomware removing what it has encrypted a copy of, goes through everything it finds"
+	}
+	why := fmt.Sprintf("it %s files of yours in %d different folders within %d minutes (%s): %s",
+		did, len(dirs), int(window.Minutes()), strings.Join(names, ", "), moral)
 	return classify.Verdict{Tier: config.TierCritical, Reasons: append([]string{why}, v.Reasons...)}
 }
 
