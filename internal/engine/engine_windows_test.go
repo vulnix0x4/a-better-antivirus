@@ -554,8 +554,8 @@ func TestAnInstantCatchLearnsWhatTheProgramWentOnToDo(t *testing.T) {
 		kind, access string
 		title        string
 	}{
-		{0x2, alerts.KindWrite, "write", "Possible ransomware: locker.exe overwrote your bait"},
-		{0x10000, alerts.KindDelete, "delete", "Possible wiper or ransomware: locker.exe deleted your bait"},
+		{0x2, alerts.KindWrite, "write", "Possible ransomware: locker.exe went to overwrite your bait"},
+		{0x10000, alerts.KindDelete, "delete", "Possible wiper or ransomware: locker.exe went to delete your bait"},
 	} {
 		// The event arrives once the alert is on record.
 		e, f := setup("balanced")
@@ -572,6 +572,10 @@ func TestAnInstantCatchLearnsWhatTheProgramWentOnToDo(t *testing.T) {
 		a := only(f)
 		if len(f.saved) != 1 || a.Kind != c.kind || a.Title != c.title || len(a.Baits) != 2 || a.Baits[1].Access != c.access {
 			t.Errorf("after the event: %d alert(s), kind %s, title %q, baits %+v", len(f.saved), a.Kind, a.Title, a.Baits)
+		}
+		// The popup said "opened your bait": you're told what it really is.
+		if len(f.desktop) != 2 {
+			t.Errorf("told %d time(s), want twice: as an open, then as %s", len(f.desktop), c.kind)
 		}
 		// Told twice (Windows logs each handle), it's there once.
 		e.HandleAccess(ev(620, img, desktopBait, c.mask))
