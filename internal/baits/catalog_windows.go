@@ -42,46 +42,49 @@ var Catalog = []Spec{
 		ID: "home-passwords", Name: "password list in your home folder", Category: "Files", Kind: KindFile, Default: true,
 		Description: "Scripts and dev-tool based stealers sweep the home folder.",
 		Files: func(u config.UserInfo) []FileSpec {
-			return []FileSpec{{Path: j(u.Profile, passwordsName(u, "home")), Audit: true, Text: true, Gen: genPasswordsTxt}}
+			name, alt := passwordsName(u, "home")
+			return []FileSpec{{Path: j(u.Profile, name), Alt: alt, Audit: true, Text: true, Gen: genPasswordsTxt}}
 		},
 	},
 	{
 		ID: "documents-passwords", Name: "password list in Documents", Category: "Files", Kind: KindFile, Default: true,
 		Description: "File grabbers sweep Documents for *.txt with names like password/wallet/seed.",
 		Files: func(u config.UserInfo) []FileSpec {
-			return []FileSpec{{Path: j(u.Documents, passwordsName(u, "documents")), Audit: true, Text: true, Gen: genPasswordsTxt}}
+			name, alt := passwordsName(u, "documents")
+			return []FileSpec{{Path: j(u.Documents, name), Alt: alt, Audit: true, Text: true, Gen: genPasswordsTxt}}
 		},
 	},
 	{
 		ID: "desktop-passwords", Name: "password list on the Desktop", Category: "Files", Kind: KindFile, Default: true,
 		Description: "The #1 folder file grabbers look in. You'll see it every day: don't open it.",
 		Files: func(u config.UserInfo) []FileSpec {
-			return []FileSpec{{Path: j(u.Desktop, passwordsName(u, "desktop")), Audit: true, Text: true, Gen: genPasswordsTxt}}
+			name, alt := passwordsName(u, "desktop")
+			return []FileSpec{{Path: j(u.Desktop, name), Alt: alt, Audit: true, Text: true, Gen: genPasswordsTxt}}
 		},
 	},
 	{
 		ID: "seed-phrase", Name: "wallet recovery phrase (Documents)", Category: "Files", Kind: KindFile, Default: true,
 		Description: "Crypto stealers grep for 'seed', 'wallet', 'recovery'.",
 		Files: func(u config.UserInfo) []FileSpec {
-			name := vary(u, "seed", "wallet recovery phrase.txt", "seed phrase.txt", "metamask seed.txt", "crypto wallet seed.txt",
+			name, alt := varyFile(u, "seed", "wallet recovery phrase.txt", "seed phrase.txt", "metamask seed.txt", "crypto wallet seed.txt",
 				"ledger recovery phrase.txt", "wallet backup seed.txt")
-			return []FileSpec{{Path: j(u.Documents, name), Audit: true, Text: true, Gen: genSeedTxt}}
+			return []FileSpec{{Path: j(u.Documents, name), Alt: alt, Audit: true, Text: true, Gen: genSeedTxt}}
 		},
 	},
 	{
 		ID: "backup-codes", Name: "2FA backup codes (Documents)", Category: "Files", Kind: KindFile, Default: true,
 		Description: "Backup codes bypass 2FA, so stealers grab them.",
 		Files: func(u config.UserInfo) []FileSpec {
-			name := vary(u, "codes", "google backup codes.txt", "2fa backup codes.txt", "backup-codes.txt", "google 2fa codes.txt")
-			return []FileSpec{{Path: j(u.Documents, name), Audit: true, Text: true, Gen: genBackupCodes}}
+			name, alt := varyFile(u, "codes", "google backup codes.txt", "2fa backup codes.txt", "backup-codes.txt", "google 2fa codes.txt")
+			return []FileSpec{{Path: j(u.Documents, name), Alt: alt, Audit: true, Text: true, Gen: genBackupCodes}}
 		},
 	},
 	{
 		ID: "keepass", Name: "KeePass database (Documents)", Category: "Files", Kind: KindFile, Default: true,
 		Description: "Stealers collect *.kdbx files to crack offline.",
 		Files: func(u config.UserInfo) []FileSpec {
-			name := vary(u, "kdbx", "Passwords.kdbx", "Database.kdbx", "keepass.kdbx", "Personal.kdbx", "passwords backup.kdbx")
-			return []FileSpec{{Path: j(u.Documents, name), Audit: true, Gen: genKdbx}}
+			name, alt := varyFile(u, "kdbx", "Passwords.kdbx", "Database.kdbx", "keepass.kdbx", "Personal.kdbx", "passwords backup.kdbx")
+			return []FileSpec{{Path: j(u.Documents, name), Alt: alt, Audit: true, Gen: genKdbx}}
 		},
 	},
 
@@ -322,8 +325,8 @@ var Catalog = []Spec{
 		Caveat:      "Goes in your real .ssh folder. ssh never reads this file name, but tools that scan .ssh will trip it.",
 		Files: func(u config.UserInfo) []FileSpec {
 			// The first name is the one installs from before per-install names had.
-			name := vary(u, "ssh", "id_rsa_backup_2023", "id_rsa.bak", "id_rsa.old", "id_rsa_backup", "id_rsa.orig", "old_id_rsa", "id_rsa_work")
-			return []FileSpec{{Path: j(u.Profile, ".ssh", name), Audit: true, Gen: genSSHKey}}
+			name, alt := varyFile(u, "ssh", "id_rsa_backup_2023", "id_rsa.bak", "id_rsa.old", "id_rsa_backup", "id_rsa.orig", "old_id_rsa", "id_rsa_work")
+			return []FileSpec{{Path: j(u.Profile, ".ssh", name), Alt: alt, Audit: true, Gen: genSSHKey}}
 		},
 	},
 }

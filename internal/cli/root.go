@@ -37,7 +37,7 @@ func newRoot() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "aba",
 		Short: "It's not an antivirus. It's a better one.",
-		Long: "A Better Antivirus plants fake passwords, wallets and app data that only malware would read.\n" +
+		Long: "A Better Antivirus plants fake passwords, wallets and app data that honest software has no reason to read.\n" +
 			"When something touches them, it freezes the reader, cuts its internet and alerts you.",
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -113,8 +113,8 @@ func renderWelcome() string {
 func rootHelp(root *cobra.Command) string {
 	var b strings.Builder
 	b.WriteString("\n" + ui.Banner(ui.Tagline) + "\n\n")
-	b.WriteString(" " + ui.Dim.Render("Plants fake passwords, wallets and app data that only malware would read. When") + "\n")
-	b.WriteString(" " + ui.Dim.Render("something touches them, ABA freezes it, cuts its internet and tells you.") + "\n")
+	b.WriteString(" " + ui.Dim.Render("Plants fake passwords, wallets and app data that honest software has no reason") + "\n")
+	b.WriteString(" " + ui.Dim.Render("to read. When something goes for them, ABA freezes it, cuts its internet and tells you.") + "\n")
 	// One column width for every group, so all descriptions line up.
 	w := 0
 	for _, c := range root.Commands() {

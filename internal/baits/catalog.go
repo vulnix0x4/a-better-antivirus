@@ -13,6 +13,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -73,6 +74,10 @@ type Spec struct {
 	// on the person's other devices. "" when it isn't. Setup asks before
 	// planting such baits (yes by default).
 	Synced func(u config.UserInfo) string
+	// Adopt: a file that's already at the bait's path becomes the bait, as it
+	// is. Only for a bait you added yourself (`aba bait add <path>`): you
+	// chose that file. A catalog bait never takes over a file (see Settle).
+	Adopt bool
 	// Since is the config version that introduced this bait, when it's newer
 	// than the catalog's first version: setup then offers it to installs
 	// configured before it existed.
@@ -85,6 +90,17 @@ type FileSpec struct {
 	Audit bool // put the read/delete audit rule on it
 	Text  bool // human-readable (shown by `bait show`)
 	Gen   func(g *Gen) []byte
+	// Alt is where the file's name came from, when it was picked from a pool:
+	// what Settle needs to give it another name if a file of yours has this
+	// one already.
+	Alt *Alt
+}
+
+// Alt is the pool a bait file's name was picked from, and what the pick is
+// kept under in config.UserInfo.Names when it isn't the usual one.
+type Alt struct {
+	What string
+	Pool []string
 }
 
 func j(parts ...string) string { return filepath.Join(parts...) }
@@ -107,6 +123,9 @@ func variantN(u config.UserInfo, what string, n int) int {
 
 // vary picks one of pool for this install (the first one without a Variant).
 func vary(u config.UserInfo, what string, pool ...string) string {
+	if n := u.Names[what]; n != "" {
+		return n // the usual pick was a file of yours: see Settle
+	}
 	if u.Variant == "" {
 		return pool[0]
 	}
@@ -127,9 +146,82 @@ func varyChars(u config.UserInfo, what, def string, n int, alphabet string) stri
 	return string(b)
 }
 
-func passwordsName(u config.UserInfo, where string) string {
-	return vary(u, "passwords-"+where, "passwords.txt", "my passwords.txt", "Passwords.txt", "password list.txt",
+// varyFile is vary for the name of a bait's file. It also returns what Settle
+// needs to pick another name of the pool.
+func varyFile(u config.UserInfo, what string, pool ...string) (string, *Alt) {
+	return vary(u, what, pool...), &Alt{What: what, Pool: pool}
+}
+
+func passwordsName(u config.UserInfo, where string) (string, *Alt) {
+	return varyFile(u, "passwords-"+where, "passwords.txt", "my passwords.txt", "Passwords.txt", "password list.txt",
 		"logins and passwords.txt", "pass.txt", "accounts and passwords.txt", "passwords backup.txt")
+}
+
+// Settle keeps a catalog bait off files that are already there. A
+// Passwords.kdbx of your own is not a bait, and ABA must never take it for
+// one: it would watch your file, alert on your own programs opening it, and
+// put it back if you deleted it.
+//
+// Where this install's name for one of s's files is taken, the next free name
+// of its pool is used instead and kept in u.Names. ours are the files ABA
+// planted itself (paths.Key of each): those aren't in the way. Settle returns
+// the files that still are (no pool to pick from, or every name of it taken):
+// s can't be planted while they're there.
+//
+// It's for a bait that isn't planted yet. Baits inside a real app's data are
+// placed by FreeProfile, and a bait you added yourself is a file you chose.
+func Settle(s Spec, u *config.UserInfo, ours map[string]bool) (inTheWay []string) {
+	if s.Files == nil || s.Adopt || s.Inside != nil {
+		return nil
+	}
+	for _, f := range s.Files(*u) {
+		if !taken(f.Path, ours) {
+			continue
+		}
+		free := ""
+		if f.Alt != nil {
+			dir, at := filepath.Dir(f.Path), 0
+			for i, name := range f.Alt.Pool {
+				if name == filepath.Base(f.Path) {
+					at = i
+				}
+			}
+			for i := 1; i < len(f.Alt.Pool) && free == ""; i++ {
+				if name := f.Alt.Pool[(at+i)%len(f.Alt.Pool)]; !taken(j(dir, name), ours) {
+					free = name
+				}
+			}
+		}
+		if free == "" {
+			inTheWay = append(inTheWay, f.Path)
+			continue
+		}
+		// A copy: u may share its map with the config it was taken from.
+		names := map[string]string{}
+		for k, v := range u.Names {
+			names[k] = v
+		}
+		names[f.Alt.What] = free
+		u.Names = names
+	}
+	return inTheWay
+}
+
+// taken reports whether something that isn't ABA's is at path already.
+//
+// It only looks at whether something is there, never inside: the file could
+// be a bait (one you added yourself, or one of another install's names), and
+// opening a bait gets the program that does it frozen, together with whatever
+// started it. A file left by the original honeypot script counts as taken too
+// (the bait gets another name and that file is left alone).
+func taken(path string, ours map[string]bool) bool {
+	if ours[paths.Key(path)] {
+		return false
+	}
+	_, err := os.Lstat(path)
+	// Not there: free. Anything else (a folder ABA can't look into) counts as
+	// taken: better one bait fewer than a bait on top of something.
+	return !errors.Is(err, os.ErrNotExist)
 }
 
 // ldbName is a LevelDB file name the way real ones look: a six-digit sequence
@@ -459,6 +551,12 @@ func Plan(u config.UserInfo, alreadyOurs map[string]bool) []Availability {
 				}
 			}
 		}
+		if a.Available && !alreadyOurs[s.ID] {
+			uu := u // Settle only changes its own copy
+			if in := Settle(s, &uu, nil); len(in) > 0 {
+				a.Available, a.Reason = false, "you already have a file there with that name ("+in[0]+")"
+			}
+		}
 		if a.Available && len(s.RequiresAny) > 0 {
 			ok := false
 			for _, r := range s.RequiresAny {
@@ -594,7 +692,7 @@ func DependentsOf(id string) []string {
 // otherwise filled with a fake passwords list).
 func CustomSpec(id, path string) Spec {
 	return Spec{
-		ID: id, Name: filepath.Base(path) + " (custom)", Category: "Custom", Kind: KindFile,
+		ID: id, Name: filepath.Base(path) + " (custom)", Category: "Custom", Kind: KindFile, Adopt: true,
 		Files: func(config.UserInfo) []FileSpec {
 			return []FileSpec{{Path: path, Audit: true, Text: true, Gen: genPasswordsTxt}}
 		},
