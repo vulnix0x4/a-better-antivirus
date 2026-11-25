@@ -298,7 +298,12 @@ func genWebData(g *Gen) []byte {
 		"favicon_url VARCHAR NOT NULL, url VARCHAR NOT NULL, safe_for_autoreplace INTEGER, originating_url VARCHAR, date_created INTEGER DEFAULT 0, usage_count INTEGER DEFAULT 0)",
 		rows: [][]any{{nil, "Google", "google.com", "https://www.google.com/favicon.ico", "{google:baseURL}search?q={searchTerms}", 1, "", 0, 0},
 			{nil, "Bing", "bing.com", "https://www.bing.com/sa/simg/bing_p_rr_teal_min.ico", "https://www.bing.com/search?q={searchTerms}", 1, "", 0, 0}}}
-	return buildSQLite([]sqlTable{sqlMeta(130), autofill, cards, keywords}, 4+rint(18))
+	// An old version, from before the oldest one Chromium still upgrades:
+	// should the real browser move into this fake profile, it starts its Web
+	// Data afresh. At 130, with only these tables, the upgrade failed and the
+	// browser said "Something went wrong when opening your profile". (Stealers
+	// read the tables; none checks the version.)
+	return buildSQLite([]sqlTable{sqlMeta(78), autofill, cards, keywords}, 4+rint(18))
 }
 
 // genKey4 is a Firefox key4.db: the salt and the check value its saved
