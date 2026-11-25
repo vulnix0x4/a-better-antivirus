@@ -42,6 +42,7 @@ cookies or keys?
 - **After you resume or release an alert, the same program going for a bait again is a new alert** with a new
   response; it used to be added quietly to the old one for two minutes.
 - **`aba alerts show`** prints when each bait was touched in local time, like the rest of the alert.
+- **`aba alerts`** says "left running" for the browser you're using, instead of an empty item in its line.
 
 **The flight recorder**
 
