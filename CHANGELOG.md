@@ -5,6 +5,24 @@
 After a catch, ABA answers the question it used to leave you with: did it already take my real passwords,
 cookies or keys?
 
+**Installing a browser is no longer taken for a stealer**
+
+- **A browser looking for other browsers to import from is left alone.** Brave, installed the normal way,
+  opened the fake Vivaldi, Opera and Yandex `Local State` files on its first start (it does on every start)
+  and was frozen as a stealer going through three apps' data, its internet cut, with an autopsy saying to
+  change your passwords. A genuine, installed browser opening another browser's `Local State` (the list of
+  its profiles) is now a quiet note and never counts toward a sweep. The same browser going on to other
+  browsers' saved passwords, cookies or card data is stopped as before.
+- **A real app that moves into its decoy is at home there.** Its reads and writes of that folder, and of a
+  bait living inside it (the MetaMask wallet in a fake browser), no longer count toward a sweep or turn an
+  alert into "possible ransomware".
+- **The decoy is retired once the app has closed**, not from under it: Brave was left with "Profile error
+  occurred" when ABA removed its fake files while Brave had them open.
+- **When the event log shows that a program caught as a stealer went to overwrite or delete the bait**, you're
+  told again (it's ransomware or a wiper, and what to do differs), so the popup and `aba alerts show` say the
+  same thing. A program frozen inside that open "went to" overwrite it: it never did.
+- Alerts ABA raises itself (a decoy retired, a bait put back) name ABA, not "unknown process".
+
 **A stealer running inside the genuine browser (Windows)**
 
 - **The browser opening the fake profile inside it is critical now, not a warning.** Cookie stealers get past

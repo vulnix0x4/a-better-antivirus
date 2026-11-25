@@ -32,6 +32,17 @@ func (s *server) healthCheck(startup bool) {
 		cfg = s.cfg
 		s.mu.Unlock()
 	}
+	// Decoys whose real app had them open when they were to be retired: now,
+	// unless it still runs (see RetireDecoy).
+	s.mu.Lock()
+	later := map[string]string{}
+	for id, why := range s.retireLater {
+		later[id] = why
+	}
+	s.mu.Unlock()
+	for id, why := range later {
+		s.RetireDecoy(id, why)
+	}
 	var health []config.HealthItem
 	add := func(name string, ok bool, detail string) {
 		health = append(health, config.HealthItem{Name: name, OK: ok, Detail: detail})
@@ -92,6 +103,13 @@ func (s *server) healthCheck(startup bool) {
 									m+" appeared, but it isn't the genuine app (it isn't signed by its publisher). A file like that is what you'd plant to make ABA remove its fake "+name+" data by itself, so ABA kept the decoy. If it's a build of the app you installed yourself, remove the decoy with `aba configure`.", nil)
 							})
 						}
+					case appRunning(spec):
+						// The real app is running with the decoy's files as its own
+						// (it moved into it): retired once it has closed, not from
+						// under it. Not checked or put right meanwhile either: it's
+						// the app's to change.
+						ok++
+						continue
 					case !s.mayRetire(retiring, id, name):
 						// A second one within a day: refused, and said so.
 					default:

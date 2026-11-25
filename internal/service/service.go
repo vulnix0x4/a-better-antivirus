@@ -63,6 +63,9 @@ type server struct {
 
 	said  map[string]time.Time // warnings raised lately, so each is raised once
 	pubMu sync.Mutex
+	// retireLater: decoys to retire once their genuine app has closed (bait
+	// ID -> why). Their files are the app's open profile meanwhile.
+	retireLater map[string]string
 
 	watchers // this operating system's way of noticing bait opens: service_<os>.go
 	recorderState
@@ -73,7 +76,7 @@ func newServer(echo bool) *server {
 	exe, _ := os.Executable()
 	s := &server{log: logx.New(paths.LogFile(), echo), selfExe: exe, cliExe: filepath.Join(filepath.Dir(exe), paths.CLIExe),
 		accesses: make(chan *detect.Access, 1024), listening: make(chan struct{}), ready: make(chan struct{}),
-		said: map[string]time.Time{}}
+		said: map[string]time.Time{}, retireLater: map[string]string{}}
 	if _, err := os.Stat(s.cliExe); err != nil {
 		s.cliExe = exe // dev builds: one binary
 	}
@@ -502,6 +505,22 @@ func (s *server) RetireDecoy(id, why string) {
 			return
 		}
 	}
+	if spec, ok := specOf(cfg, id); ok && st.Baits[id] != nil && appRunning(spec) {
+		// The real app moved into the decoy and has its files open: taking
+		// them away now leaves it with a broken profile (Brave said "Profile
+		// error occurred"). Retired once it has closed (see healthCheck).
+		s.mu.Lock()
+		first := s.retireLater[id] == ""
+		s.retireLater[id] = why
+		s.mu.Unlock()
+		if first {
+			s.log.Printf("decoy %s: its real app is running with it open; retiring it once the app has closed", id)
+		}
+		return
+	}
+	s.mu.Lock()
+	delete(s.retireLater, id)
+	s.mu.Unlock()
 	if bs := st.Baits[id]; bs == nil || !s.mayRetire(baits.RecentlyRetired(st, retireLimit), id, bs.Name) {
 		return
 	}
