@@ -112,6 +112,18 @@ cookies or keys?
   bait; a program that deletes one is now frozen when it's one that would be for reading it.
 - ABA still doesn't bring back files ransomware reached before a bait: see *Honest limitations*.
 
+**Baits**
+
+- **A file of your own is never taken for a bait.** If the name ABA picked for a bait (say `Passwords.kdbx`
+  in Documents) was already a file of yours, ABA used your file as the bait: it watched it, alerted when
+  your own programs opened it, kept a text file's contents in its records, and put it back if you deleted
+  it. Now the bait gets another name from its list, and if every one of them is taken, that bait isn't
+  planted (`aba bait catalog` says why). A file you add yourself with `aba bait add <path>` is still used as
+  it is. An install where this already happened isn't changed by updating: `aba bait remove <id>` takes
+  ABA's hands off the file and leaves the file where it is.
+- The licence names the project by its current name, and the one-line description no longer says "only
+  malware would ever read" a bait: backup and sync tools do too, as the README has always said further down.
+
 **macOS**
 
 - Built with cgo (one package, for reading a frozen program's memory) for macOS 14 and later, signed with

@@ -16,8 +16,18 @@ import (
 // script, so we adopt (and later clean up) them as our own.
 var legacyMarkers = []string{"j.marsh.1987@outlook.com"}
 
-// Create plants a bait and returns its state. Existing files are adopted, not
-// overwritten (the user may have customised them). Requires admin for audit rules.
+func hasLegacyMarker(b []byte) bool {
+	for _, m := range legacyMarkers {
+		if strings.Contains(string(b), m) {
+			return true
+		}
+	}
+	return false
+}
+
+// Create plants a bait and returns its state. A file that's already there is
+// never overwritten: a bait you added yourself takes it over as it is
+// (s.Adopt), a catalog bait is refused. Requires admin for audit rules.
 //
 // Create, Repair, Blend and Remove change files in folders that belong to the
 // user while running as administrator. Each does its work through asOwner
@@ -47,16 +57,21 @@ func create(s Spec, u config.UserInfo, g *Gen) (*config.BaitState, error) {
 			return bs, fmt.Errorf("%s: %w", dir, err)
 		}
 		bf := config.BaitFile{Path: f.Path, Audit: f.Audit}
-		if b, err := os.ReadFile(f.Path); err == nil {
-			// Adopt an existing file (e.g. from the original honeypot script).
+		_, statErr := os.Lstat(f.Path)
+		b, err := os.ReadFile(f.Path)
+		if legacy := err == nil && hasLegacyMarker(b); !legacy && !s.Adopt && (err == nil || statErr == nil) {
+			// Something of yours is here already (Settle and Plan keep baits
+			// away from such files; this is for one that appeared since). It is
+			// not a bait and never becomes one.
+			return bs, fmt.Errorf("%s is already there and isn't ABA's: left as it is, and %s wasn't planted", f.Path, s.Name)
+		}
+		if err == nil {
+			// Take over an existing file: one you chose yourself (`aba bait add
+			// <path>`), or one from the original honeypot script.
 			if f.Text {
 				bf.Text = string(b)
 			}
-			for _, m := range legacyMarkers {
-				if strings.Contains(string(b), m) {
-					bf.Created = true
-				}
-			}
+			bf.Created = hasLegacyMarker(b)
 		} else {
 			data := f.Gen(g)
 			if err := os.WriteFile(f.Path, data, 0o644); err != nil {

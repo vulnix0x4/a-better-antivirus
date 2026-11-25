@@ -111,7 +111,8 @@ var Catalog = []Spec{
 		ID: "home-passwords", Name: "password list in your home folder", Category: "Files", Kind: KindFile, Default: true,
 		Description: "Stealers and malicious scripts sweep the home folder.",
 		Files: func(u config.UserInfo) []FileSpec {
-			return []FileSpec{{Path: j(u.Profile, passwordsName(u, "home")), Audit: true, Text: true, Gen: lf(genPasswordsTxt)}}
+			name, alt := passwordsName(u, "home")
+			return []FileSpec{{Path: j(u.Profile, name), Alt: alt, Audit: true, Text: true, Gen: lf(genPasswordsTxt)}}
 		},
 	},
 	{
@@ -119,7 +120,8 @@ var Catalog = []Spec{
 		Description: "Atomic and its kin have Finder copy documents with names like password, wallet, seed.",
 		Synced:      syncedIn(documentsOf),
 		Files: func(u config.UserInfo) []FileSpec {
-			return []FileSpec{{Path: j(u.Documents, passwordsName(u, "documents")), Audit: true, Text: true, Gen: lf(genPasswordsTxt)}}
+			name, alt := passwordsName(u, "documents")
+			return []FileSpec{{Path: j(u.Documents, name), Alt: alt, Audit: true, Text: true, Gen: lf(genPasswordsTxt)}}
 		},
 	},
 	{
@@ -127,7 +129,8 @@ var Catalog = []Spec{
 		Description: "The Desktop is the first folder file grabbers sweep.",
 		Synced:      syncedIn(desktopOf),
 		Files: func(u config.UserInfo) []FileSpec {
-			return []FileSpec{{Path: j(u.Desktop, passwordsName(u, "desktop")), Audit: true, Text: true, Gen: lf(genPasswordsTxt)}}
+			name, alt := passwordsName(u, "desktop")
+			return []FileSpec{{Path: j(u.Desktop, name), Alt: alt, Audit: true, Text: true, Gen: lf(genPasswordsTxt)}}
 		},
 	},
 	{
@@ -135,9 +138,9 @@ var Catalog = []Spec{
 		Description: "Crypto stealers look for 'seed', 'wallet', 'recovery'.",
 		Synced:      syncedIn(documentsOf),
 		Files: func(u config.UserInfo) []FileSpec {
-			name := vary(u, "seed", "wallet recovery phrase.txt", "seed phrase.txt", "metamask seed.txt", "crypto wallet seed.txt",
+			name, alt := varyFile(u, "seed", "wallet recovery phrase.txt", "seed phrase.txt", "metamask seed.txt", "crypto wallet seed.txt",
 				"ledger recovery phrase.txt", "wallet backup seed.txt")
-			return []FileSpec{{Path: j(u.Documents, name), Audit: true, Text: true, Gen: lf(genSeedTxt)}}
+			return []FileSpec{{Path: j(u.Documents, name), Alt: alt, Audit: true, Text: true, Gen: lf(genSeedTxt)}}
 		},
 	},
 
@@ -298,8 +301,8 @@ var Catalog = []Spec{
 		ID: "ssh-key", Name: "spare SSH key (~/.ssh)", Category: "Credentials", Kind: KindDecoy, Default: true,
 		Description: "A private key under a name ssh never tries by itself. Grabbers copy every key in .ssh.",
 		Files: func(u config.UserInfo) []FileSpec {
-			name := vary(u, "ssh", "id_rsa.bak", "id_rsa.old", "id_rsa_backup", "id_rsa.orig", "old_id_rsa", "id_rsa_work", "id_rsa.save")
-			return []FileSpec{{Path: j(u.Profile, ".ssh", name), Audit: true, Gen: genSSHKey}}
+			name, alt := varyFile(u, "ssh", "id_rsa.bak", "id_rsa.old", "id_rsa_backup", "id_rsa.orig", "old_id_rsa", "id_rsa_work", "id_rsa.save")
+			return []FileSpec{{Path: j(u.Profile, ".ssh", name), Alt: alt, Audit: true, Gen: genSSHKey}}
 		},
 	},
 	{
@@ -314,8 +317,8 @@ var Catalog = []Spec{
 		ID: "aws", Name: "AWS credentials backup (~/.aws)", Category: "Credentials", Kind: KindCanary, Default: true,
 		Description: "A backup copy of AWS keys, which no AWS tool reads. With canary tokens on, the keys email you if anyone ever uses them.",
 		Files: func(u config.UserInfo) []FileSpec {
-			name := vary(u, "aws", "credentials.bak", "credentials.old", "credentials.backup", "credentials.orig", "credentials~", "credentials.save")
-			return []FileSpec{{Path: j(u.Profile, ".aws", name), Audit: true, Text: true, Gen: genAWSBackup}}
+			name, alt := varyFile(u, "aws", "credentials.bak", "credentials.old", "credentials.backup", "credentials.orig", "credentials~", "credentials.save")
+			return []FileSpec{{Path: j(u.Profile, ".aws", name), Alt: alt, Audit: true, Text: true, Gen: genAWSBackup}}
 		},
 	},
 }
