@@ -42,6 +42,12 @@ cookies or keys?
 - **After you resume or release an alert, the same program going for a bait again is a new alert** with a new
   response; it used to be added quietly to the old one for two minutes.
 - **`aba alerts show`** prints when each bait was touched in local time, like the rest of the alert.
+- **The autopsy no longer calls a browser's own work a theft.** When something in a browser that had been
+  running normally (one you started, or one waiting in the background) opened the fake profile, the autopsy
+  said "It opened your Brave. Act on it now." because the browser had opened its own profile, as it always
+  does. Now it says it can't tell which of those opens were for the code inside it, and to treat what's saved
+  in that browser as taken. A browser a stealer started suspended is judged as before, and a browser
+  rewriting its own Local State is no longer reported as a copy of it.
 - **`aba alerts`** says "left running" for the browser you're using, instead of an empty item in its line.
 - **Your answer to an alert stays answered.** When you resumed or killed a program while its autopsy was still
   running, the autopsy's result put the alert back to "open"; what you did is now kept.

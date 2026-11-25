@@ -1314,8 +1314,19 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 		if oa.Swap != nil {
 			c.Wallet = oa.Swap.Replacement
 		}
-		if host == nil && !test {
-			c.Own = e.ownApps(cls, append(append([]uint32{oa.PID}, frozen...), a.Process.TreePIDs...))
+		procs := append(append([]uint32{oa.PID}, frozen...), a.Process.TreePIDs...)
+		switch {
+		case host == nil && !test:
+			// A genuine browser frozen for something else (a sweep): its
+			// opens of its own data are the browser at work.
+			c.Own = e.ownApps(cls, procs)
+		case stopHost && !host.inst.CreatedSuspended:
+			// A browser that had been running as one when something in it
+			// went through the fake profile: its opens of its own data can't
+			// be told apart from that code's. ("Can't tell", not "read".)
+			// One created suspended never ran as a browser: everything it
+			// opened, it opened for the stealer.
+			c.Running = e.ownApps(cls, procs)
 		}
 		var kill []uint32
 		if killAfter {

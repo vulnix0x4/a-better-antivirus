@@ -32,6 +32,7 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/alerts"
 	"github.com/vulnix0x4/a-better-antivirus/internal/baits"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
+	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
 	"github.com/vulnix0x4/a-better-antivirus/internal/recorder"
 )
@@ -59,6 +60,14 @@ type Case struct {
 	// and aren't counted. (A browser a stealer started and ran its code in
 	// is never in here: what that copy opened, it opened for the stealer.)
 	Own map[uint32]string
+	// Running are processes of a genuine browser that had been running as a
+	// normal browser when something in it went through the fake profile
+	// (pid -> its store's ID): it opens its own passwords and cookies all
+	// the time, so its opens of them can't be told apart from the injected
+	// code's. Those make the answer "can't tell" for that store, never
+	// "read", and aren't dropped either. (A browser created suspended never
+	// ran as one: everything it opened counts, and it's in neither map.)
+	Running map[uint32]string
 }
 
 // Hooks are the operating system's part, and the service's.
@@ -124,6 +133,46 @@ func withoutOwn(res recorder.Result, own map[uint32]string) recorder.Result {
 	return res
 }
 
+// withoutRunning takes out of res the opens of a store by a normally running
+// browser of it (see Case.Running), and says which stores they were.
+func withoutRunning(res recorder.Result, running map[uint32]string) (recorder.Result, map[string]bool) {
+	busy := map[string]bool{}
+	var reads []recorder.Read
+	for _, r := range res.Reads {
+		if s, ok := running[r.PID]; ok && s == r.Store {
+			busy[r.Store] = true
+			continue
+		}
+		reads = append(reads, r)
+	}
+	var doubts []recorder.Doubt
+	for _, d := range res.Doubts {
+		if s, ok := running[d.PID]; ok && s == d.Store {
+			busy[d.Store] = true
+			continue
+		}
+		doubts = append(doubts, d)
+	}
+	res.Reads, res.Doubts = reads, doubts
+	return res, busy
+}
+
+// addBusy adds the store id to the stores a running browser of it was busy
+// with (see Case.Running), once.
+func addBusy(list []baits.Store, stores []baits.Store, id string) []baits.Store {
+	for _, s := range list {
+		if s.ID == id {
+			return list
+		}
+	}
+	for _, s := range stores {
+		if s.ID == id {
+			return append(list, s)
+		}
+	}
+	return append(list, baits.Store{ID: id, Name: id, Kind: baits.StoreBrowser})
+}
+
 // Run looks into c and returns what it found. It never fails as a whole:
 // what it couldn't do is in Notes.
 func Run(c Case, h Hooks) *alerts.Autopsy {
@@ -173,6 +222,13 @@ func Run(c Case, h Hooks) *alerts.Autopsy {
 				a.Notes = append(a.Notes, "Some of these processes are the genuine app whose data they opened (a real browser reading its own profiles): those opens are the app at work, and aren't counted as taken.")
 			}
 		}
+		if len(c.Running) > 0 {
+			var busy map[string]bool
+			res, busy = withoutRunning(res, c.Running)
+			for id := range busy {
+				f.ownBusy = addBusy(f.ownBusy, c.Stores, id)
+			}
+		}
 		f.res, f.recorderOn, f.recorderWhy = res, why == "", why
 		if why != "" {
 			// Without the recorder, coverage is still listed (all unwatched).
@@ -219,6 +275,9 @@ func Run(c Case, h Hooks) *alerts.Autopsy {
 					fs.What = "a file of " + s.Name
 					if c.Own[m.PID] == s.ID {
 						fs.What += " (its own data: it's that app)"
+					} else if c.Running[m.PID] == s.ID {
+						fs.What += " (its own data: it's that browser)"
+						f.ownBusy = addBusy(f.ownBusy, c.Stores, s.ID)
 					} else {
 						f.held = append(f.held, alerts.StoreRead{Store: s.ID, Name: s.Name, Kind: s.Kind, Path: p, At: to, PID: m.PID, How: "it has it open right now"})
 					}
@@ -256,9 +315,35 @@ func Run(c Case, h Hooks) *alerts.Autopsy {
 		skip[p] = true
 	}
 	skip[c.Image] = true // the program itself
+	for p := range realFiles {
+		skip[p] = true // a real file rewritten in place (a browser's Local State) is no copy of itself
+	}
+	runningRoots := map[string]string{} // the data folders of browsers in c.Running -> store ID
+	for _, id := range c.Running {
+		for _, s := range c.Stores {
+			if s.ID == id && s.Root != "" {
+				runningRoots[s.Root] = s.ID
+			}
+		}
+	}
 	staged, where := findStaged(dirs, since.Add(-time.Second), skip, h.EvidenceDir)
 	a.StagedWhere = where
 	for _, st := range staged {
+		if realFiles[st.Path] != "" {
+			continue
+		}
+		inOwn := ""
+		for root, id := range runningRoots {
+			if paths.Under(st.Path, root) {
+				inOwn = id
+			}
+		}
+		if inOwn != "" {
+			// A file a normally running browser wrote in its own data folder:
+			// the browser at work, which ABA can't tell apart (see Running).
+			f.ownBusy = addBusy(f.ownBusy, c.Stores, inOwn)
+			continue
+		}
 		st.HeldOpen = open[st.Path]
 		if kind := archiveKind(st.Path); kind != "" {
 			st.Archive = kind
