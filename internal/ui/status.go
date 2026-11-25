@@ -244,7 +244,7 @@ func AlertTable(list []*alerts.Alert, w int) string {
 	head := fmt.Sprintf("  %-12s  %-12s  %-*s  %-*s  %s", "WHEN", "SEVERITY", whoW, "PROGRAM", whatW, "WHAT IT READ", "ID")
 	b.WriteString(Fainter.Render(head) + "\n")
 	for _, a := range list {
-		when := a.Time.Format("Jan 02 15:04")
+		when := a.Time.Local().Format("Jan 02 15:04")
 		what := ""
 		if len(a.Baits) > 0 {
 			what = a.Baits[0].Name
@@ -271,11 +271,14 @@ func AlertTable(list []*alerts.Alert, w int) string {
 			}
 		}
 		status := ""
-		if a.Status == "resolved" {
+		switch a.Status {
+		case "resolved":
 			status = Good.Render("✓ " + a.Note)
 			if a.Note == "" {
 				status = Good.Render("✓ resolved")
 			}
+		case alerts.StatusNoted:
+			status = Fainter.Render("noted quietly: looks legitimate")
 		}
 		tier := lipgloss.NewStyle().Width(12).Render(TierDot(a.Tier) + " " + TierWord(a.Tier))
 		who := lipgloss.NewStyle().Width(whoW).Render(Plain.Render(Truncate(a.ExeName(), whoW)))
@@ -304,7 +307,7 @@ func AlertDetail(a *alerts.Alert) string {
 		return lipgloss.NewStyle().PaddingLeft(indent).Width(w).Render(s)
 	}
 	b.WriteString("\n" + TierBadge(a.Tier) + " " + Bold.Render(a.Title) + "\n")
-	b.WriteString(Dim.Render(a.Time.Format("Mon Jan 2 2006, 15:04:05")+"  ·  alert "+shortID(a.ID)) + "\n")
+	b.WriteString(Dim.Render(a.Time.Local().Format("Mon Jan 2 2006, 15:04:05")+"  ·  alert "+shortID(a.ID)) + "\n")
 	if a.Summary != "" {
 		b.WriteString("\n" + wrap(Plain.Render(a.Summary), 0) + "\n")
 	}
@@ -317,7 +320,7 @@ func AlertDetail(a *alerts.Alert) string {
 	if len(a.Baits) > 0 {
 		b.WriteString(Heading("Baits touched") + "\n")
 		for _, h := range a.Baits {
-			b.WriteString(fmt.Sprintf("  %s %s %s\n    %s\n", Dim.Render(h.Time.Format("15:04:05.000")), h.Access, Bold.Render(h.Name), Fainter.Render(h.Path)))
+			b.WriteString(fmt.Sprintf("  %s %s %s\n    %s\n", Dim.Render(h.Time.Local().Format("15:04:05.000")), h.Access, Bold.Render(h.Name), Fainter.Render(h.Path)))
 		}
 	}
 	if ap := a.Autopsy; ap != nil {
@@ -453,27 +456,49 @@ func AlertDetail(a *alerts.Alert) string {
 		if a.LatencyMS > 0 {
 			when := "after the read was logged"
 			if a.Instant {
-				when = "after it opened the bait, before it could read it"
+				// (Only one named while its open was still held never got a
+				// byte; one found by who woke up may have read the bait's
+				// fake contents first.)
+				when = "after it opened the bait"
 			}
 			b.WriteString("  " + Good.Render(fmt.Sprintf("%d ms", a.LatencyMS)) + Dim.Render(" "+when) + "\n")
 		}
+	}
+	if a.Status == alerts.StatusNoted {
+		b.WriteString("\n" + Dim.Render("Noted quietly: it looks legitimate, so ABA didn't interrupt you about it. Nothing waits for an answer; if it's yours, trusting it keeps it out of the history too.") + "\n")
 	}
 	if a.Status == "resolved" {
 		b.WriteString("\n" + Good.Render(IconOK+" Resolved: "+a.Note) + "\n")
 	} else if a.Process != nil && !a.Test && a.Kind == alerts.KindRead {
 		id := shortID(a.ID)
 		var rows [][2]string
-		if a.Did(config.ActionFreeze) || a.Did(config.ActionBlockProgram) {
-			rows = append(rows, [2]string{"aba kill " + id, "it's malware: end it (it stays cut off)"})
-		}
-		rows = append(rows, [2]string{"aba trust " + id, "it's yours: undo everything and stop alerting about it"})
-		if a.Did(config.ActionFreeze) || a.Did(config.ActionBlockProgram) {
-			rows = append(rows, [2]string{"aba resume " + id, "not sure: let it run again, without trusting it"})
+		switch {
+		case a.Verdict.KeepRunning:
+			// The browser you're using: nothing to kill, and it's never
+			// trusted for a fake profile.
+			if a.Did(config.ActionBlockProgram) {
+				rows = append(rows, [2]string{"aba resume " + id, "give " + alerts.BrowserName(a.ExeName()) + " its internet back (nothing gets trusted)"})
+			}
+		case a.Verdict.Host:
+			if a.Did(config.ActionFreeze) || a.Did(config.ActionBlockProgram) {
+				rows = append(rows, [2]string{"aba kill " + id, "end that browser and what started it"},
+					[2]string{"aba resume " + id, "not sure: let them run again, without trusting them"})
+			}
+		default:
+			if a.Did(config.ActionFreeze) || a.Did(config.ActionBlockProgram) {
+				rows = append(rows, [2]string{"aba kill " + id, "it's malware: end it (it stays cut off)"})
+			}
+			rows = append(rows, [2]string{"aba trust " + id, "it's yours: undo everything and stop alerting about it"})
+			if a.Did(config.ActionFreeze) || a.Did(config.ActionBlockProgram) {
+				rows = append(rows, [2]string{"aba resume " + id, "not sure: let it run again, without trusting it"})
+			}
 		}
 		if a.Did(config.ActionIsolate) {
 			rows = append(rows, [2]string{"aba release", "reconnect the " + platform.PC + " when it's safe"})
 		}
-		b.WriteString(Heading("What now") + "\n" + indent(Cmd(rows), 2) + "\n")
+		if len(rows) > 0 {
+			b.WriteString(Heading("What now") + "\n" + indent(Cmd(rows), 2) + "\n")
+		}
 	}
 	if a.Tier == config.TierCritical && !a.Test && a.Status != "resolved" {
 		b.WriteString(Heading("If you didn't cause this") + "\n")

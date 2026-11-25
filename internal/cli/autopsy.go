@@ -81,7 +81,7 @@ func autopsyCmd() *cobra.Command {
 func printAutopsy(a *alerts.Alert) {
 	w := ui.Width() - 4
 	fmt.Println("\n" + ui.Bold.Render(a.Title))
-	fmt.Println(ui.Dim.Render(a.Time.Format("Mon Jan 2 2006, 15:04:05") + "  ·  alert " + a.ID))
+	fmt.Println(ui.Dim.Render(a.Time.Local().Format("Mon Jan 2 2006, 15:04:05") + "  ·  alert " + a.ID))
 	for i, s := range autopsy.Render(a) {
 		fmt.Println(ui.Heading(s.Title))
 		for j, l := range s.Lines {

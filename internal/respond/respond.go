@@ -217,7 +217,13 @@ func Resume(alertID string) (*Report, error) {
 		return nil
 	})
 	released()
-	alerts.Update(a.ID, func(x *alerts.Alert) { x.Status, x.Note = "resolved", "you said it was yours" })
+	// `aba resume` is "not sure: let it run again, without trusting it", and
+	// the popup's "It's mine: unfreeze it (this time only)" runs it too.
+	note := "let run again by you (nothing trusted)"
+	if a.Verdict.KeepRunning {
+		note = "you gave " + alerts.BrowserName(a.ExeName()) + " its internet back (nothing trusted)"
+	}
+	alerts.Update(a.ID, func(x *alerts.Alert) { x.Status, x.Note = "resolved", note })
 	return rep, err
 }
 

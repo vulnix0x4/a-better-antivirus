@@ -83,6 +83,14 @@ type Ops interface {
 	// NotifyAutopsy tells the person what the autopsy found, when it found
 	// that the program read real data.
 	NotifyAutopsy(a *alerts.Alert)
+	// Browser gathers the facts about the browser instance pid (running
+	// image) belongs to: see procinfo.Browser. procinfo.ErrGone when it has
+	// exited, procinfo.ErrUnsupported where the system doesn't say.
+	Browser(pid uint32, image string) (*procinfo.BrowserInstance, error)
+	// VisibleWindow reports whether any of pids has a window on the screen of
+	// the person using it. known is false when that couldn't be found out
+	// (which never means "hidden").
+	VisibleWindow(pids []uint32) (visible, known bool)
 }
 
 // TestRequest marks a reader process started by `aba test`.
@@ -116,6 +124,12 @@ type Engine struct {
 	eventFrozen map[uint32]time.Time        // processes the event-log path froze
 	marks       map[uint32]mark             // processes seen using a trick to dodge detection
 	team        []teamRead                  // recent bait reads by anyone, for sweeps split over several processes
+
+	hosts     map[uint32]hostSeen  // browser facts gathered per opener, before anything was frozen (see host.go)
+	hostLocks map[string]*hostLock // one decision at a time per browser instance
+	roots     map[uint32][]uint32  // what the instant path is to freeze for an opener it decided on (see InstantRoots)
+	adoptWait time.Duration        // how long to give a browser that may be taking a fake profile as its own (see host.go)
+	takeWait  time.Duration        // the same, when it went to delete or overwrite the fake's files
 }
 
 // mark notes that a process did something only evasion explains.
@@ -154,6 +168,34 @@ type incident struct {
 	// wrecked: it had already gone to overwrite documents in several
 	// folders when this alert was made, so that's been judged.
 	wrecked bool
+	// quiet: the alert was noted quietly (see quietly); if what the program
+	// goes on to do changes that, you're told then.
+	quiet bool
+}
+
+// quietly reports whether alert a (verdict v) is only noted, with no popup
+// and no phone alert: a read by a program ABA rates as looking legitimate
+// (info), about which nothing was done. Never a test, a decoy being retired,
+// a browser going through its fake profile, a sweep, or a trick; and never
+// anything that read, wrote or deleted more than that. It's still saved, in
+// the history and counted by the sweep rules, but waits for no answer.
+func quietly(a *alerts.Alert, v classify.Verdict) bool {
+	return !a.Test && a.Kind == alerts.KindRead && v.Tier == config.TierInfo && len(a.Actions) == 0 &&
+		!v.DecoyOwner && !v.Host && !v.Evasion && len(v.Swept) == 0 && !v.Ignored
+}
+
+// tell notifies you about a (desktop, and phone from your minimum tier on).
+func (e *Engine) tell(a *alerts.Alert) {
+	e.Ops.NotifyDesktop(a)
+	e.mu.Lock()
+	min := config.TierWarn
+	if e.cfg != nil {
+		min = e.cfg.PhoneMinTier
+	}
+	e.mu.Unlock()
+	if a.Test || a.Tier.Rank() >= min.Rank() {
+		e.Ops.NotifyPhone(a)
+	}
 }
 
 // aggregation window: further bait hits by the same process join one alert.
@@ -162,7 +204,8 @@ const window = 2 * time.Minute
 func New(ops Ops, selfPID uint32) *Engine {
 	return &Engine{Ops: ops, SelfPID: selfPID, incidents: map[uint32]*incident{}, claimed: map[uint32]time.Time{},
 		seen: map[string]time.Time{}, touched: map[uint32]*sweep{}, wrecked: map[uint32]*sweep{}, sids: map[uint32]string{},
-		pending: map[uint32]chan struct{}{}, later: map[uint32][]alerts.BaitHit{}, eventFrozen: map[uint32]time.Time{}, marks: map[uint32]mark{}}
+		pending: map[uint32]chan struct{}{}, later: map[uint32][]alerts.BaitHit{}, eventFrozen: map[uint32]time.Time{}, marks: map[uint32]mark{},
+		hosts: map[uint32]hostSeen{}, hostLocks: map[string]*hostLock{}, roots: map[uint32][]uint32{}, adoptWait: adoptWait, takeWait: takeWait}
 }
 
 // Configure (re)loads config and the bait index.
@@ -313,7 +356,9 @@ func (e *Engine) DecideInstantOpWhy(pid uint32, path string, op detect.Op) (bool
 	exempt := cls.SweepExempt(image, pid, &sig)
 	// Deleting several apps' data isn't going through it: uninstallers and
 	// cleaners do that. Reading or rewriting it is.
-	if op != detect.OpDelete {
+	// (Never the genuine browser going through its fake profile: see host.go,
+	// and hostRead.)
+	if op != detect.OpDelete && !v.Host {
 		if swept := e.touch(pid, baitID, time.Now()); len(swept) >= sweepApps && !exempt {
 			v = e.sweepVerdict(v, swept)
 		}
@@ -331,6 +376,34 @@ func (e *Engine) DecideInstantOpWhy(pid uint32, path string, op detect.Op) (bool
 			v = evasive(v, disguiseWhy)
 		} else if why := e.evasion(pid); why != "" && !cls.TricksAllowed(image, pid, baitID, &sig) {
 			v = evasive(v, why)
+		}
+	}
+	if v.Host {
+		// The genuine browser going through a fake profile: frozen here only
+		// when the quick facts show it isn't the browser you're using (see
+		// host.go). Everything else waits for the event log, which can look
+		// at its windows first.
+		p := e.hostPlanFor(cls, pid, image, false)
+		switch {
+		case p.unsupported:
+		case p.gone:
+			done(false)
+			return false, image + " (a browser going through a fake profile) has already exited"
+		case !p.stop:
+			done(false)
+			return false, image + " went through a fake profile, but may be the browser you're using: left to the event log, which checks its windows"
+		default:
+			if !config.Has(cfg.ActionsFor(config.TierCritical, time.Now()), config.ActionFreeze) {
+				done(false)
+				return false, image + " is a browser started by a stealer, but critical readers aren't frozen right now"
+			}
+			roots := []uint32{p.inst.Main}
+			if e.starterFreezable(cls, p, p.inst.Starter, p.inst.StarterImage) {
+				roots = append(roots, p.inst.Starter)
+			}
+			e.setRoots(pid, roots)
+			done(true)
+			return true, fmt.Sprintf("%s is a browser that isn't the one you're using (%s): freezing it from its main process %d, with %v", image, p.stopVerdict(v).Reasons[0], p.inst.Main, roots[1:])
 		}
 	}
 	if v.Ignored || v.DecoyOwner {
@@ -504,10 +577,21 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	if !instant {
 		e.waitDecision(oa.PID)
 		if claimedNow() {
-			// The instant path already caught and is reporting this process.
-			// What it went on to do to the bait still belongs in that alert.
-			e.noteAfter(oa)
-			return
+			e.mu.Lock()
+			inc := e.incidents[oa.PID]
+			e.mu.Unlock()
+			if inc != nil && !oldNews(oa.Time, inc.alert) && e.undone(inc.alert) {
+				// Caught, then resumed by you: this is something new it did.
+				// (Not when it did it before it was caught and the word only
+				// comes now: that's the same case.)
+				e.Unclaim(oa.PID)
+				e.closeIncident(inc.alert)
+			} else {
+				// The instant path already caught and is reporting this process.
+				// What it went on to do to the bait still belongs in that alert.
+				e.noteAfter(oa)
+				return
+			}
 		}
 	}
 	received := time.Now()
@@ -540,7 +624,8 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 		e.mu.Unlock()
 	}
 	var swept []string
-	if access == "read" || access == "write" {
+	hostOpen := e.hostRead(oa, baitID)
+	if (access == "read" || access == "write") && !hostOpen {
 		swept = e.touch(oa.PID, baitID, time.Now())
 		if len(swept) >= sweepApps && !e.sweepable(oa.PID) {
 			swept = nil
@@ -566,15 +651,26 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 		}
 	}
 
+	// An earlier alert about it whose response has been undone since (you
+	// resumed it, gave it its internet back, released it) is a closed case:
+	// what it does now is a new alert, not a line in that one.
+	e.mu.Lock()
+	inc0 := e.incidents[oa.PID]
+	e.mu.Unlock()
+	if inc0 != nil && !instant && !oldNews(oa.Time, inc0.alert) && e.undone(inc0.alert) {
+		e.closeIncident(inc0.alert)
+	}
+
 	e.mu.Lock()
 	cfg, cls, name := e.cfg, e.classifier, e.baitNames[baitID]
 	hit := alerts.BaitHit{ID: baitID, Name: name, Path: oa.Path, Access: access, Time: oa.Time}
 	if access == "swap" {
 		hit.Name, hit.Path = clipboardBaitName, "the clipboard"
 	}
-	if inc := e.incidents[oa.PID]; !instant && inc != nil && len(swept) >= sweepApps && inc.alert.Tier != config.TierCritical {
-		// It started out looking harmless and has now read several apps' data:
-		// handle it again as a sweep, with the full response.
+	if inc := e.incidents[oa.PID]; !instant && inc != nil && len(swept) >= sweepApps && (inc.alert.Tier != config.TierCritical || inc.alert.Verdict.KeepRunning) {
+		// It started out looking harmless (or as the browser you're using,
+		// left running) and has now read several apps' data: handle it again
+		// as a sweep, with the full response.
 		delete(e.incidents, oa.PID)
 	}
 	if inc := e.incidents[oa.PID]; !instant && inc != nil && len(wrecked) >= wreckFolders && !inc.wrecked &&
@@ -587,6 +683,13 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	}
 	if inc := e.incidents[oa.PID]; access == "swap" && inc != nil && inc.alert.Tier != config.TierCritical {
 		delete(e.incidents, oa.PID) // same: now it's a caught clipper
+	}
+	if inc := e.incidents[oa.PID]; !instant && inc != nil && ((inc.quiet && access != "read") || (inc.alert.Tier != config.TierCritical && hostOpen && !inc.alert.Verdict.Host)) {
+		// Same: noted quietly as a read, and now it goes to change or delete
+		// a bait; or now it's the genuine browser going through its fake
+		// profile, which the host policy judges (see host.go). Neither is a
+		// line to add to a quiet or harmless-looking alert.
+		delete(e.incidents, oa.PID)
 	}
 	// Aggregate repeat hits into the open alert, except for instant catches: a
 	// new freeze always gets its own alert and its own record in state (the
@@ -689,9 +792,14 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	frozen := preFrozen
 	var latency time.Duration
 	canTouch := e.touchable(oa.PID, image)
+	// What looks like the genuine browser going through a fake profile isn't
+	// frozen before its signature is known: a browser installed in your own
+	// folders looks like any unsigned program there until then, and if it's
+	// the one you're using, it's never frozen at all (see host.go).
+	ownerWait := ref.Unadopted && !isSweep && !evading && access != "swap" && cls.OwnerCandidate(image, ref)
 	if instant {
 		latency = time.Since(oa.Time)
-	} else if canTouch && config.Has(actionsFor(pre.Tier), config.ActionFreeze) {
+	} else if canTouch && !ownerWait && config.Has(actionsFor(pre.Tier), config.ActionFreeze) {
 		if !tryFreeze() {
 			if claimedNow() {
 				return // the instant path froze it and reports it
@@ -762,8 +870,13 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	}
 	// A sweep split over several programs, each reading too little to look
 	// like one: together they went through several apps' data.
+	// (Not the genuine browser going through its fake profile: that's settled
+	// by the host policy, about that browser alone. A stealer's copy of it is
+	// frozen with what started it, a closed case; the browser you use is cut
+	// off. Either way, its read mustn't make a stranger that reads a bait
+	// later on the "last member" of a team it has nothing to do with.)
 	var teammates []teamRead
-	if !test && access == "read" && !v.DecoyOwner && !v.Builtin && e.sweepable(oa.PID) && !cls.SweepExempt(image, oa.PID, &sig) {
+	if !test && access == "read" && !v.DecoyOwner && !v.Builtin && !v.Host && e.sweepable(oa.PID) && !cls.SweepExempt(image, oa.PID, &sig) {
 		if units, members := e.joinTeam(oa.PID, baitID, image, now); units != nil && len(v.Swept) < sweepApps {
 			v = e.teamVerdict(v, units, len(members))
 			for _, m := range members {
@@ -773,6 +886,44 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 			}
 		}
 	}
+	// The genuine browser went through a fake profile: which browser is it?
+	// (See host.go.) Its other processes' reads join the one alert.
+	var host *hostPlan
+	var hostInst *procinfo.BrowserInstance // the browser instance, whatever came of it
+	if v.Host && !test {
+		inst, err := e.hostFacts(oa.PID, image)
+		if inst != nil && err == nil {
+			hostInst = inst
+			unlock := e.lockHost(inst)
+			defer unlock()
+			if !instant && e.joinHost(inst, oa.PID, hit) {
+				e.Ops.Resume(frozen)
+				e.Ops.Logf("%s of %s by %s (pid %d) joins the alert about its browser", access, oa.Path, image, oa.PID)
+				return
+			}
+		}
+		if p := e.hostPlanFor(cls, oa.PID, image, !instant); !p.unsupported {
+			host = &p
+		}
+	}
+	if host != nil {
+		switch {
+		case host.gone:
+			v = goneVerdict(v, image)
+		case host.stop:
+			v = host.stopVerdict(v)
+		case e.stillUnadopted(baitID, access == "delete" || access == "write"):
+			v = host.keepVerdict(v)
+		default:
+			// It took the folder as a profile of its own meanwhile (you added
+			// one): the genuine app at work on its own data.
+			v = e.tookVerdict(image, baitID)
+			host = nil
+		}
+	}
+	if v.DecoyOwner && !v.Host && embedded(baitID) {
+		v = e.tookVerdict(image, baitID) // listed as its own before ABA even looked
+	}
 	if startedAs != "" {
 		v.Reasons = append(v.Reasons, "its file was renamed after it started (it was started as "+startedAs+")")
 	}
@@ -780,12 +931,31 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	if v.DecoyOwner {
 		acts = nil
 	}
+	// The browser you're using is never frozen or killed; one that has
+	// exited can't be, and cutting its program's internet would only cut
+	// your own windows.
+	wouldStop, goneFreeze := false, false
+	if host != nil && v.KeepRunning {
+		wouldStop = config.Has(acts, config.ActionFreeze) || config.Has(acts, config.ActionKill)
+		acts = without(acts, config.ActionFreeze, config.ActionKill)
+	}
+	if host != nil && host.gone {
+		goneFreeze = config.Has(acts, config.ActionFreeze)
+		acts = without(acts, config.ActionFreeze, config.ActionKill, config.ActionBlockProgram)
+	}
+	// A browser that isn't the one you're using is frozen from its main
+	// process: all of it, whichever of its processes opened the bait.
+	freezeRoot := oa.PID
+	stopHost := host != nil && host.stop
+	if stopHost {
+		freezeRoot = host.inst.Main
+	}
 	if len(frozen) > 0 && !config.Has(acts, config.ActionFreeze) {
 		e.Ops.Resume(frozen)
 		frozen = nil
 	} else if len(frozen) == 0 && canTouch && config.Has(acts, config.ActionFreeze) {
 		if instant || tryFreeze() {
-			frozen, _ = e.Ops.SuspendTree(oa.PID)
+			frozen, _ = e.Ops.SuspendTree(freezeRoot)
 			latency = time.Since(oa.Time)
 		} else if claimedNow() {
 			return // the instant path froze it and reports it
@@ -799,12 +969,33 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	blockToo := map[string]bool{}
 	if len(frozen) > 0 && v.Tier == config.TierCritical && !test {
 		grow := func(root uint32, img string) {
+			if stopHost && hasPID(frozen, root) {
+				// The instant path froze it already, with the browser.
+				also = append(also, fmt.Sprintf("%s (pid %d)", filepath.Base(img), root))
+				return
+			}
 			if more := e.Ops.SuspendMore(root, frozen); len(more) > 0 {
 				frozen = append(frozen, more...)
 				also = append(also, fmt.Sprintf("%s (pid %d)", filepath.Base(img), root))
 			}
 		}
-		for _, anc := range e.Ops.Ancestors(oa.PID) {
+		// Up from the browser's main process, past the browser itself (it
+		// restarts itself to update): its starter by the host policy's rule,
+		// then on by the usual one.
+		for _, anc := range e.Ops.Ancestors(freezeRoot) {
+			if stopHost && anc.PID != host.inst.Starter && sameImage(anc.Image, host.inst.Image) {
+				continue
+			}
+			if stopHost && anc.PID == host.inst.Starter {
+				if !e.starterFreezable(cls, *host, anc.PID, anc.Image) {
+					break
+				}
+				grow(anc.PID, anc.Image)
+				if cls.UserWritable(anc.Image) && !e.Ops.Verify(anc.Image).Valid {
+					blockToo[anc.Image] = true
+				}
+				continue
+			}
 			if !e.partOfIt(cls, anc.PID, anc.Image) {
 				break
 			}
@@ -860,11 +1051,23 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	if config.Has(acts, config.ActionFreeze) {
 		if len(frozen) > 0 {
 			detail := fmt.Sprintf("%d process(es) frozen", len(frozen))
-			if instant {
-				detail += " the moment it opened the bait"
-			}
-			if len(also) > 0 {
-				detail += "; with it: " + strings.Join(also, ", ")
+			switch {
+			case stopHost:
+				// (config.Action.Done reads "frozen: …" as what was frozen.)
+				detail += fmt.Sprintf(": that whole %s (from its main process, pid %d)", alerts.BrowserName(image), freezeRoot)
+				if len(also) > 0 {
+					detail += " and what started it: " + strings.Join(also, ", ")
+				}
+				if instant {
+					detail += ", the moment it opened the bait"
+				}
+			default:
+				if instant {
+					detail += " the moment it opened the bait"
+				}
+				if len(also) > 0 {
+					detail += "; with it: " + strings.Join(also, ", ")
+				}
 			}
 			a.AddAction(config.ActionFreeze, nil, detail)
 		} else if !canTouch {
@@ -873,6 +1076,9 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 			a.AddAction(config.ActionFreeze, fmt.Errorf("could not suspend"), "")
 		}
 	}
+	if goneFreeze {
+		a.AddAction(config.ActionFreeze, fmt.Errorf("it had already exited"), "")
+	}
 	if latency > 0 {
 		a.LatencyMS = latency.Milliseconds()
 	}
@@ -880,6 +1086,9 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 
 	// 5. Forensics while frozen.
 	e.Ops.Forensics(oa.PID, a.Process)
+	if host != nil && host.gone {
+		a.Process.Exited = true
+	}
 
 	// 6. Remaining responses.
 	var blocked, isolated, killAfter bool
@@ -887,6 +1096,22 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	for _, act := range acts {
 		switch act {
 		case config.ActionBlockProgram:
+			if stopHost {
+				// Not the browser's program: that would cut your own windows
+				// of it, and the stealer's copy is frozen. What started it is.
+				var did []string
+				for img := range blockToo {
+					if e.Ops.BlockProgram(img) == nil {
+						alsoBlocked = append(alsoBlocked, img)
+						did = append(did, img)
+					}
+				}
+				if len(did) > 0 {
+					sort.Strings(did)
+					a.AddAction(act, nil, config.StarterBlocked+strings.Join(did, ", "))
+				}
+				continue
+			}
 			if image == "" {
 				a.AddAction(act, fmt.Errorf("unknown executable"), "")
 				continue
@@ -911,7 +1136,12 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 				a.AddAction(act, nil, "once the evidence was saved")
 				continue
 			}
-			err := e.Ops.KillTree(oa.PID)
+			err := e.Ops.KillTree(freezeRoot)
+			if stopHost && host.freezeStarter && hasPID(frozen, host.inst.Starter) {
+				if err2 := e.Ops.KillTree(host.inst.Starter); err == nil {
+					err = err2
+				}
+			}
 			a.AddAction(act, err, "")
 			if err == nil {
 				frozen = nil
@@ -927,11 +1157,37 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 		}
 	}
 
+	if v.KeepRunning {
+		name := alerts.BrowserName(image)
+		detail := "it's the " + name + " you're using"
+		if blocked {
+			detail += "; the internet of every " + name + " window is cut instead"
+		}
+		if wouldStop {
+			a.AddAction(config.ActionLeftRunning, nil, detail)
+		}
+	}
 	e.describe(a, v)
+	if stopHost {
+		// "Possible stealer: a Chrome started suspended by ghost.exe opened your bait"
+		a.Title = strings.Replace(a.Title, " inside "+alerts.BrowserName(image)+": a copy of it", ": "+host.which(), 1)
+	}
 	if v.DecoyOwner {
 		a.Kind = alerts.KindDecoyRetired
 	}
+	if v.KeepRunning {
+		name := alerts.BrowserName(image)
+		if blocked {
+			a.Summary += ". ABA left it running, since it's the browser you're using, and cut the internet of every " + name + " window instead"
+		} else {
+			a.Summary += ". ABA left it running: it's the browser you're using"
+		}
+	}
 
+	quiet := quietly(a, v)
+	if quiet {
+		a.Status = alerts.StatusNoted
+	}
 	e.Ops.UpdateState(func(st *config.State) error {
 		for _, p := range frozen {
 			ct := e.Ops.CreateTime(p)
@@ -965,8 +1221,26 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 		e.Ops.Hold(frozen)
 	}
 
+	// The alert is the whole browser instance's, and its starter's: what
+	// any of them does next joins it (see joinHost, noteAfter).
+	members := map[uint32]int64{oa.PID: createTime}
+	if hostInst != nil {
+		for _, p := range hostInst.PIDs {
+			if _, ok := members[p]; !ok {
+				members[p] = e.Ops.CreateTime(p)
+			}
+		}
+		members[hostInst.Main] = hostInst.MainCreate
+		for _, p := range frozen {
+			if _, ok := members[p]; !ok {
+				members[p] = e.Ops.CreateTime(p)
+			}
+		}
+	}
 	e.mu.Lock()
-	e.incidents[oa.PID] = &incident{alert: a, createTime: createTime, last: time.Now(), wrecked: isWreck}
+	for p, ct := range members {
+		e.incidents[p] = &incident{alert: a, createTime: ct, last: time.Now(), wrecked: isWreck, quiet: quiet}
+	}
 	for pid, inc := range e.incidents {
 		if time.Since(inc.last) > window {
 			delete(e.incidents, pid)
@@ -974,15 +1248,41 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	}
 	// What the event log said it did to the bait while this alert was being made.
 	var after *alerts.Alert
-	for _, h := range e.later[oa.PID] {
-		if cp, ok := e.did(a, h); ok {
-			after = cp
+	for p := range members {
+		for _, h := range e.later[p] {
+			if cp, ok := e.did(a, h); ok {
+				after = cp
+			}
+		}
+		delete(e.later, p)
+	}
+	loud := false // a quiet read that turned out to be more meanwhile
+	if quiet && after != nil && after.Kind != alerts.KindRead {
+		loud, a.Status, after.Status = true, "open", "open"
+		for _, inc := range e.incidents {
+			if inc.alert == a {
+				inc.quiet = false
+			}
 		}
 	}
-	delete(e.later, oa.PID)
 	e.mu.Unlock()
 	if after != nil {
 		e.Ops.SaveAlert(after)
+	}
+	if loud {
+		e.tell(after)
+		return
+	}
+	if quiet {
+		// It's in the history (`aba alerts`), where it can be trusted from;
+		// nobody is interrupted for a program that looks legitimate. (Only
+		// someone who asked for every alert on their phone, "Everything" in
+		// setup, still gets it there.)
+		e.Ops.Logf("alert %s: %s read %s, which looks legitimate: noted quietly, no popup", a.ID, image, baitID)
+		if cfg.PhoneMinTier == config.TierInfo {
+			e.Ops.NotifyPhone(a)
+		}
+		return
 	}
 
 	// Script hosts and runtimes are never quieted: the next script could be a
@@ -1014,14 +1314,20 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 		if oa.Swap != nil {
 			c.Wallet = oa.Swap.Replacement
 		}
-		var kill uint32
+		if host == nil && !test {
+			c.Own = e.ownApps(cls, append(append([]uint32{oa.PID}, frozen...), a.Process.TreePIDs...))
+		}
+		var kill []uint32
 		if killAfter {
-			kill = oa.PID
+			kill = append(kill, freezeRoot)
+			if stopHost && host.freezeStarter && hasPID(frozen, host.inst.Starter) {
+				kill = append(kill, host.inst.Starter)
+			}
 		}
 		if test {
-			e.autopsy(a, c, 0) // before the test reader is ended below
+			e.autopsy(a, c) // before the test reader is ended below
 		} else {
-			go e.autopsy(a, c, kill)
+			go e.autopsy(a, c, kill...)
 		}
 	}
 	if test {
@@ -1049,6 +1355,10 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 func (e *Engine) noteAfter(oa *detect.Access) {
 	access := ""
 	switch oa.Op {
+	case detect.OpRead:
+		// Another bait it (or another process of the browser instance it's
+		// part of) read: listed in the same alert.
+		access = "read"
 	case detect.OpWrite:
 		access = "write"
 	case detect.OpDelete:
@@ -1075,9 +1385,23 @@ func (e *Engine) noteAfter(oa *detect.Access) {
 		return
 	}
 	cp, changed := e.did(inc.alert, hit)
+	loud := false
+	if changed && inc.quiet && cp.Kind != alerts.KindRead {
+		// Noted quietly as a read; it went on to overwrite or delete the
+		// bait: that you hear about.
+		loud, inc.alert.Status, cp.Status = true, "open", "open"
+		for _, x := range e.incidents {
+			if x.alert == inc.alert {
+				x.quiet = false
+			}
+		}
+	}
 	e.mu.Unlock()
 	if changed {
 		e.Ops.SaveAlert(cp)
+	}
+	if loud {
+		e.tell(cp)
 	}
 }
 
@@ -1085,6 +1409,9 @@ func (e *Engine) noteAfter(oa *detect.Access) {
 // or a delete), and returns a copy to save. An alert about a read becomes one
 // about what was done to the file. Called with e.mu held.
 func (e *Engine) did(a *alerts.Alert, hit alerts.BaitHit) (*alerts.Alert, bool) {
+	if hit.Access == "read" {
+		return e.addHit(a, hit)
+	}
 	for _, h := range a.Baits {
 		if strings.EqualFold(h.Path, hit.Path) && h.Access == hit.Access {
 			return nil, false
@@ -1113,8 +1440,12 @@ func (e *Engine) did(a *alerts.Alert, hit alerts.BaitHit) (*alerts.Alert, bool) 
 // wantsAutopsy: a program caught as a stealer or clipper (or `aba test`'s),
 // or anything frozen, gets looked into. A warning about a program that's
 // still running free doesn't: it's no verdict that it stole anything.
+//
+// Nor does the browser you're using that was left running (classify.Verdict
+// KeepRunning): it reads your real cookies and passwords all day, so the
+// autopsy would announce a theft that is only your browser at work.
 func wantsAutopsy(a *alerts.Alert, v classify.Verdict, frozen []uint32) bool {
-	if a.Process == nil || v.DecoyOwner || v.Ignored {
+	if a.Process == nil || v.DecoyOwner || v.Ignored || v.KeepRunning {
 		return false
 	}
 	switch a.Kind {
@@ -1126,16 +1457,16 @@ func wantsAutopsy(a *alerts.Alert, v classify.Verdict, frozen []uint32) bool {
 }
 
 // autopsy runs the autopsy of a's program and adds what it found to a. kill
-// (if not 0) is a process to end once it's done: the configured response
-// waited for the evidence.
-func (e *Engine) autopsy(a *alerts.Alert, c autopsy.Case, kill uint32) {
+// are processes to end (with what they started) once it's done: the
+// configured response waited for the evidence.
+func (e *Engine) autopsy(a *alerts.Alert, c autopsy.Case, kill ...uint32) {
 	defer func() {
 		if r := recover(); r != nil {
 			e.Ops.Logf("PANIC in the autopsy of %s: %v", c.AlertID, r)
 		}
-		if kill != 0 {
-			if err := e.Ops.KillTree(kill); err != nil {
-				e.Ops.Logf("alert %s: ending pid %d after the autopsy: %v", c.AlertID, kill, err)
+		for _, k := range kill {
+			if err := e.Ops.KillTree(k); err != nil {
+				e.Ops.Logf("alert %s: ending pid %d after the autopsy: %v", c.AlertID, k, err)
 			}
 		}
 	}()
@@ -1504,8 +1835,21 @@ func (e *Engine) describe(a *alerts.Alert, v classify.Verdict) {
 		a.Title = "Test detection: " + exe + " was frozen the moment it opened a bait"
 	case a.Test:
 		a.Title = "Test detection: " + exe + " read a bait"
+	case v.DecoyOwner && v.Host:
+		a.Title = alerts.BrowserName(exe) + " made a fake profile's folder its own: ABA moved the fake profile"
 	case v.DecoyOwner:
 		a.Title = exe + " is installed: retiring its decoy"
+	case v.KeepRunning:
+		a.Title = "Something inside your " + alerts.BrowserName(exe) + " " + what + " a bait"
+		if a.Did(config.ActionBlockProgram) {
+			a.Title += ": its internet is cut"
+		}
+	case v.Host && v.Tier == config.TierCritical:
+		// (The browser itself is named by what gave it away: see handle.)
+		a.Title = threat + " inside " + alerts.BrowserName(exe) + ": a copy of it " + what + " your bait"
+		if a.Process != nil && a.Process.Exited {
+			a.Title = threat + " inside " + alerts.BrowserName(exe) + ": a copy of it that exited at once " + what + " your bait"
+		}
 	case v.Tier == config.TierCritical:
 		a.Title = threat + ": " + exe + " " + what + " your bait"
 	case v.Tier == config.TierWarn:
@@ -1548,6 +1892,17 @@ func swapVerdict(sw *detect.Swap) classify.Verdict {
 		reasons = append(reasons, "the bait address: "+sw.Bait+" (invalid on purpose: no wallet accepts it)")
 	}
 	return classify.Verdict{Tier: config.TierCritical, Reasons: reasons}
+}
+
+// without is acts minus drop.
+func without(acts []config.Action, drop ...config.Action) []config.Action {
+	var out []config.Action
+	for _, a := range acts {
+		if !config.Has(drop, a) {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 func appendUnique(xs []string, add ...string) []string {

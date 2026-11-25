@@ -36,6 +36,12 @@ const (
 	KindClipper       = "clipper" // a program swapped the wallet address ABA put on the clipboard
 )
 
+// StatusNoted is the status of an alert ABA noted quietly: a read by a program
+// that looks legitimate, about which nothing was done. It's in the history,
+// but no popup or phone alert went out and nothing waits for an answer.
+// ("open" waits for one; "resolved" got one.)
+const StatusNoted = "noted"
+
 type BaitHit struct {
 	ID     string    `json:"id"`
 	Name   string    `json:"name"`
@@ -221,6 +227,28 @@ func (a *Alert) ExeName() string {
 		return "unknown process"
 	}
 	return procinfo.BaseName(a.Process.Image)
+}
+
+// BrowserName is what people call the browser whose executable is image
+// ("Chrome" for chrome.exe), or else the executable's name. image may be a
+// Windows path on any system (an alert shown elsewhere, a test), so both
+// separators count: no browser's file name has either.
+func BrowserName(image string) string {
+	base := image
+	if i := strings.LastIndexAny(base, `\/`); i >= 0 {
+		base = base[i+1:]
+	}
+	switch strings.TrimSuffix(strings.ToLower(base), ".exe") {
+	case "chrome", "google-chrome", "google chrome":
+		return "Chrome"
+	case "msedge", "microsoft-edge", "microsoft edge":
+		return "Edge"
+	case "brave", "brave-browser", "brave browser":
+		return "Brave"
+	case "firefox", "firefox-bin", "firefox-esr":
+		return "Firefox"
+	}
+	return base
 }
 
 func file(id string) string { return filepath.Join(paths.AlertsDir(), id+".json") }
