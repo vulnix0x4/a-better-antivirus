@@ -253,6 +253,70 @@ func BrowserName(image string) string {
 
 func file(id string) string { return filepath.Join(paths.AlertsDir(), id+".json") }
 
+// SaveFromService is how the service saves an alert, every time, including
+// again later (an autopsy finished, more of what the program did): it keeps
+// what was written to the alert's file meanwhile by you, through the CLI
+// (`aba resume`, `kill`, `release`, `trust`, a popup's answer). See Merge.
+func SaveFromService(a *Alert) error {
+	if b, err := os.ReadFile(file(a.ID)); err == nil {
+		var disk Alert
+		if json.Unmarshal(b, &disk) == nil {
+			return Save(Merge(&disk, a))
+		}
+	}
+	return Save(a)
+}
+
+// Merge is the service's copy of an alert (svc) saved over the one on disk:
+// the service's copy, plus what the CLI wrote to the file meanwhile. The
+// service adds to an alert (what it found, did and saw), the CLI resolves it.
+// So:
+//   - a resolution on disk (status "resolved" and its note) stays;
+//   - the actions are both lists together (the CLI adds "killed by you");
+//   - the bait hits are both lists together;
+//   - an autopsy only on disk stays, and the evidence folder the CLI saved
+//     (see respond.Preserve) is kept in the service's autopsy;
+//
+// and everything else is the service's.
+func Merge(disk, svc *Alert) *Alert {
+	if disk == nil {
+		return svc
+	}
+	out := *svc
+	if disk.Status == "resolved" && out.Status != "resolved" {
+		out.Status, out.Note = disk.Status, disk.Note
+	}
+	out.Actions = append([]ActionResult(nil), svc.Actions...)
+	for _, d := range disk.Actions {
+		seen := false
+		for _, s := range svc.Actions {
+			seen = seen || (s.Action == d.Action && s.OK == d.OK && s.Detail == d.Detail && s.Time.Equal(d.Time))
+		}
+		if !seen {
+			out.Actions = append(out.Actions, d)
+		}
+	}
+	out.Baits = append([]BaitHit(nil), svc.Baits...)
+	for _, d := range disk.Baits {
+		seen := false
+		for _, s := range svc.Baits {
+			seen = seen || (strings.EqualFold(s.Path, d.Path) && s.Access == d.Access)
+		}
+		if !seen {
+			out.Baits = append(out.Baits, d)
+		}
+	}
+	switch {
+	case out.Autopsy == nil:
+		out.Autopsy = disk.Autopsy
+	case disk.Autopsy != nil && out.Autopsy.Evidence == "" && disk.Autopsy.Evidence != "":
+		ap := *out.Autopsy
+		ap.Evidence, ap.MemoryImage = disk.Autopsy.Evidence, disk.Autopsy.MemoryImage
+		out.Autopsy = &ap
+	}
+	return &out
+}
+
 // Save writes the alert (admin only).
 func Save(a *Alert) error {
 	if err := os.MkdirAll(paths.AlertsDir(), 0o755); err != nil {
