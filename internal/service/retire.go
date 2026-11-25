@@ -31,6 +31,31 @@ func appRunning(spec baits.Spec) bool {
 	return anyNamed(snap, spec.OwnerExes)
 }
 
+// retiringFor reports whether path belongs to a decoy waiting to be retired
+// once its real app has closed (see RetireDecoy), and every one of pids is
+// that app (by program name: they hold the file, nothing is let through).
+func (s *server) retiringFor(path string, pids []uint32) bool {
+	id, ok := s.eng.IsBait(path)
+	if !ok {
+		return false
+	}
+	s.mu.Lock()
+	_, waiting := s.retireLater[id]
+	cfg := s.cfg
+	s.mu.Unlock()
+	spec, ok := specOf(cfg, id)
+	if !waiting || !ok || len(pids) == 0 {
+		return false
+	}
+	for _, pid := range pids {
+		img, err := procinfo.ImagePath(pid)
+		if err != nil || !anyNamed(map[uint32]procinfo.Entry{pid: {PID: pid, Exe: img}}, spec.OwnerExes) {
+			return false
+		}
+	}
+	return true
+}
+
 // anyNamed reports whether a process in snap runs a program called one of
 // names (lowercase file names).
 func anyNamed(snap map[uint32]procinfo.Entry, names []string) bool {
