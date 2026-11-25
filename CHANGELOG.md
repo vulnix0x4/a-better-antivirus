@@ -16,8 +16,11 @@ cookies or keys?
 - **A real app that moves into its decoy is at home there.** Its reads and writes of that folder, and of a
   bait living inside it (the MetaMask wallet in a fake browser), no longer count toward a sweep or turn an
   alert into "possible ransomware".
-- **The decoy is retired once the app has closed**, not from under it: Brave was left with "Profile error
-  occurred" when ABA removed its fake files while Brave had them open.
+- **A browser that moves into its fake profile starts without "Profile error occurred".** The fake profile's
+  Web Data claimed a version Brave then failed to upgrade; it now carries one old enough that the browser
+  starts that file afresh. The decoy is retired once the browser has closed, not from under it; you're told
+  once (not on every start in between), and the browser holding those files open meanwhile isn't reported
+  as weakening ABA.
 - **When the event log shows that a program caught as a stealer went to overwrite or delete the bait**, you're
   told again (it's ransomware or a wiper, and what to do differs), so the popup and `aba alerts show` say the
   same thing. A program frozen inside that open "went to" overwrite it: it never did.
