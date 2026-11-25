@@ -129,6 +129,14 @@ cookies or keys?
 - Built with cgo (one package, for reading a frozen program's memory) for macOS 14 and later, signed with
   one hardened-runtime exception (`com.apple.security.cs.debugger`) that macOS requires for that.
 
+**Installing (Windows)**
+
+- **The one-line installer (`irm … | iex`) checks the release's signature**, like the Linux installer and the
+  automatic updates already did. It only compared the download with the checksum list published next to it,
+  which whoever could change the download could change too. Now that list has to be signed with ABA's
+  release key, or nothing is run. (Windows PowerShell can't check this kind of signature itself, so the
+  script carries the arithmetic; the tests run it against signatures that must and mustn't pass.)
+
 ## v0.7.1
 
 The clipboard bait now works on real copies, and alerts say where a program came from.
