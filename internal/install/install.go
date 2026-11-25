@@ -165,6 +165,7 @@ func Steps(o Options) []Step {
 				if selected[a.Spec.ID] && a.Available {
 					cfg.Baits = append(cfg.Baits, config.BaitConfig{ID: a.Spec.ID})
 					placeEmbedded(cfg, a.Spec, planted)
+					settleNames(cfg, a.Spec, planted)
 				}
 			}
 			for _, p := range o.CustomBaits {
@@ -289,6 +290,14 @@ func placeEmbedded(cfg *config.Config, spec baits.Spec, planted map[string]bool)
 	cfg.User.Embedded[spec.ID] = baits.FreeProfile(spec, cfg.User)
 }
 
+// settleNames gives a bait that isn't planted yet file names nothing of yours
+// has (see baits.Settle): a file of your own is never taken for a bait.
+func settleNames(cfg *config.Config, spec baits.Spec, planted map[string]bool) {
+	if !planted[spec.ID] {
+		baits.Settle(spec, &cfg.User, nil)
+	}
+}
+
 // AddCatalogBait switches on one bait from the catalog (`aba bait add
 // chrome-profile`) without going through setup again.
 func AddCatalogBait(cfg *config.Config, id string) error {
@@ -316,6 +325,7 @@ func AddCatalogBait(cfg *config.Config, id string) error {
 		}
 	}
 	placeEmbedded(cfg, spec, planted)
+	settleNames(cfg, spec, planted)
 	cfg.Baits = append(cfg.Baits, config.BaitConfig{ID: id})
 	// (cfg.Version stays as it is: it says which baits setup has offered you,
 	// and adding one by hand doesn't mean you've seen the others.)
@@ -329,12 +339,26 @@ func RenameBaits(cfg *config.Config) (string, error) {
 	b := make([]byte, 8)
 	rand.Read(b)
 	cfg.User.Variant = hex.EncodeToString(b)
-	if err := config.SaveConfig(cfg); err != nil {
-		return "", err
+	// The new names, kept off files of your own (see baits.Settle). ABA's own
+	// baits, still under their old names, aren't in the way.
+	cfg.User.Names = nil
+	ours := map[string]bool{}
+	if st, err := config.LoadState(); err == nil {
+		for _, bs := range st.Baits {
+			for _, f := range bs.Files {
+				ours[paths.Key(f.Path)] = true
+			}
+		}
 	}
 	custom := map[string]bool{}
 	for _, bc := range cfg.Baits {
 		custom[bc.ID] = bc.Path != ""
+		if spec, ok := baits.ByID(bc.ID); ok && bc.Path == "" {
+			baits.Settle(spec, &cfg.User, ours)
+		}
+	}
+	if err := config.SaveConfig(cfg); err != nil {
+		return "", err
 	}
 	moved := 0
 	err := config.UpdateState(func(st *config.State) error {
