@@ -112,6 +112,71 @@ func TestProfileBaitKeepsOutOfTheBrowsersWay(t *testing.T) {
 	}
 }
 
+// The browser counts every profile ever added; when that count comes near the
+// fake's number, the fake is to be moved before the browser walks into it.
+func TestCrowdedProfileBait(t *testing.T) {
+	u := testUser(t)
+	ud := realBrowser(t, u, `{"profile":{"info_cache":{"Default":{}}}}`, "Default")
+	spec, _ := ByID("chrome-profile")
+	u.Embedded = map[string]string{"chrome-profile": "Profile 13"}
+	if Crowded(spec, u) {
+		t.Fatal("no counter yet (1): far from 13")
+	}
+	for created, want := range map[int]bool{5: false, 8: false, 9: true, 13: true, 20: true} {
+		os.WriteFile(filepath.Join(ud, "Local State"), []byte(`{"profile":{"info_cache":{"Default":{}},"profiles_created":`+itoa(created)+`}}`), 0o644)
+		if got := Crowded(spec, u); got != want {
+			t.Errorf("profiles_created %d, fake Profile 13: crowded %v", created, got)
+		}
+	}
+	// A fresh pick is never crowded.
+	u.Embedded["chrome-profile"] = FreeProfile(spec, u)
+	if Crowded(spec, u) {
+		t.Fatalf("FreeProfile picked %s, already crowded", u.Embedded["chrome-profile"])
+	}
+	// Firefox picks names at random; an unreadable Local State says nothing.
+	if ff, _ := ByID("firefox-profile"); Crowded(ff, u) {
+		t.Fatal("firefox")
+	}
+	os.WriteFile(filepath.Join(ud, "Local State"), []byte(`{"profile":`), 0o644)
+	u.Embedded["chrome-profile"] = "Profile 13"
+	if Crowded(spec, u) {
+		t.Fatal("unreadable Local State")
+	}
+}
+
+// The browser wiping the fake profile and making the folder a real one:
+// seen on disk before it lists the folder in Local State.
+func TestTakenOverProfileBait(t *testing.T) {
+	u := testUser(t)
+	ud := realBrowser(t, u, `{"profile":{"info_cache":{"Default":{}}}}`, "Default")
+	spec, _ := ByID("chrome-profile")
+	u.Embedded = map[string]string{"chrome-profile": "Profile 13"}
+	prof := filepath.Join(ud, "Profile 13")
+	if TakenOver(spec, u) {
+		t.Fatal("no folder at all")
+	}
+	for _, f := range spec.Files(u) {
+		os.MkdirAll(filepath.Dir(f.Path), 0o755)
+		os.WriteFile(f.Path, []byte("x"), 0o644)
+	}
+	os.WriteFile(filepath.Join(prof, "Login Data-journal"), nil, 0o644)
+	if TakenOver(spec, u) {
+		t.Fatal("only the fake profile (and a journal a reader left)")
+	}
+	os.WriteFile(filepath.Join(prof, "Secure Preferences"), []byte("{}"), 0o644)
+	os.MkdirAll(filepath.Join(prof, "Sessions"), 0o755)
+	if !TakenOver(spec, u) {
+		t.Fatal("the browser is making it a profile of its own")
+	}
+}
+
+func itoa(n int) string {
+	if n < 10 {
+		return string(rune('0' + n))
+	}
+	return itoa(n/10) + string(rune('0'+n%10))
+}
+
 func atoi(s string) int {
 	n := 0
 	for _, c := range s {

@@ -53,6 +53,15 @@ const (
 
 var AllActions = []Action{ActionFreeze, ActionBlockProgram, ActionKill, ActionIsolate, ActionDisableAdapters}
 
+// ActionLeftRunning isn't a response you choose: it's on record when ABA
+// would have frozen a program but didn't, because it's the browser you're
+// using (its internet is cut instead, where that's configured).
+const ActionLeftRunning Action = "left-running"
+
+// StarterBlocked starts the detail of a block-program action that cut off
+// what started a browser a stealer ran its code in, not the browser itself.
+const StarterBlocked = "what started it: "
+
 func (a Action) Describe() string {
 	switch a {
 	case ActionFreeze:
@@ -65,6 +74,8 @@ func (a Action) Describe() string {
 		return "Isolate the " + platform.PC + " from the network (ABA alerts still get out)"
 	case ActionDisableAdapters:
 		return "Disable network adapters (blunt fallback)"
+	case ActionLeftRunning:
+		return "Left it running: it's the browser you're using"
 	}
 	return string(a)
 }
@@ -375,6 +386,8 @@ func (a Action) Verb() string {
 		return "isolate this " + platform.PC
 	case ActionDisableAdapters:
 		return "turn off the network adapters"
+	case ActionLeftRunning:
+		return "leave it running"
 	}
 	return string(a)
 }
@@ -383,6 +396,9 @@ func (a Action) Verb() string {
 func (a Action) Done(detail string) string {
 	switch a {
 	case ActionFreeze:
+		if i := strings.Index(detail, " frozen: "); i >= 0 {
+			return "Froze " + detail[i+len(" frozen: "):] // what exactly, in the engine's words
+		}
 		n := 0
 		fmt.Sscanf(detail, "%d", &n)
 		if n > 1 {
@@ -390,6 +406,16 @@ func (a Action) Done(detail string) string {
 		}
 		return "Froze it"
 	case ActionBlockProgram:
+		if rest, ok := strings.CutPrefix(detail, StarterBlocked); ok {
+			var names []string
+			for _, p := range strings.Split(rest, ", ") {
+				if i := strings.LastIndexAny(p, `\/`); i >= 0 {
+					p = p[i+1:]
+				}
+				names = append(names, p)
+			}
+			return "Cut the internet of what started it (" + strings.Join(names, ", ") + ")"
+		}
 		return "Cut its internet"
 	case ActionKill:
 		return "Killed it"
@@ -400,6 +426,11 @@ func (a Action) Done(detail string) string {
 			return "Turned off network adapters: " + detail
 		}
 		return "Turned off network adapters"
+	case ActionLeftRunning:
+		if detail != "" {
+			return "Left it running: " + detail
+		}
+		return "Left it running: it's the browser you're using"
 	}
 	return string(a)
 }

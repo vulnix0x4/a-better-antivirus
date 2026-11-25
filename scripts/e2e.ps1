@@ -60,9 +60,17 @@ function Step($n) { Write-Host "`n=== $n ===" -ForegroundColor Cyan; Report "===
 # (Passed checks aren't reported: ntfy.sh limits requests per address, and the
 # phone-alert checks below need that allowance.)
 function Ok($m)   { Write-Host "  ok  $m" -ForegroundColor Green }
+# Processes a step started that must not outlive a failed check (a browser
+# and what started it): ended, with what they started, before Fail exits.
+$script:leftovers = @()
+function EndLeftovers {
+    foreach ($p in $script:leftovers) { if ($p) { & taskkill.exe /T /F /PID $p 2>&1 | Out-Null } }
+    $script:leftovers = @()
+}
 function Fail($m) {
     Write-Host "  FAIL $m" -ForegroundColor Red
     Report "FAIL $m"
+    EndLeftovers
     # Never leave the runner isolated or anything frozen: it would go offline
     # and GitHub could neither cancel the job nor show its log.
     $r = Start-Process -FilePath $Aba -ArgumentList 'release' -NoNewWindow -PassThru
@@ -232,6 +240,33 @@ function RecorderRuleReport([string]$dir) {
     "  recorder folders on record: $(((State).recorderDirs) -join '; ')" | Out-Host
 }
 Check ((RecorderRule $sshDir).Count -eq 0) 'no audit rule of ABA''s on the .ssh folder before the install'
+# A browser that has been used, so that ABA plants its fake profile inside it:
+# the runner has Chrome and Edge installed, but its user has never run them
+# (no "User Data\Local State"). Run the first one found once, headless, on its
+# default data folder; if it still left no Local State, write a minimal one.
+$browsers = @(
+    @{ id = 'chrome-profile'; name = 'Chrome'; exe = "$env:ProgramFiles\Google\Chrome\Application\chrome.exe"; ud = "$env:LOCALAPPDATA\Google\Chrome\User Data" },
+    @{ id = 'chrome-profile'; name = 'Chrome'; exe = "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe"; ud = "$env:LOCALAPPDATA\Google\Chrome\User Data" },
+    @{ id = 'edge-profile'; name = 'Edge'; exe = "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe"; ud = "$env:LOCALAPPDATA\Microsoft\Edge\User Data" },
+    @{ id = 'edge-profile'; name = 'Edge'; exe = "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe"; ud = "$env:LOCALAPPDATA\Microsoft\Edge\User Data" }
+) | Where-Object { $_.exe -and (Test-Path $_.exe) }
+$hostBrowser = $browsers | Select-Object -First 1
+if ($hostBrowser) {
+    $ls = Join-Path $hostBrowser.ud 'Local State'
+    if (-not (Test-Path $ls)) {
+        $hb = Start-Process -FilePath $hostBrowser.exe -PassThru -WindowStyle Hidden -ArgumentList '--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-gpu', "--user-data-dir=`"$($hostBrowser.ud)`"", '--dump-dom', 'about:blank'
+        if (-not $hb.WaitForExit(45000)) { & taskkill.exe /T /F /PID $hb.Id | Out-Null }
+        Start-Sleep -Seconds 2
+    }
+    if (-not (Test-Path $ls)) {
+        New-Item -ItemType Directory -Force $hostBrowser.ud | Out-Null
+        Set-Content -Path $ls -Value '{"profile":{"info_cache":{"Default":{"name":"Person 1"}}}}' -NoNewline
+        Ok "$($hostBrowser.name) left no Local State after a headless run: wrote a minimal one"
+    }
+    Ok "$($hostBrowser.name) has been used on this machine ($ls)"
+} else {
+    Ok 'no Chrome or Edge here: the fake-profile-inside-a-browser steps will be skipped'
+}
 
 Step 'Install (balanced, no learning, ntfy phone alerts)'
 Aba install --yes --preset balanced --learning 0 --ntfy-topic $topic
@@ -502,6 +537,123 @@ if ((Get-Process -Id ([int]$fp) -ErrorAction SilentlyContinue).SessionId -gt 0) 
     Aba kill $a6.id
 }
 Check (Did $a6 'block-program') 'its internet is cut'
+
+Step 'A browser a stealer starts suspended is frozen with the stealer; the browser you use is left running, cut off'
+# What cookie stealers do to get past a browser's own encryption: start the
+# genuine browser suspended, put code into it, and have it open every profile
+# from inside the browser. ghost does the observable part (see scripts/ghost).
+$hostBait = $null
+if ($hostBrowser) {
+    $hostBait = ((State).baits.($hostBrowser.id).files | Where-Object { $_.audit -and $_.path -like '*Login Data' } | Select-Object -First 1).path
+}
+if (-not $hostBait) {
+    Ok 'skipped: no fake profile was planted inside a real browser on this machine'
+} else {
+    $bexe = $hostBrowser.exe
+    $bname = $hostBrowser.name
+    # ghost writes its progress to a status file it creates itself: until it
+    # has, there's nothing to read (never an error).
+    function GhostSays([string]$file, [string]$pattern) {
+        if (-not (Test-Path -LiteralPath $file)) { return $null }
+        $m = Select-String -LiteralPath $file -Pattern $pattern -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($m) { return [int]$m.Matches[0].Groups[1].Value }
+        return $null
+    }
+    function ShowGhost([string]$file) {
+        if (Test-Path -LiteralPath $file) { Get-Content -LiteralPath $file -ErrorAction SilentlyContinue | ForEach-Object { "  ghost: $_" } | Out-Host }
+    }
+    Start-Sleep -Seconds 2   # the guard on the bait is back after the step before
+    $status = Join-Path $env:TEMP 'ghost-browser-suspended.txt'
+    Remove-Item -LiteralPath $status -ErrorAction SilentlyContinue
+    Snap
+    $gp = & $Medium $Ghost browser-suspended $bexe $hostBait $status
+    if ($LASTEXITCODE -or -not "$gp".Trim()) { Fail "ghost browser-suspended didn't start" }
+    $gp = [int]"$gp".Trim()
+    $script:leftovers = @($gp)
+    $bp = WaitFor { GhostSays $status 'browser pid (\d+)' } 15
+    if ($bp) { $script:leftovers += $bp }
+    ShowGhost $status
+    Check ($bp) "ghost (pid $gp) started $bname suspended (pid $bp)"
+    $ah = WaitFor { Fresh | Where-Object { $_.verdict.host -and $_.tier -eq 'critical' } | Select-Object -Last 1 } 25
+    ShowGhost $status
+    if (Test-Path "$data\service.log") {
+        Select-String -Path "$data\service.log" -Pattern 'instant|window check|joins the alert' | Select-Object -Last 10 | ForEach-Object { "  log: " + $_.Line } | Out-Host
+    }
+    Check ($ah) "critical alert about the $bname a stealer started: $($ah.summary)"
+    Check (-not $ah.verdict.keepRunning) 'not taken for the browser you use'
+    Check (Did $ah 'freeze') "froze it: $(($ah.actions | Where-Object action -eq 'freeze').detail)"
+    Check (WaitFor { IsSuspended $bp } 5) "the $bname it started is suspended"
+    Check (WaitFor { IsSuspended $gp } 5) 'and so is ghost, which started it'
+    $blockedNow = @((State).blocked | ForEach-Object { $_.path })
+    Check (-not ($blockedNow | Where-Object { $_ -eq $bexe })) "$bname's own program isn't blocked (your own windows of it keep their internet)"
+    Check ($blockedNow | Where-Object { $_ -eq $Ghost }) 'ghost''s internet is cut'
+    Aba kill $ah.id
+    Check (WaitFor { -not (Get-Process -Id $bp -ErrorAction SilentlyContinue) -and -not (Get-Process -Id $gp -ErrorAction SilentlyContinue) } 10) "aba kill ended that $bname and ghost"
+    $script:leftovers = @()
+
+    # The browser you're using: only on a machine with a desktop someone is
+    # signed in to (its windows have to be on a screen to count).
+    if (-not (Get-Process explorer -ErrorAction SilentlyContinue | Where-Object SessionId -gt 0)) {
+        Ok 'skipped the browser-you-use half: no desktop session on this machine'
+    } else {
+        # ghost is started exactly the way the browser was (the desktop's own
+        # token, or else this script's at medium integrity): otherwise it may
+        # not be allowed to open the browser at all.
+        $how = @('-shell')
+        $vp = & $Medium -shell $bexe --no-first-run --no-default-browser-check --new-window about:blank
+        if ($LASTEXITCODE -or -not "$vp".Trim()) {
+            $how = @()
+            $vp = & $Medium $bexe --no-first-run --no-default-browser-check --new-window about:blank
+        }
+        $vp = if ("$vp".Trim() -match '^\d+$') { [int]"$vp".Trim() } else { 0 }
+        $script:leftovers = @($vp)
+        $shown = if ($vp) { WaitFor { $p = Get-Process -Id $vp -ErrorAction SilentlyContinue; $p -and $p.MainWindowHandle -ne 0 } 30 } else { $null }
+        if (-not $shown) {
+            Ok "skipped the browser-you-use half: $bname (pid $vp) showed no window here"
+        } else {
+            Start-Sleep -Seconds 3
+            $rulesBefore = WfpRules
+            # (In Public: ghost may run as the desktop's user, who can write there.)
+            $status = Join-Path $env:PUBLIC 'ghost-browser-inject.txt'
+            Remove-Item -LiteralPath $status -ErrorAction SilentlyContinue
+            Snap
+            $ip = & $Medium @how $Ghost browser-inject $vp $hostBait $status
+            if ($LASTEXITCODE -or -not "$ip".Trim()) { Fail "ghost browser-inject didn't start (medium $($how -join ' '))" }
+            $script:leftovers += [int]"$ip".Trim()
+            # What ghost says it did: read the fake profile from inside the
+            # browser, or which call failed (with Windows' error number).
+            $said = WaitFor {
+                if (Test-Path -LiteralPath $status) {
+                    $l = Get-Content -LiteralPath $status -ErrorAction SilentlyContinue | Where-Object { $_ -match '^(its thread read|failed:)' } | Select-Object -First 1
+                    if ($l) { return $l }
+                }
+                if (-not (Get-Process -Id ([int]"$ip".Trim()) -ErrorAction SilentlyContinue)) { return 'failed: ghost exited without saying why' }
+                $null
+            } 20
+            ShowGhost $status
+            if ($said -match '^failed: OpenProcess.*\(Win32 error 5\)') {
+                Ok "skipped the browser-you-use half: this machine doesn't let ghost into the $bname it started ($said)"
+            } else {
+                if (-not $said) { Fail 'ghost browser-inject said nothing within 20 s' }
+                if ($said -like 'failed:*') { Fail "ghost browser-inject: $said" }
+                $ak = WaitFor { Fresh | Where-Object { $_.verdict.keepRunning } | Select-Object -Last 1 } 30
+                if (Test-Path "$data\service.log") {
+                    Select-String -Path "$data\service.log" -Pattern 'window check|instant' | Select-Object -Last 6 | ForEach-Object { "  log: " + $_.Line } | Out-Host
+                }
+                Check ($ak -and $ak.tier -eq 'critical') "critical alert, left running: $($ak.summary)"
+                Check (-not (Did $ak 'freeze')) 'not frozen'
+                Check (-not (IsSuspended $vp)) "your $bname is still running"
+                Check (Did $ak 'block-program') "its internet is cut instead"
+                Check ((State).blocked | Where-Object { $_.path -eq $bexe }) "$bname's program is on the blocked list"
+                Check ((WfpRules) -gt $rulesBefore) 'a WFP rule for it is in place'
+                Aba resume $ak.id
+                Check (-not ((State).blocked | Where-Object { $_.path -eq $bexe })) 'aba resume gave it its internet back'
+                Check ((WfpRules) -eq $rulesBefore) 'and its WFP rule is gone'
+            }
+        }
+        EndLeftovers
+    }
+}
 
 Step 'Release everything'
 Aba release

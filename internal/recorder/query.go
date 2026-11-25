@@ -189,7 +189,7 @@ func (r *Recorder) Query(q Query) Result {
 			cv.Absent = true // there at some point, gone now: say so if it was read
 			cv.Why = "its files are gone now"
 		case !cv.Since.IsZero():
-			cv.Why = "ABA only started watching it at " + cv.Since.Format("15:04:05") + ", after the program started"
+			cv.Why = "ABA only started watching it at " + cv.Since.Local().Format("15:04:05") + ", after the program started"
 		case c.why != "":
 			cv.Why = c.why
 		default:

@@ -39,6 +39,11 @@ func Rule(a *alerts.Alert) (rule config.IgnoreRule, why string) {
 	if a.Verdict.Evasion {
 		return rule, exe + " used a trick meant to dodge detection; that's never trusted from an alert (for a backup or security tool that really works that way: `aba ignore add --allow-tricks`)"
 	}
+	if a.Verdict.Host {
+		// Trusting the browser for its fake profile would let every later
+		// stealer that runs its code inside the same browser through.
+		return rule, "a browser going through a fake profile it doesn't know means code is running inside it; that's never trusted from an alert, or the next stealer to run its code inside " + exe + " would be let through too"
+	}
 	rule.Note = "trusted " + time.Now().Format("2006-01-02") + " from alert " + a.ID
 	if swept {
 		// It went through several apps' data. Trusting that means trusting it

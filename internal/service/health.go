@@ -26,6 +26,12 @@ func (s *server) healthCheck(startup bool) {
 	if cfg == nil {
 		return
 	}
+	// Before the browsers get to a fake profile's name for one you add.
+	if s.moveCrowdedProfiles(cfg) {
+		s.mu.Lock()
+		cfg = s.cfg
+		s.mu.Unlock()
+	}
 	var health []config.HealthItem
 	add := func(name string, ok bool, detail string) {
 		health = append(health, config.HealthItem{Name: name, OK: ok, Detail: detail})

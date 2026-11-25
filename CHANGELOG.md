@@ -5,6 +5,44 @@
 After a catch, ABA answers the question it used to leave you with: did it already take my real passwords,
 cookies or keys?
 
+**A stealer running inside the genuine browser (Windows)**
+
+- **The browser opening the fake profile inside it is critical now, not a warning.** Cookie stealers get past
+  the browser's own encryption by starting the genuine browser themselves, suspended and without a window,
+  and running their code inside it; that code goes through every profile, the fake one included.
+- **Which browser it is decides what happens.** One that was started suspended and never ran, started
+  hidden, has no window on your screen, or was started by a program ABA would stop itself is nobody's
+  browser: it's frozen whole, from its main process, together with what started it (even a signed runtime
+  like Python, when it created the browser suspended). The starter's internet is cut, never the browser's.
+  A browser created suspended is frozen while its open of the fake profile is still held, so the code
+  inside gets nothing.
+- **The browser window you're using is never frozen or killed**, whatever the preset: ABA cuts the internet
+  of every window of that browser and tells you so. The popup's *Yes* gives it back (`aba resume`); nothing
+  gets trusted. ABA first gives it a moment, in case you just added a profile and it's taking the folder as
+  its own, and skips the autopsy (your browser reads your real cookies all day).
+- **One that had already exited when ABA looked** is reported as critical, with nothing left to freeze.
+- **One alert and one freeze per browser**, however many of its processes open the fake profile. Such an
+  alert is never trusted from the popup or `aba trust`: that would let every later stealer inside the same
+  browser through.
+- **A browser installed in your own folders** is no longer frozen for a moment on the first,
+  unsigned-looking guess before its signature is checked.
+- **Adding a profile in your browser no longer walks into the fake one.** Chrome, Edge and Brave name a new
+  profile after how many they have ever made; when that count comes near the fake profile's number, ABA
+  moves the fake further out. If the browser takes its folder all the same, ABA says so in plain words,
+  cuts nothing, and puts a new fake profile under another name instead of retiring it.
+- **A browser's fake-profile read no longer counts toward a sweep split over several programs.** Your own
+  browser reading a bait once could be frozen as the "last member" of a stealer's team; and the autopsy no
+  longer counts a genuine browser's opens of its own data as taken.
+- **A read by a program that looks legitimate no longer interrupts you.** Edge, for one, opens the password
+  list on your Desktop after every start; ABA rated that "looks legitimate" and still popped up a question,
+  again every 12 hours. Such reads (signed, installed software, nothing done about them) are now noted quietly:
+  in `aba alerts`, where you can trust them, but no popup, nothing waiting for an answer, and on the phone only
+  if you asked for every alert there. If the same program goes on to change or delete a bait, or turns out to
+  be part of a sweep, you hear about it as before.
+- **After you resume or release an alert, the same program going for a bait again is a new alert** with a new
+  response; it used to be added quietly to the old one for two minutes.
+- **`aba alerts show`** prints when each bait was touched in local time, like the rest of the alert.
+
 **The flight recorder**
 
 - **ABA quietly notes who opens your real secrets**: the browser profiles, wallets, Telegram and Discord

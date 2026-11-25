@@ -351,6 +351,9 @@ func (s *server) Isolate() error                           { return netguard.Iso
 func (s *server) DisableAdapters() ([]string, error)       { return netguard.DisableAdapters() }
 func (s *server) Ancestors(pid uint32) []procinfo.Ancestor { return procinfo.Ancestors(pid, 6) }
 func (s *server) RunningImage(path string) []uint32        { return procinfo.RunningImage(path) }
+func (s *server) Browser(pid uint32, image string) (*procinfo.BrowserInstance, error) {
+	return procinfo.Browser(pid, image)
+}
 
 // suspendTree freezes pid and what it started, and says in the log why it
 // couldn't, if it couldn't.
@@ -486,6 +489,17 @@ func (s *server) RetireDecoy(id, why string) {
 	if err != nil {
 		return
 	}
+	s.mu.Lock()
+	cfg := s.cfg
+	s.mu.Unlock()
+	if cfg != nil && st.Baits[id] != nil {
+		if spec, ok := baits.SpecByID(cfg, id); ok && spec.Inside != nil {
+			// A fake profile the real browser took for one you added: it gets
+			// a new folder, it isn't retired.
+			s.moveCrowdedProfiles(cfg)
+			return
+		}
+	}
 	if bs := st.Baits[id]; bs == nil || !s.mayRetire(baits.RecentlyRetired(st, retireLimit), id, bs.Name) {
 		return
 	}
@@ -519,11 +533,21 @@ func (s *server) decideOpenOp(path string, op detect.Op, at time.Time, pid uint3
 		s.log.Printf("instant: pid %d let through: %s", pid, why)
 		return false
 	}
-	frozen, err := procinfo.SuspendTree(pid)
+	// Usually the opener and what it started; for a browser a stealer
+	// started, that whole browser and the stealer (see engine's host.go).
+	roots, instance := s.eng.InstantRoots(pid)
+	frozen, err := procinfo.SuspendTree(roots[0])
+	for _, r := range roots[1:] {
+		frozen = append(frozen, s.SuspendMore(r, frozen)...)
+	}
 	if err != nil && len(frozen) == 0 {
 		s.eng.Unclaim(pid)
 		s.log.Printf("instant freeze of pid %d failed: %v", pid, err)
 		return false
+	}
+	if instance {
+		s.eng.ClaimAll(frozen)
+		s.log.Printf("instant: %s", why)
 	}
 	img, _ := procinfo.ImagePath(pid)
 	how := ""

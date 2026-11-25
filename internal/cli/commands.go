@@ -227,10 +227,20 @@ func trustCmd() *cobra.Command {
 			}
 			rule, why := trust.Rule(a)
 			if why != "" {
-				alerts.Update(a.ID, func(x *alerts.Alert) {
-					x.Status, x.Note = "resolved", "you said it was yours (not trusted permanently)"
-				})
-				fmt.Println(ui.Warn.Render("Unfrozen this once, not trusted permanently: " + why + "."))
+				// Like `aba resume`: what ABA did is undone this once, and
+				// nothing is trusted.
+				note, said := "you said it was yours (not trusted permanently)", "Unfrozen this once, not trusted permanently: "+why+"."
+				switch {
+				case a.Verdict.KeepRunning:
+					b := alerts.BrowserName(a.ExeName())
+					note = "you gave " + b + " its internet back (nothing trusted)"
+					said = "Nothing was trusted (" + why + "). " + b + "'s internet is back, the same as `aba resume " + a.ID + "`."
+				case a.Verdict.Host:
+					note = "let run again by you (nothing trusted)"
+					said = "Nothing was trusted (" + why + "). What ABA froze or cut off for this alert runs again, the same as `aba resume " + a.ID + "`."
+				}
+				alerts.Update(a.ID, func(x *alerts.Alert) { x.Status, x.Note = "resolved", note })
+				fmt.Println(ui.Warn.Render(said))
 				return nil
 			}
 			alerts.Update(a.ID, func(x *alerts.Alert) { x.Status, x.Note = "resolved", "you trusted this program" })

@@ -70,6 +70,48 @@ func TestTiers(t *testing.T) {
 	}
 }
 
+// Only the genuine browser, in its own folder, opening a fake profile it
+// doesn't know is a "host": something running inside it. The same browser
+// once it took the folder as a profile is the owner; a copy elsewhere, an
+// unsigned look-alike or any other program is judged the usual way.
+func TestHostOnlyForTheGenuineBrowser(t *testing.T) {
+	c := &Classifier{Env: env, UserSession: func(uint32) bool { return true }}
+	google := provenance.Result{Signed: true, Valid: true, Signer: "Google LLC"}
+	chrome := `C:\Program Files\Google\Chrome\Application\chrome.exe`
+	perUser := `C:\Users\bob\AppData\Local\Google\Chrome\Application\chrome.exe`
+	bait := Bait{ID: "chrome-profile", OwnerExes: []string{"chrome.exe"}, OwnerSigner: "Google",
+		OwnerDirs: []string{`C:\Program Files\Google\Chrome\Application`, `C:\Users\bob\AppData\Local\Google\Chrome\Application`}, Unadopted: true}
+	for _, img := range []string{chrome, perUser} {
+		if v := c.Final(img, 1, bait, google); !v.Host || v.DecoyOwner || v.Tier != config.TierWarn {
+			t.Errorf("%s opening a profile it doesn't know: %+v", img, v)
+		}
+		if !c.OwnerCandidate(img, bait) {
+			t.Errorf("%s is where the genuine browser lives", img)
+		}
+	}
+	adopted := bait
+	adopted.Unadopted = false
+	if v := c.Final(chrome, 1, adopted, google); v.Host || !v.DecoyOwner {
+		t.Errorf("the browser's own profile: %+v", v)
+	}
+	for name, tc := range map[string]struct {
+		img string
+		sig provenance.Result
+	}{
+		"a copy elsewhere":    {`C:\Users\bob\Downloads\c\chrome.exe`, google},
+		"unsigned":            {chrome, unsigned},
+		"some other program":  {`C:\Users\bob\AppData\Local\Temp\x\stealer.exe`, unsigned},
+		"signed by Microsoft": {`C:\Windows\System32\notepad.exe`, ms},
+	} {
+		if v := c.Final(tc.img, 1, bait, tc.sig); v.Host || v.KeepRunning {
+			t.Errorf("%s: %+v", name, v)
+		}
+	}
+	if c.OwnerCandidate(`C:\Users\bob\Downloads\c\chrome.exe`, bait) || c.OwnerCandidate(`C:\Users\bob\AppData\Local\Temp\x\stealer.exe`, bait) {
+		t.Error("only the browser's own name in its own folder is a candidate")
+	}
+}
+
 func TestPrelimAssumesUnsigned(t *testing.T) {
 	c := &Classifier{Env: env}
 	if v := c.Prelim(`C:\Users\bob\AppData\Local\Programs\Microsoft VS Code\Code.exe`, 1, Bait{}); v.Tier != config.TierCritical {
