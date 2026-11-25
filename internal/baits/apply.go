@@ -58,20 +58,24 @@ func create(s Spec, u config.UserInfo, g *Gen) (*config.BaitState, error) {
 		}
 		bf := config.BaitFile{Path: f.Path, Audit: f.Audit}
 		_, statErr := os.Lstat(f.Path)
-		b, err := os.ReadFile(f.Path)
-		if legacy := err == nil && hasLegacyMarker(b); !legacy && !s.Adopt && (err == nil || statErr == nil) {
+		there := !errors.Is(statErr, os.ErrNotExist)
+		if there && !s.Adopt {
 			// Something of yours is here already (Settle and Plan keep baits
 			// away from such files; this is for one that appeared since). It is
-			// not a bait and never becomes one.
+			// not a bait and never becomes one. Not opened to look: it could be
+			// a bait itself, and opening one gets this program frozen.
 			return bs, fmt.Errorf("%s is already there and isn't ABA's: left as it is, and %s wasn't planted", f.Path, s.Name)
 		}
-		if err == nil {
-			// Take over an existing file: one you chose yourself (`aba bait add
-			// <path>`), or one from the original honeypot script.
+		if there {
+			// Take over the file you chose yourself (`aba bait add <path>`).
+			b, err := os.ReadFile(f.Path)
+			if err != nil {
+				return bs, fmt.Errorf("%s: %w", f.Path, err)
+			}
 			if f.Text {
 				bf.Text = string(b)
 			}
-			bf.Created = hasLegacyMarker(b)
+			bf.Created = hasLegacyMarker(b) // the original honeypot script's: cleaned up as ABA's
 		} else {
 			data := f.Gen(g)
 			if err := os.WriteFile(f.Path, data, 0o644); err != nil {

@@ -102,9 +102,10 @@ func TestBaitIsLeftOutWhenEveryNameIsYours(t *testing.T) {
 }
 
 // What's not in the way: ABA's own baits (a rename looks at names while the
-// old baits are still there), and a bait of the original honeypot script,
-// which is taken over as before.
-func TestOwnAndLegacyBaitsAreNotInTheWay(t *testing.T) {
+// old baits are still there). Settle never opens a file to tell (it might be a
+// bait), so a file of the original honeypot script is in the way like any
+// other, and left as it is.
+func TestOwnBaitsAreNotInTheWay(t *testing.T) {
 	dir := t.TempDir()
 	s := pooled(dir)
 	u := config.UserInfo{Variant: "a1b2c3"}
@@ -114,13 +115,13 @@ func TestOwnAndLegacyBaitsAreNotInTheWay(t *testing.T) {
 		t.Fatalf("ABA's own bait counted as yours: %v %v", in, u.Names)
 	}
 
-	write(t, p, "login: "+legacyMarkers[0])
-	if in := Settle(s, &u, nil); len(in) != 0 || len(u.Names) != 0 {
-		t.Fatalf("a legacy bait counted as yours: %v %v", in, u.Names)
+	legacy := "login: " + legacyMarkers[0]
+	write(t, p, legacy)
+	if in := Settle(s, &u, nil); len(in) != 0 || u.Names["doc"] == "" {
+		t.Fatalf("a file of the old script wasn't stepped around: %v %v", in, u.Names)
 	}
-	bs, err := create(s, u, NewGen())
-	if err != nil || len(bs.Files) != 1 || !bs.Files[0].Created {
-		t.Fatalf("legacy bait not taken over: %v, %+v", err, bs)
+	if b, _ := os.ReadFile(p); string(b) != legacy {
+		t.Fatalf("the old script's file was changed: %q", b)
 	}
 }
 

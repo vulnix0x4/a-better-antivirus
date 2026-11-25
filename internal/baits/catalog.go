@@ -208,27 +208,20 @@ func Settle(s Spec, u *config.UserInfo, ours map[string]bool) (inTheWay []string
 }
 
 // taken reports whether something that isn't ABA's is at path already.
+//
+// It only looks at whether something is there, never inside: the file could
+// be a bait (one you added yourself, or one of another install's names), and
+// opening a bait gets the program that does it frozen, together with whatever
+// started it. A file left by the original honeypot script counts as taken too
+// (the bait gets another name and that file is left alone).
 func taken(path string, ours map[string]bool) bool {
 	if ours[paths.Key(path)] {
 		return false
 	}
-	fi, err := os.Lstat(path)
-	if err != nil {
-		// Not there. Anything else (a folder ABA can't look into) counts as
-		// taken: better one bait fewer than a bait on top of something.
-		return !errors.Is(err, os.ErrNotExist)
-	}
-	return !legacyBait(path, fi)
-}
-
-// legacyBait reports whether the file at path was planted by the original
-// PowerShell honeypot script: those are taken over and cleaned up as ABA's.
-func legacyBait(path string, fi os.FileInfo) bool {
-	if !fi.Mode().IsRegular() || fi.Size() > 64<<10 {
-		return false
-	}
-	b, err := os.ReadFile(path)
-	return err == nil && hasLegacyMarker(b)
+	_, err := os.Lstat(path)
+	// Not there: free. Anything else (a folder ABA can't look into) counts as
+	// taken: better one bait fewer than a bait on top of something.
+	return !errors.Is(err, os.ErrNotExist)
 }
 
 // ldbName is a LevelDB file name the way real ones look: a six-digit sequence
