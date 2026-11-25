@@ -357,8 +357,16 @@ func (e *Engine) DecideInstantOpWhy(pid uint32, path string, op detect.Op) (bool
 	// Deleting several apps' data isn't going through it: uninstallers and
 	// cleaners do that. Reading or rewriting it is.
 	// (Never the genuine browser going through its fake profile: see host.go,
-	// and hostRead.)
-	if op != detect.OpDelete && !v.Host {
+	// and hostRead. Nor the genuine app at home in its decoy, or a genuine
+	// browser's import probe: see probe.go.)
+	home := e.atHome(image, baitID, path, sig)
+	if home && !v.DecoyOwner && !v.Host {
+		// A bait inside the decoy it moved into (see handle).
+		done(false)
+		return false, image + " is the genuine app, at home in the decoy it moved into"
+	}
+	quietRead := v.DecoyOwner || home || e.importProbe(image, baitID, path, sig)
+	if op != detect.OpDelete && !v.Host && !quietRead {
 		if swept := e.touch(pid, baitID, time.Now()); len(swept) >= sweepApps && !exempt {
 			v = e.sweepVerdict(v, swept)
 		}
@@ -410,7 +418,7 @@ func (e *Engine) DecideInstantOpWhy(pid uint32, path string, op detect.Op) (bool
 		done(false)
 		return false, image + " is ignored or the real app"
 	}
-	if !exempt && v.Tier != config.TierCritical && op == detect.OpRead {
+	if !exempt && !quietRead && v.Tier != config.TierCritical && op == detect.OpRead {
 		if units, _ := e.joinTeam(pid, baitID, image, time.Now()); units != nil {
 			v = e.teamVerdict(v, units, 0)
 		}
@@ -625,7 +633,18 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	}
 	var swept []string
 	hostOpen := e.hostRead(oa, baitID)
-	if (access == "read" || access == "write") && !hostOpen {
+	// (Nor the genuine app at home in its decoy, or a genuine browser's import
+	// probe: see probe.go.)
+	unswept, home := e.quietAccess(oa.Image, oa.PID, baitID, oa.Path)
+	if home != "" && home != baitID && access != "swap" {
+		// The genuine app using a bait that lives inside its decoy (the
+		// MetaMask wallet inside the fake browser it moved into). Its reads of
+		// the decoy itself retire that decoy, with what's inside it (see
+		// classify's DecoyOwner).
+		e.Ops.Logf("ignored %s of %s by %s: the genuine app, at home in its decoy %s", access, oa.Path, oa.Image, home)
+		return
+	}
+	if (access == "read" || access == "write") && !hostOpen && !unswept {
 		swept = e.touch(oa.PID, baitID, time.Now())
 		if len(swept) >= sweepApps && !e.sweepable(oa.PID) {
 			swept = nil
@@ -876,7 +895,8 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	// off. Either way, its read mustn't make a stranger that reads a bait
 	// later on the "last member" of a team it has nothing to do with.)
 	var teammates []teamRead
-	if !test && access == "read" && !v.DecoyOwner && !v.Builtin && !v.Host && e.sweepable(oa.PID) && !cls.SweepExempt(image, oa.PID, &sig) {
+	if !test && access == "read" && !v.DecoyOwner && !v.Builtin && !v.Host && !unswept &&
+		e.sweepable(oa.PID) && !cls.SweepExempt(image, oa.PID, &sig) {
 		if units, members := e.joinTeam(oa.PID, baitID, image, now); units != nil && len(v.Swept) < sweepApps {
 			v = e.teamVerdict(v, units, len(members))
 			for _, m := range members {
@@ -1285,6 +1305,14 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 		return
 	}
 
+	if v.DecoyOwner && !test && e.repeat(image, baitID, now) {
+		// You've been told the decoy goes. It waits for the app to close (see
+		// the service's RetireDecoy), and the app reads it again meanwhile:
+		// asked once more, not told again.
+		e.Ops.Logf("alert %s: repeat of %s reading its own decoy %s, not notified again", a.ID, image, baitID)
+		e.Ops.RetireDecoy(baitID, a.Summary)
+		return
+	}
 	// Script hosts and runtimes are never quieted: the next script could be a
 	// different one. Neither are critical alerts.
 	if !test && len(a.Actions) == 0 && !v.DecoyOwner && v.Tier != config.TierCritical &&
@@ -1381,6 +1409,11 @@ func (e *Engine) noteAfter(oa *detect.Access) {
 	if !ok {
 		return
 	}
+	if _, home := e.quietAccess(oa.Image, oa.PID, baitID, oa.Path); home != "" {
+		// The genuine app writing its own folder, the decoy it moved into:
+		// not ransomware (see probe.go).
+		return
+	}
 	e.mu.Lock()
 	hit := alerts.BaitHit{ID: baitID, Name: e.baitNames[baitID], Path: oa.Path, Access: access, Time: oa.Time}
 	inc := e.incidents[oa.PID]
@@ -1395,6 +1428,7 @@ func (e *Engine) noteAfter(oa *detect.Access) {
 		e.mu.Unlock()
 		return
 	}
+	was := inc.alert.Kind
 	cp, changed := e.did(inc.alert, hit)
 	loud := false
 	if changed && inc.quiet && cp.Kind != alerts.KindRead {
@@ -1407,6 +1441,10 @@ func (e *Engine) noteAfter(oa *detect.Access) {
 			}
 		}
 	}
+	// You were told about a stealer, and it's ransomware or a wiper: what to
+	// do about it differs, so you're told again (the popup you saw and the
+	// alert on record say the same thing).
+	loud = loud || (changed && cp.Kind != was)
 	e.mu.Unlock()
 	if changed {
 		e.Ops.SaveAlert(cp)
@@ -1434,6 +1472,11 @@ func (e *Engine) did(a *alerts.Alert, hit alerts.BaitHit) (*alerts.Alert, bool) 
 		a.Kind = alerts.KindWrite
 		if hit.Access == "delete" {
 			what, to, threat, a.Kind = "deleted", "delete", "Possible wiper or ransomware", alerts.KindDelete
+		}
+		if a.Instant {
+			// Frozen inside that open: the event log says what it asked for,
+			// it never got to do it (the same words as describe's).
+			what = "went to " + to
 		}
 		if a.Tier == config.TierCritical {
 			a.Title = threat + ": " + a.ExeName() + " " + what + " your bait"

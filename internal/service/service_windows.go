@@ -663,6 +663,12 @@ func (s *server) onBlocked(path string, pids []uint32) {
 		})
 		return
 	}
+	if s.retiringFor(path, pids) {
+		// The real app moved into this decoy and has its files open: the
+		// decoy goes once it has closed (see RetireDecoy).
+		s.log.Printf("instant: %s is held open by its real app; the decoy goes once the app has closed", path)
+		return
+	}
 	if !s.once("blocked|"+strings.ToLower(path), time.Hour) {
 		return
 	}

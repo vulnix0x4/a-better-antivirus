@@ -218,9 +218,13 @@ func (a *Alert) AddAction(act config.Action, err error, detail string) {
 	a.Actions = append(a.Actions, r)
 }
 
-// ExeName is the reader's file name, or a placeholder.
+// ExeName is the reader's file name, or a placeholder. An alert without a
+// process is one ABA raises itself (a decoy retired, a bait put back).
 func (a *Alert) ExeName() string {
-	if a.Process == nil || a.Process.Image == "" {
+	if a.Process == nil {
+		return "ABA"
+	}
+	if a.Process.Image == "" {
 		if a.Process != nil && a.Process.PID == 4 {
 			return "System (kernel / network share)"
 		}
