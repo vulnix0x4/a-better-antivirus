@@ -63,7 +63,7 @@ release:
     whatever touches them. [abetterantivirus.com](https://abetterantivirus.com)
 
     **Windows 10/11** (x64 and ARM): download `ABA-Setup.exe` below, double-click it and follow the steps.
-    Or in PowerShell (downloads this release, checks its hash, runs the guided setup):
+    Or in PowerShell (downloads this release, checks its signature and hash, runs the guided setup):
     ```powershell
     irm https://raw.githubusercontent.com/vulnix0x4/a-better-antivirus/main/install.ps1 | iex
     ```
