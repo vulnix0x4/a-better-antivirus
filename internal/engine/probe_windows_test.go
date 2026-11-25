@@ -111,7 +111,14 @@ func TestGenuineAppAtHomeInItsDecoy(t *testing.T) {
 			t.Fatalf("not a sweep: %+v", a)
 		}
 	}
-	if len(f.retired) == 0 {
-		t.Fatal("Brave reading its own decoy retires it")
+	if len(f.retired) != 1 || len(f.desktop) != 1 {
+		t.Fatalf("Brave reading its own decoy retires it, and you're told: retired %v, told %v", f.retired, f.desktop)
+	}
+	// The decoy waits for Brave to close; Brave started again reads it again:
+	// asked to retire once more, but you aren't told twice.
+	f.images[4001] = braveExe
+	e.HandleAccess(ev(4001, braveExe, braveDecoy, 1))
+	if len(f.retired) != 2 || len(f.desktop) != 1 {
+		t.Fatalf("again: retired %v, told %v", f.retired, f.desktop)
 	}
 }

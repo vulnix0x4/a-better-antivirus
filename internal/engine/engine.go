@@ -1305,6 +1305,14 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 		return
 	}
 
+	if v.DecoyOwner && !test && e.repeat(image, baitID, now) {
+		// You've been told the decoy goes. It waits for the app to close (see
+		// the service's RetireDecoy), and the app reads it again meanwhile:
+		// asked once more, not told again.
+		e.Ops.Logf("alert %s: repeat of %s reading its own decoy %s, not notified again", a.ID, image, baitID)
+		e.Ops.RetireDecoy(baitID, a.Summary)
+		return
+	}
 	// Script hosts and runtimes are never quieted: the next script could be a
 	// different one. Neither are critical alerts.
 	if !test && len(a.Actions) == 0 && !v.DecoyOwner && v.Tier != config.TierCritical &&
