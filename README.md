@@ -46,7 +46,7 @@ Prefer the terminal (or want to pick every bait and response yourself)? In Power
 irm https://raw.githubusercontent.com/vulnix0x4/a-better-antivirus/main/install.ps1 | iex
 ```
 
-It downloads the latest release for your PC, checks its SHA-256 against `SHA256SUMS.txt`, and starts the guided setup ([read the script first](install.ps1) if you like). Setup takes about a minute:
+It downloads the latest release for your PC, checks that its checksum list carries a valid signature from ABA's release key, checks the download against it, and starts the guided setup ([read the script first](install.ps1) if you like). Setup takes about a minute:
 
 - **Recommended** asks just two things — phone alerts and automatic updates — and uses sensible defaults for the rest. **Customize** lets you pick every bait and response.
 - If you set up phone alerts, it sends a test notification so you know they work.
@@ -84,7 +84,7 @@ $env:ABA_ARGS = 'install --yes --preset strict --learning 0'; irm https://raw.gi
 
 **By hand:** download `aba_<version>_windows_amd64.exe` (or `arm64`) from [Releases](https://github.com/vulnix0x4/a-better-antivirus/releases/latest), verify its SHA-256 against `SHA256SUMS.txt`, and run it with `install`.
 
-> Only ever paste `irm … | iex` commands from sources you trust: it's also how many infostealers get installed ("paste this to fix your PC"). This script is open, short, and refuses to run a download whose checksum doesn't match.
+> Only ever paste `irm … | iex` commands from sources you trust: it's also how many infostealers get installed ("paste this to fix your PC"). This script is open, and refuses to run a download that isn't in a checksum list signed with ABA's release key.
 
 </details>
 
