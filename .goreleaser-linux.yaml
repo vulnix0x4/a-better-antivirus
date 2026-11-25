@@ -42,7 +42,7 @@ nfpms:
     maintainer: "A Better Antivirus <https://github.com/vulnix0x4/a-better-antivirus/issues>"
     description: |-
       Catch infostealers in the act. Plants fake passwords, wallets and app data
-      that only malware would ever read, and freezes whatever touches them.
+      that honest software has no reason to read, and freezes whatever goes for them.
       Run `sudo aba install` to set it up.
     license: MIT
     section: admin

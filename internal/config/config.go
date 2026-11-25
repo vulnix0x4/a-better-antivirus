@@ -138,6 +138,10 @@ type UserInfo struct {
 	// Embedded is where each bait that lives inside a real app's data was put
 	// (bait ID -> folder name, e.g. "Profile 23" inside Chrome's User Data).
 	Embedded map[string]string `json:"embedded,omitempty"`
+	// Names are bait file names that aren't this install's usual pick, because
+	// a file of yours already had that name when the bait was planted (what
+	// the name is for -> the name; see baits.Settle).
+	Names map[string]string `json:"names,omitempty"`
 }
 
 // BaitConfig selects a bait from the catalog, or defines a custom file bait.

@@ -59,7 +59,7 @@ release:
 
     > It's not an antivirus. It's a better one.
 
-    Plants fake passwords, wallets and app data that only an infostealer would read, and freezes
+    Plants fake passwords, wallets and app data that honest software has no reason to read, and freezes
     whatever touches them. [abetterantivirus.com](https://abetterantivirus.com)
 
     **Windows 10/11** (x64 and ARM): download `ABA-Setup.exe` below, double-click it and follow the steps.

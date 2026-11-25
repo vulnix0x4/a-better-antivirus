@@ -5,7 +5,7 @@
 **It's not an antivirus. It's a better one.**
 
 Catch infostealers in the act. ABA plants fake passwords, wallets and app data<br>
-that only malware would ever read, and freezes whatever touches them.
+that honest software has no reason to read, and freezes whatever goes for them.
 
 **[abetterantivirus.com](https://abetterantivirus.com)**
 
