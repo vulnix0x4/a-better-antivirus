@@ -371,7 +371,9 @@ func (s *server) UpdateState(fn func(*config.State) error) error {
 func (s *server) Logf(f string, a ...any) { s.log.Printf(f, a...) }
 
 func (s *server) SaveAlert(a *alerts.Alert) error {
-	err := alerts.Save(a)
+	// Saved again later (the autopsy, more of what it did): keep what you
+	// answered through the CLI meanwhile (see alerts.Merge).
+	err := alerts.SaveFromService(a)
 	go s.publish()
 	return err
 }

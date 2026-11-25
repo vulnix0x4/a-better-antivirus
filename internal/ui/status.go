@@ -233,6 +233,14 @@ func RenderStatus(d StatusData) string {
 	return b.String()
 }
 
+// actionTag is what an alert list says about something ABA did ("" for
+// nothing worth a word).
+func actionTag(a config.Action) string {
+	return map[config.Action]string{config.ActionFreeze: "frozen", config.ActionBlockProgram: "internet cut",
+		config.ActionKill: "killed", config.ActionIsolate: platform.Capital(platform.PC) + " isolated", config.ActionDisableAdapters: "adapters off",
+		config.ActionLeftRunning: "left running"}[a]
+}
+
 // AlertTable renders a compact list of alerts.
 func AlertTable(list []*alerts.Alert, w int) string {
 	var b strings.Builder
@@ -265,9 +273,11 @@ func AlertTable(list []*alerts.Alert, w int) string {
 			tags = append(tags, "learning")
 		}
 		for _, r := range a.Actions {
-			if r.OK {
-				tags = append(tags, map[config.Action]string{config.ActionFreeze: "frozen", config.ActionBlockProgram: "internet cut",
-					config.ActionKill: "killed", config.ActionIsolate: platform.Capital(platform.PC) + " isolated", config.ActionDisableAdapters: "adapters off"}[r.Action])
+			if !r.OK {
+				continue
+			}
+			if tag := actionTag(r.Action); tag != "" {
+				tags = append(tags, tag)
 			}
 		}
 		status := ""
