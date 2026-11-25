@@ -126,14 +126,15 @@ func Steps(o Options) []Step {
 			}
 			// This install's own bait names: chosen once, when the first baits are
 			// planted. An install that already has baits keeps the names it has.
-			variant, embedded := cfg.User.Variant, cfg.User.Embedded
+			variant, embedded, names := cfg.User.Variant, cfg.User.Embedded, cfg.User.Names
 			if variant == "" && len(ourBaits()) == 0 {
 				b := make([]byte, 8)
 				rand.Read(b)
 				variant = hex.EncodeToString(b)
+				names = nil // picked for the old variant's names
 			}
 			cfg.User = u
-			cfg.User.Variant, cfg.User.Embedded = variant, embedded
+			cfg.User.Variant, cfg.User.Embedded, cfg.User.Names = variant, embedded, names
 			if cfg.InstalledAt.IsZero() {
 				cfg.InstalledAt = time.Now()
 			}
