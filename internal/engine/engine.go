@@ -580,8 +580,10 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 			e.mu.Lock()
 			inc := e.incidents[oa.PID]
 			e.mu.Unlock()
-			if inc != nil && e.undone(inc.alert) {
+			if inc != nil && !oldNews(oa.Time, inc.alert) && e.undone(inc.alert) {
 				// Caught, then resumed by you: this is something new it did.
+				// (Not when it did it before it was caught and the word only
+				// comes now: that's the same case.)
 				e.Unclaim(oa.PID)
 				e.closeIncident(inc.alert)
 			} else {
@@ -655,7 +657,7 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	e.mu.Lock()
 	inc0 := e.incidents[oa.PID]
 	e.mu.Unlock()
-	if inc0 != nil && !instant && e.undone(inc0.alert) {
+	if inc0 != nil && !instant && !oldNews(oa.Time, inc0.alert) && e.undone(inc0.alert) {
 		e.closeIncident(inc0.alert)
 	}
 
