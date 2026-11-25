@@ -797,6 +797,29 @@ func TestAutopsyOfAGenuineBrowserLeavesItsOwnDataOut(t *testing.T) {
 	}
 }
 
+// The autopsy of a browser stopped as a stealer's: one that had been running
+// as a browser (a visible Brave started from cmd.exe, an Edge with no
+// window) gets its own data marked "can't tell"; a copy created suspended
+// never ran as a browser, so everything it opened counts.
+func TestAutopsyOfAStoppedBrowserKnowsWhetherItRan(t *testing.T) {
+	cmdExe := `C:\Windows\System32\cmd.exe`
+	e, f, bait, b := browserUser(t, "balanced", 905, cmdExe, nil)
+	signed(f, cmdExe, "Microsoft Windows")
+	f.parents[b.Main] = []procinfo.Ancestor{{PID: 905, Image: cmdExe, CreateTime: 1}}
+	f.visible[1000] = true
+	e.HandleAccess(ev(1000, chromeExe, bait, 1))
+	c := waitCase(t, f)
+	if c.Running[1000] != "chrome-profile" || len(c.Own) != 0 {
+		t.Fatalf("a Chrome that ran as one: running %v, own %v", c.Running, c.Own)
+	}
+
+	e, f, bait, _ = browserUser(t, "balanced", 900, ghostExe, suspended)
+	e.HandleAccess(ev(1000, chromeExe, bait, 1))
+	if c := waitCase(t, f); len(c.Running) != 0 || len(c.Own) != 0 {
+		t.Fatalf("created suspended: running %v, own %v", c.Running, c.Own)
+	}
+}
+
 func waitCase(t *testing.T, f *fakeOps) autopsy.Case {
 	t.Helper()
 	for i := 0; i < 200; i++ {

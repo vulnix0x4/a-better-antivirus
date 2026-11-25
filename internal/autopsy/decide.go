@@ -34,6 +34,17 @@ type facts struct {
 	held        []alerts.StoreRead // real stores' files it has open now
 	stagedReal  []stagedFact       // byte-for-byte copies of real files among what it staged
 	leads       []string           // other things that point to a theft without proving it
+	// ownBusy are the stores of a genuine browser that had been running
+	// normally and is caught (see Case.Running): it opens its own data all
+	// the time, so whether the code in it took that data can't be told.
+	ownBusy []baits.Store
+}
+
+// busyLine is the "can't tell" for a store its own, normally running browser
+// had open or opened.
+func busyLine(s baits.Store) string {
+	name := strings.TrimPrefix(s.Name, "your ")
+	return "This is the genuine " + name + " and it had been running normally: it opens its own passwords and cookies all the time, so ABA can't tell which of those opens were for the code that opened the fake profile. Treat what's saved in that " + name + " as taken."
 }
 
 type stagedFact struct {
@@ -93,6 +104,9 @@ func decide(f facts, a *alerts.Autopsy) {
 
 	// Why ABA might not be able to tell.
 	var unsure []string
+	for _, s := range f.ownBusy {
+		unsure = append(unsure, busyLine(s))
+	}
 	if !f.recorderOn {
 		why := f.recorderWhy
 		if why == "" {
@@ -140,6 +154,11 @@ func decide(f facts, a *alerts.Autopsy) {
 		if len(unsure) > 0 {
 			a.Summary = append(a.Summary, "It may have taken more than this: "+lower(unsure[0]))
 		}
+		for _, s := range f.ownBusy {
+			if _, read := idxStore(byStore, s.ID); !read {
+				a.Steps = append(a.Steps, advice(s.ID, s.Kind, s.Name)...)
+			}
+		}
 	case len(unsure) > 0 || len(leads) > 0:
 		a.Answer = alerts.AnswerUnknown
 		first := ""
@@ -153,8 +172,15 @@ func decide(f facts, a *alerts.Autopsy) {
 			a.Summary = append(a.Summary, "It saw no open of "+joinNames(watched)+" by it while it ran.")
 		}
 		a.Summary = append(a.Summary, "To be safe, treat what ABA couldn't see as taken:")
+		advised := map[string]bool{}
+		for _, s := range f.ownBusy {
+			advised[s.ID] = true
+			a.Steps = append(a.Steps, advice(s.ID, s.Kind, s.Name)...)
+		}
 		for _, n := range unwatchedStores(f.res.Stores, f.res.Doubts, f.stagedReal, !f.recorderOn || f.start.IsZero() || len(f.res.Lapses) > 0 || !f.res.Forgot.IsZero()) {
-			a.Steps = append(a.Steps, advice(n.Store, n.Kind, n.Name)...)
+			if !advised[n.Store] {
+				a.Steps = append(a.Steps, advice(n.Store, n.Kind, n.Name)...)
+			}
 		}
 	case present == 0:
 		a.Answer = alerts.AnswerNoSign
@@ -185,6 +211,16 @@ func groupReads(reads []alerts.StoreRead) [][]alerts.StoreRead {
 		out[i] = append(out[i], r)
 	}
 	return out
+}
+
+// idxStore finds the group of reads of store id.
+func idxStore(groups [][]alerts.StoreRead, id string) (int, bool) {
+	for i, g := range groups {
+		if g[0].Store == id {
+			return i, true
+		}
+	}
+	return 0, false
 }
 
 func storeNames(groups [][]alerts.StoreRead) []string {
