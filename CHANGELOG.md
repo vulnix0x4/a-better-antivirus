@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.8.0
 
 After a catch, ABA answers the question it used to leave you with: did it already take my real passwords,
 cookies or keys?
