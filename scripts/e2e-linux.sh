@@ -53,6 +53,7 @@ state()  { sudo cat "$DATA/state.json"; }
 alerts() { sudo sh -c "cat $DATA/alerts/*.json 2>/dev/null" | jq -s 'sort_by(.id)'; }
 bait_file() { state | jq -r --arg id "$1" '.baits[$id].files[0].path // empty'; }
 frozen() { grep -q "$FROZEN" "/proc/$1/cgroup" 2>/dev/null; }
+incut() { grep -q 'file-access-monitor.blocked' "/proc/$1/cgroup" 2>/dev/null; }
 alive()  { [ -d "/proc/$1" ] && ! grep -q '^State:.*Z' "/proc/$1/status" 2>/dev/null; }
 
 # launch NAME CMD...: start CMD as this user, from systemd (not from this
@@ -286,6 +287,10 @@ rm -f "$HOME/e2e-collect.sh"
 # =====================================================================
 say "aba resume"
 pid=$(launch stealer "$HOME/Downloads/free-game" -wait 2000 -out "$OUT/s2" "$PASSWORDS") || fail "couldn't start the fake stealer"
+# Its program was cut off by the first catch: it's moved to the cut-off group
+# as it starts (inside its exec, or a moment later). Where it was then is
+# where resume has to put it back.
+wait_until 10 incut "$pid" || true
 before=$(cat "/proc/$pid/cgroup")
 id=$(expect_frozen "$pid" "$OUT/s2" "fake stealer") || exit 1
 sudo aba resume "$id" || fail "aba resume"
@@ -375,7 +380,6 @@ a=$(alerts | jq -c "map(select(.id == \"$id\")) | last")
 ok "the alert cut its program off ($(field "$a" '[.actions[] | select(.action=="block-program")][0].detail'))"
 if command -v nft >/dev/null; then sudo nft list table inet file_access_monitor | sed 's/^/      /'; fi
 p2=$(launch net2 "$HOME/Downloads/net-game" -wait 0 -connect "$PHONE" -out "$OUT/n2") || fail "couldn't start the program again"
-incut() { grep -q 'file-access-monitor.blocked' "/proc/$1/cgroup" 2>/dev/null; }
 wait_until 25 incut "$p2" || fail "the program started again isn't in the cut-off group: $(cat /proc/$p2/cgroup)"
 wait_until 50 has_line '^NET FAIL' "$OUT/n2.net" || fail "the program started again reached the listener: $(cat "$OUT/n2.net" 2>/dev/null)"
 ok "started again, it was cut off inside its exec, and can't reach a listener on this machine ($(cut -c1-90 "$OUT/n2.net"))"
