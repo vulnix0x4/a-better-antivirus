@@ -547,6 +547,39 @@ func TestInstantCatchResumedThenReadsAgain(t *testing.T) {
 	}
 }
 
+// Caught inside its open and resumed by you within seconds; only then does
+// the event log report that same open (on a busy machine it has come 3.7 s
+// late). That's the case you already answered: no second alert, no new
+// freeze. The same for the browser you use after its internet was restored.
+func TestLateWordOfTheSameOpenAfterResumeIsNotANewAlert(t *testing.T) {
+	e, f := setup("balanced")
+	e.cfg.InstantFreeze = true
+	img := `C:\Users\bob\AppData\Local\Temp\x\stealer.exe`
+	f.images[100] = img
+	late := ev(100, img, desktopBait, 1) // the open itself, as the log will tell it
+	time.Sleep(20 * time.Millisecond)
+	if !e.DecideInstant(100, desktopBait) {
+		t.Fatal("not frozen inside the open")
+	}
+	e.HandleOpen(100, desktopBait, time.Now(), []uint32{100})
+	f.state.Frozen, f.state.Blocked = nil, nil // `aba resume <id>`
+	e.HandleAccess(late)
+	if len(f.saved) != 1 || len(f.suspended) != 0 || len(f.desktop) != 1 {
+		t.Fatalf("alerts %d, suspended %v, popups %d", len(f.saved), f.suspended, len(f.desktop))
+	}
+
+	e, f, bait, _ := browserUser(t, "balanced", 4410, explorerExe, nil)
+	f.visible[1000] = true
+	lateCookies := ev(1001, chromeExe, cookiesOf(bait), 1)
+	time.Sleep(20 * time.Millisecond)
+	e.HandleAccess(ev(1000, chromeExe, bait, 1))
+	f.state.Blocked = nil // `aba resume <id>`
+	e.HandleAccess(lateCookies)
+	if len(f.saved) != 1 || len(f.blocked) != 1 || len(f.desktop) != 1 {
+		t.Fatalf("browser: alerts %d, blocked %v, popups %d", len(f.saved), f.blocked, len(f.desktop))
+	}
+}
+
 // One of the browser's own processes (its network service) opening the fake
 // profile is handled like the main process: the whole instance is judged,
 // from its main process.

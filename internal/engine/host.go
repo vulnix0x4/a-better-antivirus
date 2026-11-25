@@ -350,6 +350,14 @@ func (e *Engine) undone(a *alerts.Alert) bool {
 	return !still
 }
 
+// oldNews reports whether an access made at time t was made before alert a
+// was: word of it came late (the Security log can deliver seconds after the
+// fact), so it's part of what a is about, however a has been answered since.
+// Only what a program does after you undid ABA's response is a new case.
+func oldNews(t time.Time, a *alerts.Alert) bool {
+	return !t.IsZero() && t.Before(a.Time)
+}
+
 // joinHost adds hit to the alert already made about the browser instance,
 // if there is one: one alert, and one freeze, per instance. pid is the
 // process that made this access; it joins the incident too.
@@ -362,7 +370,7 @@ func (e *Engine) joinHost(inst *procinfo.BrowserInstance, pid uint32, hit alerts
 	}
 	a := inc.alert
 	e.mu.Unlock()
-	if e.undone(a) {
+	if !oldNews(hit.Time, a) && e.undone(a) {
 		e.closeIncident(a)
 		return false
 	}
