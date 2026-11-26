@@ -557,10 +557,29 @@ func (e *Engine) baitRef(id string) classify.Bait {
 		e.mu.Unlock()
 		if cfg != nil {
 			b.OwnerDirs = baits.OwnerDirs(s, cfg.User)
-			b.Unadopted = s.Inside != nil && !baits.Adopted(s, cfg.User)
+			b.Unadopted = s.Inside != nil && !e.adopted(s, cfg.User)
 		}
 	}
 	return b
+}
+
+// adopted is baits.Adopted, without ever opening one of ABA's own baits to
+// find out. Where the browser isn't installed, the file it would list its
+// profiles in belongs to ABA's fake browser (a decoy) and is itself a bait,
+// so nothing real has taken an embedded profile through it. And reading it
+// can hang: an instant decision runs while the bait's oplock is held with a
+// program paused inside its open (see package instant), and ABA's own open
+// of that file would wait for the very oplock the decision is holding. That
+// froze find.exe in CI for good, mid-sweep, as it went from Discord's data to
+// the fake Brave's Local State: deciding about it asked whether a real Brave
+// had adopted ABA's fake profile inside it (see probe.go's browserCandidates).
+func (e *Engine) adopted(s baits.Spec, u config.UserInfo) bool {
+	if idx := baits.ProfilesIndex(s, u); idx != "" {
+		if _, bait := e.IsBait(idx); bait {
+			return false
+		}
+	}
+	return baits.Adopted(s, u)
 }
 
 // HandleAccess processes one bait access that a watcher reports after the
