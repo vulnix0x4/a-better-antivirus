@@ -2,6 +2,7 @@ package ui
 
 import (
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -65,13 +66,17 @@ func drive(t *testing.T, in WizardInput, keys ...string) (install.Options, bool,
 }
 
 func TestSetupRecommendedJustEnter(t *testing.T) {
-	// Recommended → phone: not now → auto-update: yes → Install (the review text needs no key).
-	o, ok, err := drive(t, wizardInput(), enter, enter, enter, enter)
+	// Recommended → phone: not now → clippers: yes → miners: yes → auto-update: yes
+	// → Install (the review text needs no key).
+	o, ok, err := drive(t, wizardInput(), enter, enter, enter, enter, enter, enter)
 	if err != nil || !ok {
 		t.Fatalf("ok=%v err=%v", ok, err)
 	}
 	if o.Preset != "balanced" || o.Phone.Enabled() || !o.AutoUpdate || o.LearningDays != 0 || o.CanaryEmail != "" || !o.CleanRecent {
 		t.Fatalf("recommended defaults: %+v", o)
+	}
+	if o.ClipboardBait == nil || !*o.ClipboardBait || o.MinerTrap == nil || !*o.MinerTrap {
+		t.Fatalf("both traps are recommended: %v %v", o.ClipboardBait, o.MinerTrap)
 	}
 	want := 0
 	for _, a := range wizardInput().Plan {
@@ -85,8 +90,9 @@ func TestSetupRecommendedJustEnter(t *testing.T) {
 }
 
 func TestSetupRecommendedWithNtfyNoUpdates(t *testing.T) {
-	// Recommended → phone: ntfy → topic, server, token (the steps above them need no key) → auto-update: n → Install.
-	o, ok, err := drive(t, wizardInput(), enter, down, enter, enter, enter, enter, "n", enter)
+	// Recommended → phone: ntfy → topic, server, token (the steps above them need no key)
+	// → clippers, miners: yes → auto-update: n → Install.
+	o, ok, err := drive(t, wizardInput(), enter, down, enter, enter, enter, enter, enter, enter, "n", enter)
 	if err != nil || !ok {
 		t.Fatalf("ok=%v err=%v", ok, err)
 	}
@@ -100,8 +106,8 @@ func TestSetupRecommendedWithNtfyNoUpdates(t *testing.T) {
 
 func TestSetupCustomizeStrictWithLearning(t *testing.T) {
 	// Customize → baits (keep) → response: Strict → learning: 3 days → phone: not now
-	// → canary: No → recent files: Yes → auto-update: Yes → Install.
-	o, ok, err := drive(t, wizardInput(), down, enter, enter, down, enter, enter, enter, enter, enter, enter, enter)
+	// → clippers, miners: yes → canary: No → recent files: Yes → auto-update: Yes → Install.
+	o, ok, err := drive(t, wizardInput(), down, enter, enter, down, enter, enter, enter, enter, enter, enter, enter, enter, enter)
 	if err != nil || !ok {
 		t.Fatalf("ok=%v err=%v", ok, err)
 	}
@@ -111,7 +117,7 @@ func TestSetupCustomizeStrictWithLearning(t *testing.T) {
 }
 
 func TestSetupCancelAtReview(t *testing.T) {
-	_, ok, err := drive(t, wizardInput(), enter, enter, enter, "n")
+	_, ok, err := drive(t, wizardInput(), enter, enter, enter, enter, enter, "n")
 	if err != nil || ok {
 		t.Fatalf("Cancel must not install: ok=%v err=%v", ok, err)
 	}
@@ -144,9 +150,10 @@ func TestSetupRerunKeepSettings(t *testing.T) {
 }
 
 func TestSetupGoBackAndChangeYourMind(t *testing.T) {
-	// Recommended → phone: ntfy → shift+tab back → up to "Not now" → auto-update → Install.
+	// Recommended → phone: ntfy → shift+tab back → up to "Not now" → clippers, miners
+	// → auto-update → Install.
 	const back, up = "\x1b[Z", "\x1b[A"
-	o, ok, err := drive(t, wizardInput(), enter, down, enter, back, up, enter, enter, enter)
+	o, ok, err := drive(t, wizardInput(), enter, down, enter, back, up, enter, enter, enter, enter, enter)
 	if err != nil || !ok {
 		t.Fatalf("ok=%v err=%v", ok, err)
 	}
@@ -194,5 +201,109 @@ func TestKeepOptionsDoesNotTurnOnUpdatesUnasked(t *testing.T) {
 	in.Existing = ex
 	if o := KeepOptions(in); o.AutoUpdate {
 		t.Fatal("automatic updates were switched on without asking")
+	}
+}
+
+// Recommended, answering No to both traps.
+func TestSetupRecommendedTrapsOff(t *testing.T) {
+	o, ok, err := drive(t, wizardInput(), enter, enter, "n", "n", enter, enter)
+	if err != nil || !ok {
+		t.Fatalf("ok=%v err=%v", ok, err)
+	}
+	if o.ClipboardBait == nil || *o.ClipboardBait || o.MinerTrap == nil || *o.MinerTrap {
+		t.Fatalf("answered No to both: %v %v", o.ClipboardBait, o.MinerTrap)
+	}
+}
+
+// One yes, one no: each answer goes where it belongs.
+func TestSetupRecommendedOnlyClippers(t *testing.T) {
+	o, ok, err := drive(t, wizardInput(), enter, enter, enter, "n", enter, enter)
+	if err != nil || !ok {
+		t.Fatalf("ok=%v err=%v", ok, err)
+	}
+	if o.ClipboardBait == nil || !*o.ClipboardBait || o.MinerTrap == nil || *o.MinerTrap {
+		t.Fatalf("clippers yes, miners no: %v %v", o.ClipboardBait, o.MinerTrap)
+	}
+}
+
+// An install from before setup asked about the traps: "Keep my settings"
+// asks the two questions once, and changes nothing else.
+func TestSetupKeepAsksTrapsOnce(t *testing.T) {
+	in := wizardInput()
+	ex := config.Default()
+	ex.ApplyPreset("strict")
+	ex.AutoUpdate = false
+	ex.Version = config.TrapsAskedSince - 1
+	ex.Baits = []config.BaitConfig{{ID: "desktop-passwords"}}
+	in.Existing = ex
+	// Keep my settings → clippers: yes → miners: no → Apply.
+	o, ok, err := drive(t, in, enter, enter, "n", enter)
+	if err != nil || !ok {
+		t.Fatalf("ok=%v err=%v", ok, err)
+	}
+	if o.ClipboardBait == nil || !*o.ClipboardBait || o.MinerTrap == nil || *o.MinerTrap {
+		t.Fatalf("answers: %v %v", o.ClipboardBait, o.MinerTrap)
+	}
+	if o.Preset != "strict" || o.AutoUpdate || len(o.Baits) == 0 || !o.KeepLearning {
+		t.Fatalf("everything else must be kept: %+v", o)
+	}
+	// Asked once: a config saved by this version isn't asked again.
+	ex.Version = config.CurrentConfigVersion
+	ex.ClipboardBait, ex.MinerTrap = true, false
+	o, ok, err = drive(t, in, enter, enter)
+	if err != nil || !ok {
+		t.Fatalf("ok=%v err=%v", ok, err)
+	}
+	if o.ClipboardBait != nil || o.MinerTrap != nil {
+		t.Fatalf("asked again, or changed: %v %v", o.ClipboardBait, o.MinerTrap)
+	}
+}
+
+// Changing settings shows the traps as they are now.
+func TestSetupChangeShowsTrapsAsTheyAre(t *testing.T) {
+	in := wizardInput()
+	ex := config.Default()
+	ex.Version = config.CurrentConfigVersion
+	ex.Baits = []config.BaitConfig{{ID: "desktop-passwords"}}
+	ex.ClipboardBait, ex.MinerTrap = false, true
+	in.Existing, in.Change = ex, true
+	// Change settings (already selected) → baits → response → phone → traps as
+	// they are → canary → recent → updates → Apply.
+	o, ok, err := drive(t, in, enter, enter, enter, enter, enter, enter, enter, enter, enter, enter)
+	if err != nil || !ok {
+		t.Fatalf("ok=%v err=%v", ok, err)
+	}
+	if o.ClipboardBait == nil || *o.ClipboardBait || o.MinerTrap == nil || !*o.MinerTrap {
+		t.Fatalf("defaults should be what's set: %v %v", o.ClipboardBait, o.MinerTrap)
+	}
+}
+
+// The setup program on a PC that has ABA (and `aba install --yes
+// --keep-settings`): never switches a trap on, asked or not.
+func TestKeepOptionsLeavesTrapsAlone(t *testing.T) {
+	in := wizardInput()
+	ex := config.Default()
+	ex.Version = config.TrapsAskedSince - 1
+	in.Existing = ex
+	if o := KeepOptions(in); o.ClipboardBait != nil || o.MinerTrap != nil {
+		t.Fatalf("traps changed without asking: %v %v", o.ClipboardBait, o.MinerTrap)
+	}
+}
+
+func TestReviewMentionsTraps(t *testing.T) {
+	on := reviewSummary(modeRecommended, 17, "balanced", "", "", false, true, "0", false, trapAnswers{asked: true, clipOK: true, minerOK: true, clippers: true, miners: true})
+	off := reviewSummary(modeRecommended, 17, "balanced", "", "", false, true, "0", false, trapAnswers{asked: true, clipOK: true, minerOK: true})
+	if !strings.Contains(on, "Clippers") || !strings.Contains(on, "Miners") || !strings.Contains(on, "fake mining pool") {
+		t.Errorf("on: %s", on)
+	}
+	if !strings.Contains(off, "aba clipboard on") || !strings.Contains(off, "aba miners on") {
+		t.Errorf("off: %s", off)
+	}
+	keep := reviewSummary(modeKeep, 17, "balanced", "", "", false, true, "0", false, trapAnswers{asked: true, clipOK: true, minerOK: true, miners: true})
+	if !strings.Contains(keep, "And from now on") || !strings.Contains(keep, "aba clipboard on") {
+		t.Errorf("keep: %s", keep)
+	}
+	if k := reviewSummary(modeKeep, 17, "balanced", "", "", false, true, "0", false, trapAnswers{clipOK: true, minerOK: true}); strings.Contains(k, "Miners") {
+		t.Errorf("keep, not asked: %s", k)
 	}
 }

@@ -20,13 +20,15 @@ type IOC struct {
 	Format    string    `json:"format"`
 	Generated time.Time `json:"generated"`
 	Detected  time.Time `json:"detected"`
-	Kind      string    `json:"kind"` // stealer | clipper
+	Kind      string    `json:"kind"` // stealer | clipper | miner
 	File      *IOCFile  `json:"file,omitempty"`
 	Sending   []IOCAddr `json:"sendingTo,omitempty"`
 	// AttackerWallet is the address a clipper swapped in for yours: where
-	// it wanted your money sent.
+	// it wanted your money sent. For a miner, the wallet it mines for.
 	AttackerWallet string `json:"attackerWallet,omitempty"`
-	Note           string `json:"note"`
+	// Pool is the mining pool a miner wanted (it reached ABA's fake one).
+	Pool string `json:"pool,omitempty"`
+	Note string `json:"note"`
 }
 
 // IOCFile is the program, by its fingerprint.
@@ -51,8 +53,16 @@ const iocNote = "Written by A Better Antivirus for you to share if you choose. I
 // MakeIOC builds the shareable record of a.
 func MakeIOC(a *alerts.Alert, home string) IOC {
 	out := IOC{Format: "aba-ioc/1", Generated: time.Now().UTC(), Detected: a.Time.UTC(), Kind: "stealer", Note: iocNote}
-	if a.Kind == alerts.KindClipper {
+	switch a.Kind {
+	case alerts.KindClipper:
 		out.Kind = "clipper"
+	case alerts.KindMiner:
+		out.Kind = "miner"
+		for _, h := range a.Baits {
+			if h.Access == "mine" && out.Pool == "" {
+				out.Pool = h.Path
+			}
+		}
 	}
 	if p := a.Process; p != nil && p.Image != "" {
 		f := &IOCFile{SHA256: p.SHA256, Name: filepath.Base(p.Image), Path: redactHome(p.Image, home), Signed: p.Signature.Valid, Signer: p.Signature.Signer}

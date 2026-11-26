@@ -79,6 +79,17 @@ function AppEntries {
         }
     }
 }
+# The miner trap's name rules (NRPT), and where a pool's name leads.
+function TrapRules {
+    foreach ($k in 'HKLM:\SYSTEM\CurrentControlSet\Services\Dnscache\Parameters\DnsPolicyConfig', 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient\DnsPolicyConfig') {
+        Get-ChildItem $k -ErrorAction SilentlyContinue | Where-Object { $_.PSChildName -like '{ABA0A0A0-*' }
+    }
+}
+function PoolLeadsToTrap {
+    Clear-DnsClientCache
+    $r = Resolve-DnsName pool.supportxmr.com -Type A -DnsOnly -ErrorAction SilentlyContinue | Where-Object { $_.IP4Address }
+    return [bool]($r -and ($r.IP4Address -contains '127.97.98.97'))
+}
 function MachinePath { [Environment]::GetEnvironmentVariable('Path', 'Machine') -split ';' }
 
 # What this release says the aba.exe for this machine is.
@@ -102,11 +113,16 @@ Step 'An option that tries to smuggle in more is refused'
 $code = Run-Setup $Setup 'bad-option' @('/NTFYTOPIC="x --purge"')
 Check ($code -ne 0) "the installer stopped (exit code $code)"
 Check (-not (Test-Path $installDir) -and -not (Get-Service FileAccessMonitor -ErrorAction SilentlyContinue)) 'and installed nothing'
+foreach ($bad in '/MINERS=2', '/CLIPPERS=yes') {
+    $code = Run-Setup $Setup 'bad-trap' @($bad)
+    Check ($code -ne 0) "$bad is refused (exit code $code)"
+}
+Check (-not (Test-Path $installDir)) 'and nothing was installed'
 
 # ---------------------------------------------------------------- install
-Step 'Silent install, with phone alerts on and automatic updates off'
+Step 'Silent install, with phone alerts and the miner trap on, automatic updates off'
 $topic = 'aba-ci-' + [guid]::NewGuid().ToString('N').Substring(0, 16)
-$code = Run-Setup $Setup 'install' @("/NTFYTOPIC=$topic", '/AUTOUPDATE=0')
+$code = Run-Setup $Setup 'install' @("/NTFYTOPIC=$topic", '/AUTOUPDATE=0', '/MINERS=1')
 Check ($code -eq 0) 'the installer reported success (exit code 0)'
 
 Step 'ABA is installed and healthy'
@@ -127,6 +143,10 @@ Check ($cfg.preset -eq 'balanced') 'the response is Balanced'
 $baits = BaitCount
 Check ($baits -ge 10) "$baits baits planted"
 Check ((SetupLog 'install') -match 'Sending a test to your phone') 'a phone test was sent (the ntfy topic reached ABA)'
+Check ($cfg.minerTrap -eq $true) 'the miner trap is on, as asked'
+Check (-not $cfg.clipboardBait) 'the clipboard bait is off: a silent install never switches a trap on by itself'
+Check (WaitFor { @(TrapRules).Count -gt 0 } 60) "the miner trap's name rules are in place ($(@(TrapRules).Count))"
+Check (WaitFor { PoolLeadsToTrap } 60) 'a mining pool''s name leads to the trap'
 Check ((MachinePath) -contains $installDir) 'the program folder is on PATH'
 
 Step 'Installed apps and the Start menu'
@@ -144,12 +164,13 @@ Check ($target -eq $aba) "it opens $target"
 
 # ---------------------------------------------------------------- run it again
 Step 'Running the installer again keeps every setting'
-$code = Run-Setup $Setup 'again' @('/AUTOUPDATE=1', '/PRESET=strict')
+$code = Run-Setup $Setup 'again' @('/AUTOUPDATE=1', '/PRESET=strict', '/MINERS=0', '/CLIPPERS=1')
 Check ($code -eq 0) 'the installer reported success (exit code 0)'
 Check ((SetupLog 'again') -match 'Already set up: yes') 'it saw that ABA was already set up'
 $cfg = Config
 Check ($cfg.autoUpdate -eq $false) 'automatic updates are still off'
 Check ($cfg.preset -eq 'balanced') 'the response is still Balanced'
+Check ($cfg.minerTrap -eq $true -and -not $cfg.clipboardBait) 'the traps are as they were'
 Check ((BaitCount) -eq $baits) "still $baits baits"
 Check ((Get-Service FileAccessMonitor).Status -eq 'Running') 'the service is running again'
 Check (@(AppEntries).Count -eq 1) 'still one entry in Installed apps'
@@ -177,6 +198,8 @@ Check (-not @(AppEntries).Count) 'the Installed apps entry is gone'
 Check (-not (Test-Path $shortcut)) 'the Start menu shortcut is gone'
 Check (-not ((MachinePath) -contains $installDir)) 'the program folder is off PATH'
 Check (-not (Test-Path "$data\config.json")) 'the settings are gone'
+Check (-not @(TrapRules).Count) 'the miner trap''s name rules are gone'
+Check (-not (PoolLeadsToTrap)) 'mining pools'' names resolve normally again'
 # aba.exe can't delete its own folder while it runs; a helper does it right after.
 Check (WaitFor { -not (Test-Path $installDir) } 60) 'the program folder is gone'
 

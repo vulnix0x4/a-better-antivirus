@@ -37,3 +37,17 @@ func contains(xs []string, s string) bool {
 	}
 	return false
 }
+
+func TestMineLines(t *testing.T) {
+	var none *Mine
+	if none.Lines() != nil {
+		t.Error("no miner, no lines")
+	}
+	l := (&Mine{Wallet: "w1", Agent: "XMRig/6.24.0"}).Lines()
+	if len(l) != 2 || l[0] != "Wallet it mines for: w1" || l[1] != "Miner: XMRig/6.24.0" {
+		t.Errorf("%q", l)
+	}
+	if c := Checklist(&Alert{Kind: KindMiner}); len(c) < 4 || !strings.Contains(c[0], "miner") {
+		t.Errorf("miner checklist: %q", c)
+	}
+}

@@ -39,6 +39,13 @@ func TestCreatedSuspended(t *testing.T) {
 
 	sus := start(windows.CREATE_SUSPENDED)
 	pid := uint32(sus.Process.Pid)
+	// A thread created suspended is parked by the kernel only once it's first
+	// scheduled: until then it's "ready", not yet "waiting, suspended". On a
+	// busy machine (CI running other packages' tests alongside) that can take
+	// a moment; ABA only ever asks long after a process started.
+	for end := time.Now().Add(2 * time.Second); time.Now().Before(end) && firstThread(t, pid).State != ThreadWaiting; {
+		time.Sleep(10 * time.Millisecond)
+	}
 	if got, err := CreatedSuspended(pid); err != nil || !got {
 		t.Fatalf("created suspended: %v, %v (first thread %+v)", got, err, firstThread(t, pid))
 	}

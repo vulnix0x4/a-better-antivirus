@@ -18,6 +18,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -25,6 +26,7 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/baits"
 	"github.com/vulnix0x4/a-better-antivirus/internal/canary"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
+	"github.com/vulnix0x4/a-better-antivirus/internal/minertrap"
 	"github.com/vulnix0x4/a-better-antivirus/internal/netguard"
 	"github.com/vulnix0x4/a-better-antivirus/internal/notify"
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
@@ -45,9 +47,14 @@ type Options struct {
 	PhoneMinTier config.Tier
 	CanaryEmail  string // non-empty: create canary tokens
 	CleanRecent  bool
-	KeepLearning bool   // reconfigure: don't reset an active learning period
-	AutoUpdate   bool   // install signed releases automatically
-	Version      string // this build's version, shown where the system lists installed programs
+	KeepLearning bool // reconfigure: don't reset an active learning period
+	AutoUpdate   bool // install signed releases automatically
+	// ClipboardBait and MinerTrap switch those traps on or off. nil leaves
+	// them as they are (off on a first install): nothing switches one on
+	// unless someone chose it.
+	ClipboardBait *bool
+	MinerTrap     *bool
+	Version       string // this build's version, shown where the system lists installed programs
 }
 
 // Step is one unit of work, shown with a spinner by the UI.
@@ -154,6 +161,21 @@ func Steps(o Options) []Step {
 			}
 			cfg.CleanRecent = o.CleanRecent
 			cfg.AutoUpdate = o.AutoUpdate
+			if o.ClipboardBait != nil {
+				cfg.ClipboardBait = *o.ClipboardBait
+			}
+			if o.MinerTrap != nil {
+				cfg.MinerTrap = *o.MinerTrap
+			}
+			if !minertrap.Supported() {
+				cfg.MinerTrap = false
+			}
+			if !cfg.MinerTrap {
+				// The service puts the redirect in place when the trap is on;
+				// off, there must be none, service or not. (The service
+				// removes it too, and `aba doctor` says if any is left.)
+				minertrap.Remove()
+			}
 			cfg.Version = config.CurrentConfigVersion
 			cfg.Baits = nil
 			selected := map[string]bool{}
@@ -185,7 +207,7 @@ func Steps(o Options) []Step {
 			if cfg.AutoUpdate {
 				upd = "automatic updates"
 			}
-			return fmt.Sprintf("%s · %d baits · %s", cfg.PresetName(), len(cfg.Baits), upd), config.SaveConfig(cfg)
+			return fmt.Sprintf("%s · %d baits · %s%s", cfg.PresetName(), len(cfg.Baits), upd, TrapsSummary(cfg)), config.SaveConfig(cfg)
 		}},
 	}...)
 	steps = append(steps, detectionSteps()...)
@@ -251,6 +273,25 @@ func Steps(o Options) []Step {
 		}})
 	}
 	return steps
+}
+
+// ClipboardBaitSupported reports whether the clipboard bait works here
+// (package clipbait: Windows only for now). The miner trap's is
+// minertrap.Supported.
+func ClipboardBaitSupported() bool { return runtime.GOOS == "windows" }
+
+// TrapsSummary is " · clippers and miners caught" (or one of them, or
+// nothing), for the "Saving your settings" line.
+func TrapsSummary(cfg *config.Config) string {
+	switch {
+	case cfg.ClipboardBait && cfg.MinerTrap:
+		return " · clipper and miner traps on"
+	case cfg.ClipboardBait:
+		return " · clipper trap on"
+	case cfg.MinerTrap:
+		return " · miner trap on"
+	}
+	return ""
 }
 
 // SendTest sends a test alert through the given phone settings.
@@ -541,6 +582,13 @@ func UninstallSteps(purge bool) []Step {
 	var canaryLinks []string
 	steps := []Step{
 		{Name: "Stopping and removing the service", Run: func() (string, error) { return "", svcctl.Delete() }},
+		{Name: "Removing the miner trap", Run: func() (string, error) {
+			n, err := minertrap.Remove()
+			if n == 0 && err == nil {
+				return "it wasn't on", nil
+			}
+			return "mining pools' names resolve normally again", err
+		}},
 		{Name: "Releasing frozen processes and network blocks", Soft: true, Run: func() (string, error) {
 			rep, err := respond.Release("")
 			if err != nil {

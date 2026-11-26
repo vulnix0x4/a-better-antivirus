@@ -112,3 +112,48 @@ func Connections(pids []uint32) ([]Conn, error) {
 	}
 	return out, nil
 }
+
+// ConnOwner is the process that owns the end of a TCP connection at local
+// talking to remote (both on this PC: a program connected to one of ABA's
+// own listeners). 0 if no such connection is open.
+func ConnOwner(local, remote netip.AddrPort) (uint32, error) {
+	le := binary.LittleEndian
+	if local.Addr().Is4() {
+		b, err := table(procGetExtendedTcpTable, windows.AF_INET, tcpTableOwnerPIDAll)
+		if err != nil {
+			return 0, err
+		}
+		if len(b) < 4 {
+			return 0, nil
+		}
+		n := le.Uint32(b)
+		const row = 24
+		for i := uint32(0); i < n && int(4+(i+1)*row) <= len(b); i++ {
+			r := b[4+i*row:]
+			la := netip.AddrPortFrom(netip.AddrFrom4([4]byte(r[4:8])), port(le.Uint32(r[8:])))
+			ra := netip.AddrPortFrom(netip.AddrFrom4([4]byte(r[12:16])), port(le.Uint32(r[16:])))
+			if la == local && ra == remote {
+				return le.Uint32(r[20:]), nil
+			}
+		}
+		return 0, nil
+	}
+	b, err := table(procGetExtendedTcpTable, windows.AF_INET6, tcpTableOwnerPIDAll)
+	if err != nil {
+		return 0, err
+	}
+	if len(b) < 4 {
+		return 0, nil
+	}
+	n := le.Uint32(b)
+	const row = 56
+	for i := uint32(0); i < n && int(4+(i+1)*row) <= len(b); i++ {
+		r := b[4+i*row:]
+		la := netip.AddrPortFrom(netip.AddrFrom16([16]byte(r[0:16])), port(le.Uint32(r[20:])))
+		ra := netip.AddrPortFrom(netip.AddrFrom16([16]byte(r[24:40])), port(le.Uint32(r[44:])))
+		if la == local && ra == remote {
+			return le.Uint32(r[52:]), nil
+		}
+	}
+	return 0, nil
+}

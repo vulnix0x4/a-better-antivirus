@@ -41,6 +41,10 @@ const (
 	// truncate, append). Nothing has a reason to rewrite a bait; ransomware
 	// and wipers rewrite everything.
 	OpWrite
+	// OpMine: logged in to mine cryptocurrency at the fake mining pool ABA's
+	// miner trap runs on this PC (see package minertrap). Path is empty and
+	// Mine says what it asked for.
+	OpMine
 )
 
 // Swap is what a clipper did to the clipboard bait.
@@ -51,6 +55,19 @@ type Swap struct {
 	How         string // how the program was pinned down
 	LatencyMS   int64  // how quickly it swapped
 	Keyed       bool   // the bait was a real address whose key ABA holds
+}
+
+// Mine is what a program caught by the miner trap asked for.
+type Mine struct {
+	Pool     string // the pool name it wanted ("" if it can't be told)
+	PoolSure bool   // it said so (in TLS); otherwise Pool is the name looked up just before
+	Port     int
+	TLS      bool
+	Method   string // the login it sent ("login", "mining.authorize", ...)
+	Wallet   string // the wallet it mines for
+	Pass     string
+	Agent    string // the miner's own name and version
+	Algo     []string
 }
 
 // Access is one program touching one bait.
@@ -80,4 +97,5 @@ type Access struct {
 	Helpers []uint32
 
 	Swap *Swap // OpSwap only
+	Mine *Mine // OpMine only
 }

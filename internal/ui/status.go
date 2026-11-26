@@ -159,6 +159,22 @@ func RenderStatus(d StatusData) string {
 			resp = append(resp, Warn.Render("learning, "+Until(cfg.LearningUntil))+Dim.Render(": only critical is stopped"))
 		}
 	}
+	if clipOK, minerOK := TrapsAvailable(); !d.Limited && (clipOK || minerOK) {
+		var t []string
+		onOff := func(name string, on bool) string {
+			if on {
+				return name + " " + Good.Render("on")
+			}
+			return name + " " + Fainter.Render("off")
+		}
+		if clipOK {
+			t = append(t, onOff("clippers", cfg.ClipboardBait))
+		}
+		if minerOK {
+			t = append(t, onOff("miners", cfg.MinerTrap))
+		}
+		resp = append(resp, Dim.Render("traps       ")+strings.Join(t, Dim.Render(" · ")))
+	}
 	if st != nil && st.Isolation != nil {
 		resp = append(resp, Dim.Render("network     ")+Bad.Bold(true).Render("isolated"))
 	} else {
@@ -470,6 +486,12 @@ func AlertDetail(a *alerts.Alert) string {
 				// byte; one found by who woke up may have read the bait's
 				// fake contents first.)
 				when = "after it opened the bait"
+			}
+			switch {
+			case a.Kind == alerts.KindMiner || (len(a.Baits) > 0 && a.Baits[0].Access == "mine"):
+				when = "after it logged in to mine"
+			case a.Kind == alerts.KindClipper || (len(a.Baits) > 0 && a.Baits[0].Access == "swap"):
+				when = "after it swapped the address"
 			}
 			b.WriteString("  " + Good.Render(fmt.Sprintf("%d ms", a.LatencyMS)) + Dim.Render(" "+when) + "\n")
 		}
