@@ -134,3 +134,31 @@ func writableRegion(line string) (lo, hi uint64, ok bool) {
 	hi, err2 := strconv.ParseUint(b, 16, 64)
 	return lo, hi, err1 == nil && err2 == nil && hi > lo
 }
+
+// CodeFiles lists the program files a process runs code from: its own
+// program and the libraries it has mapped to run (/proc/<pid>/maps, the
+// executable mappings).
+func CodeFiles(pid uint32) ([]string, error) {
+	maps, err := os.ReadFile(fmt.Sprintf("/proc/%d/maps", pid))
+	if err != nil {
+		return nil, err
+	}
+	return codeFilesOf(string(maps)), nil
+}
+
+func codeFilesOf(maps string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, line := range strings.Split(maps, "\n") {
+		f := strings.Fields(line)
+		if len(f) < 6 || len(f[1]) < 3 || f[1][2] != 'x' {
+			continue
+		}
+		p := strings.TrimSuffix(strings.Join(f[5:], " "), " (deleted)")
+		if strings.HasPrefix(p, "/") && !seen[p] {
+			seen[p] = true
+			out = append(out, p)
+		}
+	}
+	return out
+}

@@ -96,7 +96,9 @@ func decide(f facts, a *alerts.Autopsy) {
 		}
 		present++
 		if c.Watched {
-			watched = append(watched, c.Name)
+			if !hasName(watched, c.Name) { // two stores can share a name (the Credential Manager's two folders)
+				watched = append(watched, c.Name)
+			}
 		} else {
 			notWatched = append(notWatched, c.Name+": "+c.Why)
 		}
@@ -379,4 +381,13 @@ func advice(id, kind, name string) []string {
 		return []string{n + ": sign out of all devices in it and change its password."}
 	}
 	return []string{n + ": change the passwords saved in it."}
+}
+
+func hasName(list []string, n string) bool {
+	for _, x := range list {
+		if x == n {
+			return true
+		}
+	}
+	return false
 }

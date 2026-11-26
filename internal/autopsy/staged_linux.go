@@ -2,6 +2,7 @@ package autopsy
 
 import (
 	"os"
+	"path/filepath"
 	"syscall"
 	"time"
 )
@@ -23,4 +24,12 @@ func appeared(fi os.FileInfo) time.Time {
 func DefaultStagingDirs(c *Case) []Dir {
 	out := []Dir{{Path: "/tmp", Depth: 3}, {Path: "/var/tmp", Depth: 2}, {Path: "/dev/shm", Depth: 2}}
 	return append(out, homeDirs(c)...)
+}
+
+// StartupDirs are the folders whose programs start at every sign-in.
+func StartupDirs(c *Case) []string {
+	if c.User.Profile == "" {
+		return []string{"/etc/xdg/autostart"}
+	}
+	return []string{filepath.Join(c.User.Profile, ".config", "autostart"), "/etc/xdg/autostart"}
 }

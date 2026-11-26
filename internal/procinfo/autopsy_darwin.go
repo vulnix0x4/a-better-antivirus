@@ -62,3 +62,17 @@ func parseLsofFiles(s string) []string {
 func ReadMemory(pid uint32, limit int64, fn func(base uint64, b []byte) bool) (int64, error) {
 	return machmem.Read(pid, limit, fn)
 }
+
+// CodeFiles lists the program files a process runs code from: its own
+// program and the libraries it has loaded (lsof's "txt" files).
+func CodeFiles(pid uint32) ([]string, error) {
+	out, err := exec.Command("/usr/sbin/lsof", "-nP", "-a", "-p", strconv.FormatUint(uint64(pid), 10), "-d", "txt", "-F", "tn").Output()
+	if err != nil && len(out) == 0 {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) && ee.ExitCode() == 1 {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return parseLsofFiles(string(out)), nil
+}

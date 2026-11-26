@@ -2,6 +2,7 @@ package procinfo
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -90,5 +91,19 @@ func TestSockAddrAndArgs(t *testing.T) {
 	}
 	if got := unescape(`/mnt/my\040disk`); got != "/mnt/my disk" {
 		t.Errorf("unescape = %q", got)
+	}
+}
+
+func TestCodeFilesOf(t *testing.T) {
+	maps := `55d0c0a00000-55d0c0a20000 r--p 00000000 08:01 131 /tmp/_MEIab12/stealer
+55d0c0a20000-55d0c0a80000 r-xp 00020000 08:01 131 /tmp/_MEIab12/stealer
+7f00a0000000-7f00a0100000 r-xp 00000000 08:01 200 /tmp/_MEIab12/libpython3.10.so.1.0
+7f00a0100000-7f00a0200000 rw-p 00000000 00:00 0 [heap]
+7f00a0200000-7f00a0300000 r-xp 00000000 08:01 201 /tmp/_MEIab12/lib dir/x.so (deleted)
+7ffd00000000-7ffd00021000 r-xp 00000000 00:00 0 [vdso]`
+	got := codeFilesOf(maps)
+	want := []string{"/tmp/_MEIab12/stealer", "/tmp/_MEIab12/libpython3.10.so.1.0", "/tmp/_MEIab12/lib dir/x.so"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("codeFilesOf = %q, want %q", got, want)
 	}
 }
