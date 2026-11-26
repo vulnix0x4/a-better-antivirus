@@ -15,7 +15,7 @@
 - In the lab, Phemedrone got "nothing left this PC". Umbral and Blank Grabber got "it sent something": each sent
   the Discord login it had just read to discord.com (to check it) about a tenth of a second after reading it,
   before the freeze landed. ABA can't see inside encrypted traffic, so it says to assume the login was taken.
-- The popup, the phone alert and `aba autopsy` say so in plain words; `aba doctor` shows whether the network record
+- The popup, the phone alert and `aba autopsy` say so in plain words; the `aba` dashboard shows whether the network record
   is running. On Linux and macOS the autopsy says it can't tell yet.
 
 **The autopsy, tested against real stealers**
