@@ -132,7 +132,11 @@ func Render(a *alerts.Alert) []Section {
 		addrs = append(addrs, l)
 	}
 	if ap.AttackerWallet != "" {
-		addrs = append(addrs, "attacker wallet  "+ap.AttackerWallet+"  (what it swapped in for yours)")
+		note := ap.WalletNote
+		if note == "" {
+			note = "what it swapped in for yours"
+		}
+		addrs = append(addrs, "attacker wallet  "+ap.AttackerWallet+"  ("+note+")")
 	}
 	if ap.MemoryScanned > 0 {
 		addrs = append(addrs, fmt.Sprintf("(%s of its memory looked through.)", size(ap.MemoryScanned)))

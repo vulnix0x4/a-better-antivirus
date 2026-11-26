@@ -68,13 +68,19 @@ func Details(a *alerts.Alert) string {
 	// Message boxes use a proportional font, so no column alignment: one
 	// labelled line per fact, long paths on their own line.
 	var b strings.Builder
-	fmt.Fprintln(&b, a.Summary)
+	fmt.Fprintln(&b, sentence(a.Summary))
 	if p := a.Process; p != nil {
 		fmt.Fprintf(&b, "\nProgram: %s (pid %d)\n", a.ExeName(), p.PID)
 		if p.Image != "" {
 			fmt.Fprintln(&b, p.Image)
 		}
-		fmt.Fprintf(&b, "%s: %s\n", vouchLabel, p.Signature)
+		sig := p.Signature.String()
+		if a.Kind == alerts.KindMiner && p.Signature.Valid {
+			// A signed system program caught mining was hollowed: say so,
+			// or "signed by Microsoft" reads like a false alarm.
+			sig += ". The file itself is genuine: the miner is hiding inside it"
+		}
+		fmt.Fprintf(&b, "%s: %s\n", vouchLabel, sig)
 		if p.Origin != nil {
 			fmt.Fprintln(&b, p.Origin.Line(p.Image))
 		}
@@ -84,6 +90,9 @@ func Details(a *alerts.Alert) string {
 	}
 	for _, h := range a.Baits {
 		fmt.Fprintf(&b, "\nIt %s: %s\n%s\n", accessVerb(h.Access), h.Name, h.Path)
+	}
+	for _, l := range a.Mine.Lines() {
+		fmt.Fprintln(&b, l)
 	}
 	if len(a.Actions) > 0 {
 		fmt.Fprintln(&b, "\nWhat ABA did:")
@@ -123,6 +132,28 @@ func ShowPopup(a *alerts.Alert, cli string) {
 		case idNo:
 			if cli != "" && len(no) > 0 {
 				RunElevated(cli, no...)
+			}
+		}
+	case frozen && a.Kind == alerts.KindMiner:
+		// Someone who mines on purpose did start it: unfreezing it is one
+		// click, but it can't mine until the trap is off.
+		text := body + "\n" + a.ExeName() + " was frozen as it tried to mine cryptocurrency.\n" +
+			"Hidden miners come with cracked games, cheats and \"free\" tools. Whatever started this one may still be on this " + platform.PC + " and start it again: run a full antivirus scan.\n\n" +
+			"Kill it?\n" +
+			"Yes = Kill it (recommended)\n" +
+			"No = It's my own miner: unfreeze it (then turn the miner trap off with `aba miners off`, or it has nowhere to mine)\n" +
+			"Cancel = Decide later (it stays frozen)"
+		if isolated {
+			text += "\n\nYour " + platform.PC + " is isolated from the network. When it's safe, run `aba release` as admin."
+		}
+		switch messageBox(title, text, mbYesNoCancel|mbIconError) {
+		case idYes:
+			if cli != "" {
+				RunElevated(cli, "kill", a.ID)
+			}
+		case idNo:
+			if cli != "" {
+				RunElevated(cli, "resume", a.ID)
 			}
 		}
 	case frozen:
@@ -257,6 +288,10 @@ func accessVerb(access string) string {
 		return "deleted"
 	case "write":
 		return "changed"
+	case "swap":
+		return "swapped the address on"
+	case "mine":
+		return "tried to mine at"
 	}
 	return "read"
 }
@@ -266,4 +301,13 @@ func procBase(p string) string {
 		return p[i+1:]
 	}
 	return p
+}
+
+// sentence starts s with a capital letter. Verdict reasons are written in
+// lower case (they're also list items); the popup's first line is a sentence.
+func sentence(s string) string {
+	for i, r := range s {
+		return strings.ToUpper(string(r)) + s[i+len(string(r)):]
+	}
+	return s
 }

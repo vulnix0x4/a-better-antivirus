@@ -191,6 +191,17 @@ function Online {
     foreach ($u in "https://www.microsoft.com", "https://github.com") { & curl.exe -s -o NUL --max-time 8 $u; if ($LASTEXITCODE -eq 0) { return $true } }
     return $false
 }
+# The miner trap's name rules (NRPT), and where a name leads.
+function TrapRules {
+    foreach ($k in 'HKLM:\SYSTEM\CurrentControlSet\Services\Dnscache\Parameters\DnsPolicyConfig', 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient\DnsPolicyConfig') {
+        Get-ChildItem $k -ErrorAction SilentlyContinue | Where-Object { $_.PSChildName -like '{ABA0A0A0-*' }
+    }
+}
+function Resolves([string]$name) {
+    Clear-DnsClientCache
+    @(Resolve-DnsName $name -Type A -DnsOnly -ErrorAction SilentlyContinue | Where-Object { $_.IP4Address } | ForEach-Object { $_.IP4Address })
+}
+$trapIP = '127.97.98.97'
 function WfpRules {
     $f = Join-Path $env:TEMP 'wfp.xml'
     netsh wfp show filters file="$f" | Out-Null
@@ -278,6 +289,7 @@ Check (@($st.baits.PSObject.Properties).Count -ge 10) "$(@($st.baits.PSObject.Pr
 Check ((AuditFS) -match 'Success') 'file auditing on'
 $cfg = Get-Content (Join-Path $data 'config.json') -Raw | ConvertFrom-Json
 Check ($cfg.autoUpdate -eq $true) 'auto-update on by default'
+Check (-not $cfg.clipboardBait -and -not $cfg.minerTrap) 'a silent install leaves both traps off'
 Check ($cfg.version -ge 2) 'config is version 2'
 Aba update --check
 Aba doctor
@@ -336,6 +348,44 @@ $reloads = Reloads
 Aba clipboard off
 WaitReloaded $reloads
 Start-Sleep -Seconds 3   # let the guard go, and everything settle, before the next fake stealer
+
+Step 'Miner trap: pool names lead to a fake pool, a fake miner is caught, nothing else changes'
+$poolBefore = Resolves 'pool.supportxmr.com'
+Check (-not ($poolBefore -contains $trapIP)) "trap off: a pool's name resolves normally ($($poolBefore -join ', '))"
+Check (-not @(TrapRules).Count) 'trap off: no name rules'
+$reloads = Reloads
+Aba miners on
+WaitReloaded $reloads
+Check (WaitFor { @(TrapRules).Count -gt 0 } 60) "the name rules are in place ($(@(TrapRules).Count))"
+Check (WaitFor { (Resolves 'pool.supportxmr.com') -contains $trapIP } 60) 'pool.supportxmr.com leads to the trap'
+Check ((Resolves 'pool.hashvault.pro') -contains $trapIP) 'so does pool.hashvault.pro'
+Check ((Resolves 'xmr-eu1.nanopool.org') -contains $trapIP) 'and a name under another pool'
+foreach ($n in 'www.microsoft.com', 'github.com', 'f2pool.com', 'ntfy.sh') {
+    $ips = Resolves $n
+    Check ($ips.Count -gt 0 -and -not ($ips -contains $trapIP)) "$n still resolves normally ($($ips -join ', '))"
+}
+Check (Online) 'the internet still works'
+Snap
+Aba miners test
+$mine = Fresh | Where-Object { $_.test -and $_.baits -and $_.baits[0].access -eq 'mine' } | Select-Object -Last 1
+Check $mine "the fake miner was caught logging in at the fake pool ($($mine.title))"
+Check (Did $mine 'freeze') 'it was frozen'
+Check (($mine.verdict.reasons -join ' ') -match 'ABA-TEST-not-a-real-wallet') 'the alert names the wallet it mines for'
+# A browser opening a pool's website gets a page saying why, and isn't caught.
+# (Over HTTPS: port 80 can be held by Windows' own web server, as on CI
+# runners, and the trap then does without it. -k: the trap's certificate is
+# its own, which a browser warns about first.)
+Snap
+$page = (& curl.exe -sk --max-time 10 https://supportxmr.com/) -join "`n"
+Check ($page -match 'miner trap') 'a pool''s website explains why it doesn''t open'
+Start-Sleep -Seconds 2
+Check (-not @(Fresh | Where-Object { $_.baits -and $_.baits[0].access -eq 'mine' }).Count) 'and opening it isn''t taken for mining'
+$reloads = Reloads
+Aba miners off
+WaitReloaded $reloads
+Check (-not @(TrapRules).Count) 'off: no name rules are left'
+Check (WaitFor { $r = Resolves 'pool.supportxmr.com'; $r.Count -gt 0 -and -not ($r -contains $trapIP) } 30) 'off: pool names resolve normally again'
+Start-Sleep -Seconds 3   # let everything settle before the next fake stealer
 
 Step 'Real stealer: frozen, blocked, then killed'
 $s1 = Stealer 'stealer1' $desktopBait
@@ -806,9 +856,18 @@ Aba status --once
 Aba learn --stop
 Aba doctor
 
-Step 'Turn auto-update off unattended'
-Aba install --yes --preset balanced --learning 0 --auto-update=false
-Check ((Get-Content (Join-Path $data 'config.json') -Raw | ConvertFrom-Json).autoUpdate -eq $false) '--auto-update=false turns it off'
+Step 'Turn auto-update off, and the miner trap on, unattended'
+Aba install --yes --preset balanced --learning 0 --auto-update=false --miners
+$cfg = Get-Content (Join-Path $data 'config.json') -Raw | ConvertFrom-Json
+Check ($cfg.autoUpdate -eq $false) '--auto-update=false turns it off'
+Check ($cfg.minerTrap -eq $true -and -not $cfg.clipboardBait) '--miners turns the miner trap on, and nothing else'
+Check (WaitFor { (Resolves 'pool.supportxmr.com') -contains $trapIP } 60) 'pool names lead to the trap'
+Aba install --yes --keep-settings
+Check ((Get-Content (Join-Path $data 'config.json') -Raw | ConvertFrom-Json).minerTrap -eq $true) '--keep-settings keeps it'
+# (Here, not earlier: doctor opens every bait to check it, which lifts instant
+# freeze off each for a moment, and no fake stealer follows from here on.)
+$doc = (& $Aba doctor 2>&1 | Out-String)
+Check ($doc -match 'Miner trap\s+on: \d+ mining pools') "aba doctor shows the miner trap on: $(($doc -split "`n" | Select-String 'Miner trap') -join '')"
 
 Step 'What the flight recorder cost'
 # Informational, for deciding between audit rules and other ways of watching:
@@ -832,6 +891,8 @@ Check (-not (Test-Path "$env:APPDATA\Opera Software")) 'fake app folders removed
 Check (-not (Test-Path $data)) 'data folder purged'
 Check (-not (Test-Path $installDir) -or @(Get-ChildItem $installDir -Recurse -File).Count -eq 0) 'program files removed'
 Check ((WfpRules) -eq 0) 'no WFP rules left'
+Check (-not @(TrapRules).Count) 'no miner trap name rules left'
+Check (WaitFor { $r = Resolves 'pool.supportxmr.com'; $r.Count -gt 0 -and -not ($r -contains $trapIP) } 30) 'mining pools'' names resolve normally again'
 Check ((AuditFS) -eq $auditBefore) "audit policy restored ($auditBefore)"
 $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
 Check (-not ($machinePath -split ';' | Where-Object { $_ -eq $installDir })) 'removed from PATH'

@@ -14,7 +14,24 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/baits"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/install"
+	"github.com/vulnix0x4/a-better-antivirus/internal/minertrap"
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
+)
+
+// TrapsAvailable says which traps setup offers: the clipboard bait and the
+// miner trap, where they work. (The previews show the Windows screens from
+// any system.)
+var TrapsAvailable = func() (clipboard, miners bool) {
+	return install.ClipboardBaitSupported(), minertrap.Supported()
+}
+
+// The two traps' questions, in the words of the setup program too
+// (installer/aba.iss).
+const (
+	clippersTitle = "Detect clippers?"
+	clippersWhy   = "Clippers swap a crypto wallet address you copy for the attacker's. When you're away from your PC, ABA puts a fake address on the clipboard and freezes any program that swaps it. Your clipboard is put back."
+	minersTitle   = "Detect hidden crypto miners?"
+	minersWhy     = "Hidden crypto miners use your " + platform.PC + " to make money for someone else. ABA points the known mining pools at a fake one on this " + platform.PC + " and freezes any program that tries to mine there. Turn it off if you mine on purpose."
 )
 
 // WizardInput is what the wizard knows before asking.
@@ -65,6 +82,8 @@ func KeepOptions(in WizardInput) install.Options {
 		// whether it wants them. Nobody is being asked here, so nothing changes.
 		o.AutoUpdate = in.Existing.AutoUpdate
 	}
+	// The same for the traps: what's there stays (nil: as it is).
+	o.ClipboardBait, o.MinerTrap = nil, nil
 	return o
 }
 
@@ -206,6 +225,28 @@ func newWizard(in WizardInput) *wizard {
 	// Configs from before auto-update existed haven't chosen yet: suggest on.
 	updateUnasked := ex != nil && ex.Version < 2
 	autoUpdate := ex == nil || updateUnasked || ex.AutoUpdate
+	// The traps: recommended, so suggested on, except to an install that
+	// already chose (from config version 5, setup asks).
+	clipOK, minerOK := TrapsAvailable()
+	trapsUnasked := ex != nil && ex.Version < config.TrapsAskedSince
+	catchClippers := ex == nil || trapsUnasked || ex.ClipboardBait
+	catchMiners := ex == nil || trapsUnasked || ex.MinerTrap
+	var trapFields []huh.Field
+	if clipOK {
+		trapFields = append(trapFields, huh.NewConfirm().Title(clippersTitle).
+			Description(Good.Render("Recommended.")+" "+clippersWhy).
+			Affirmative("Yes, detect them").Negative("No").Value(&catchClippers))
+	}
+	if minerOK {
+		trapFields = append(trapFields, huh.NewConfirm().Title(minersTitle).
+			Description(Good.Render("Recommended, unless you mine crypto on this "+platform.PC+" yourself.")+" "+minersWhy).
+			Affirmative("Yes, detect them").Negative("No").Value(&catchMiners))
+	}
+	trapsAsked := func() bool { return len(trapFields) > 0 && (mode != modeKeep || trapsUnasked) }
+	trapGroup := trapFields
+	if len(trapGroup) == 0 {
+		trapGroup = []huh.Field{huh.NewNote()} // never shown: a group can't be empty
+	}
 	confirm := true
 
 	custom := func() bool { return mode == modeCustom }
@@ -321,6 +362,8 @@ func newWizard(in WizardInput) *wizard {
 			).Value(&minTier),
 		).WithHideFunc(func() bool { return !custom() || phoneKind == "" }),
 
+		huh.NewGroup(trapGroup...).WithHideFunc(func() bool { return !trapsAsked() }),
+
 		huh.NewGroup(
 			huh.NewConfirm().Title("Add canary tokens?").
 				Description("ABA hides fake AWS keys and a tracking link inside your baits, made with the free canarytokens.org service. If a stealer gets away with your files and USES them later, you get an email, even if this "+platform.PC+" never got the chance to warn you.\n"+
@@ -344,8 +387,12 @@ func newWizard(in WizardInput) *wizard {
 
 		huh.NewGroup(
 			huh.NewNote().Title("Ready").DescriptionFunc(func() string {
-				return noteText(reviewSummary(mode, len(o.Baits)+len(o.CustomBaits), o.Preset, phoneKind, ntfyTopic, canaryOn && custom() || (mode == modeKeep && canaryEmail != ""), autoUpdate, learning, warnResponds(o.Preset, warnActs)))
-			}, []any{&mode, &o.Baits, &o.Preset, &phoneKind, &ntfyTopic, &canaryOn, &autoUpdate, &learning, &warnActs}),
+				tr := trapAnswers{asked: trapsAsked(), clipOK: clipOK, minerOK: minerOK, clippers: catchClippers, miners: catchMiners}
+				if !tr.asked && ex != nil {
+					tr.clippers, tr.miners = ex.ClipboardBait, ex.MinerTrap
+				}
+				return noteText(reviewSummary(mode, len(o.Baits)+len(o.CustomBaits), o.Preset, phoneKind, ntfyTopic, canaryOn && custom() || (mode == modeKeep && canaryEmail != ""), autoUpdate, learning, warnResponds(o.Preset, warnActs), tr))
+			}, []any{&mode, &o.Baits, &o.Preset, &phoneKind, &ntfyTopic, &canaryOn, &autoUpdate, &learning, &warnActs, &catchClippers, &catchMiners}),
 			huh.NewConfirm().Title(map[bool]string{true: "Go ahead?", false: "Install A Better Antivirus?"}[ex != nil]).
 				Affirmative(map[bool]string{true: "Apply", false: "Install"}[ex != nil]).Negative("Cancel").Value(&confirm),
 		),
@@ -354,6 +401,16 @@ func newWizard(in WizardInput) *wizard {
 	finish := func() (install.Options, bool) {
 		if !confirm {
 			return o, false
+		}
+		// The traps: set as answered, and only when they were asked about.
+		o.ClipboardBait, o.MinerTrap = nil, nil
+		if trapsAsked() {
+			if clipOK {
+				o.ClipboardBait = &catchClippers
+			}
+			if minerOK {
+				o.MinerTrap = &catchMiners
+			}
 		}
 		if mode == modeKeep && ex != nil {
 			// Same settings as now; only the install itself is redone.
@@ -431,11 +488,42 @@ func presetDetail(id string) string {
 	return ""
 }
 
+// trapAnswers is what the review says about the traps.
+type trapAnswers struct {
+	asked            bool // the questions were on screen
+	clipOK, minerOK  bool // offered on this system
+	clippers, miners bool
+}
+
+// rows are the review's lines about the traps.
+func (t trapAnswers) rows() [][2]string {
+	var rows [][2]string
+	if t.clipOK {
+		if t.clippers {
+			rows = append(rows, [2]string{"Clippers", "detected" + Fainter.Render("  ·  a fake wallet address when you're away from your PC")})
+		} else {
+			rows = append(rows, [2]string{"Clippers", Fainter.Render("not watched  ·  turn on later with ") + Code.Render("aba clipboard on")})
+		}
+	}
+	if t.minerOK {
+		if t.miners {
+			rows = append(rows, [2]string{"Miners", "detected" + Fainter.Render("  ·  a fake mining pool on this "+platform.PC)})
+		} else {
+			rows = append(rows, [2]string{"Miners", Fainter.Render("not watched  ·  turn on later with ") + Code.Render("aba miners on")})
+		}
+	}
+	return rows
+}
+
 // reviewSummary is the last screen before installing: what's about to happen.
-func reviewSummary(mode string, nBaits int, preset, phone, topic string, canary, autoUpdate bool, learning string, learningMatters bool) string {
+func reviewSummary(mode string, nBaits int, preset, phone, topic string, canary, autoUpdate bool, learning string, learningMatters bool, traps trapAnswers) string {
 	if mode == modeKeep {
-		return "ABA will be reinstalled in place with your current settings:\n" +
+		s := "ABA will be reinstalled in place with your current settings:\n" +
 			Fainter.Render("program files, the background service, Windows auditing and your baits are checked and repaired.")
+		if traps.asked {
+			s += "\n\nAnd from now on:\n" + KV(traps.rows())
+		}
+		return s
 	}
 	name := map[string]string{"alert": "Alert only", "balanced": "Balanced", "strict": "Strict", "custom": "Custom"}[preset]
 	rows := [][2]string{
@@ -456,6 +544,7 @@ func reviewSummary(mode string, nBaits int, preset, phone, topic string, canary,
 	if canary {
 		rows = append(rows, [2]string{"Canary", "on"})
 	}
+	rows = append(rows, traps.rows()...)
 	if autoUpdate {
 		rows = append(rows, [2]string{"Updates", "automatic" + Fainter.Render("  ·  signed releases only")})
 	} else {

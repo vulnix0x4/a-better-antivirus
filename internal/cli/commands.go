@@ -1143,7 +1143,7 @@ func instantCmd() *cobra.Command {
 func clipboardCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "clipboard [on|off|test]",
-		Short: "Catch clippers with a fake wallet address on the clipboard",
+		Short: "Detect clippers with a fake wallet address on the clipboard",
 		Long: "Clippers are malware that swap a crypto wallet address you copied for the attacker's, so\n" +
 			"the money you send goes to them. With this on, while nobody is using the PC, ABA now and\n" +
 			"then puts a bait wallet address on the clipboard for a few seconds and watches it. If a\n" +

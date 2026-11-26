@@ -7,6 +7,7 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/alerts"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
+	"github.com/vulnix0x4/a-better-antivirus/internal/provenance"
 )
 
 func TestPopupTextReadsCleanly(t *testing.T) {
@@ -27,5 +28,31 @@ func TestPopupTextReadsCleanly(t *testing.T) {
 	}
 	if testing.Verbose() {
 		t.Log("\n" + got)
+	}
+}
+
+func TestMinerPopupSaysTheSignedFileWasHijacked(t *testing.T) {
+	a := &alerts.Alert{Kind: alerts.KindMiner, Summary: "it tried to mine cryptocurrency on this PC",
+		Mine: &alerts.Mine{Wallet: "43iNancbmDEMOkv43M"},
+		Process: &alerts.Process{PID: 6892, Image: `C:\Windows\System32\conhost.exe`,
+			Signature: provenance.Result{Signed: true, Valid: true, Signer: "Microsoft Windows", Catalog: true}}}
+	got := Details(a)
+	for _, want := range []string{"It tried to mine cryptocurrency", "The file itself is genuine: the miner is hiding inside it", "Wallet it mines for: 43iNancbmDEMOkv43M"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+	// Other alerts keep their signature line as it was.
+	a.Kind = ""
+	if got := Details(a); strings.Contains(got, "hiding inside") {
+		t.Errorf("non-miner alert mentions a hidden miner:\n%s", got)
+	}
+}
+
+func TestSentence(t *testing.T) {
+	for in, want := range map[string]string{"": "", "it read": "It read", "Already": "Already", "écrit": "Écrit"} {
+		if got := sentence(in); got != want {
+			t.Errorf("sentence(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

@@ -1,7 +1,8 @@
 ; ABA-Setup.exe: the "Next, Next, Finish" way to install A Better Antivirus.
 ;
 ; This is a front end for ABA's own installer, not a second one. It asks the
-; two questions of the terminal setup's "Recommended" path, then runs
+; questions of the terminal setup's "Recommended" path (phone alerts, the
+; clipper and miner traps, updates), then runs
 ;
 ;     aba.exe install --yes --keep-settings ...
 ;
@@ -149,6 +150,8 @@ var
   PhoneOffRadio, PhoneNtfyRadio: TNewRadioButton;
   PhoneSteps, TopicLabel, TopicHint: TNewStaticText;
   TopicEdit: TNewEdit;
+  TrapsPage: TWizardPage;
+  ClippersCheck, MinersCheck: TNewCheckBox;
   UpdatesPage: TInputOptionWizardPage;
   ProgressPage: TOutputProgressWizardPage;
 
@@ -387,6 +390,43 @@ begin
   Result := UpdatesPage.SelectedValueIndex = 0;
 end;
 
+// The two traps. On a silent install nobody sees the page, so a trap is on
+// only when asked for (/CLIPPERS=1, /MINERS=1): Setup never switches one on
+// by itself.
+function TrapParamGiven(const Name: String): Boolean;
+begin
+  Result := Param(Name, '') <> '';
+end;
+
+function WantTrap(const Name: String; Box: TNewCheckBox): Boolean;
+begin
+  if WizardSilent then
+    Result := Param(Name, '') = '1'
+  else
+    Result := Box.Checked;
+end;
+
+function WantClippers: Boolean;
+begin
+  Result := WantTrap('CLIPPERS', ClippersCheck);
+end;
+
+function WantMiners: Boolean;
+begin
+  Result := WantTrap('MINERS', MinersCheck);
+end;
+
+function TrapArgument(const Flag, Name: String; Want: Boolean): String;
+begin
+  Result := '';
+  if WizardSilent and not TrapParamGiven(Name) then
+    Exit; // not asked for: left as it is (off on a first install)
+  if Want then
+    Result := ' --' + Flag + '=true'
+  else
+    Result := ' --' + Flag + '=false';
+end;
+
 // These are for silent installs (/VERYSILENT), where nobody can pick them in
 // the window. '' means "not given": ABA's default applies.
 function ParamPreset: String;
@@ -413,6 +453,7 @@ begin
     Result := Result + ' --auto-update=false';
   if WantNtfy then
     Result := Result + ' --ntfy-topic ' + Topic;
+  Result := Result + TrapArgument('clippers', 'CLIPPERS', WantClippers) + TrapArgument('miners', 'MINERS', WantMiners);
   if Param('CANARYEMAIL', '') <> '' then
     Result := Result + ' --canary-email ' + Param('CANARYEMAIL', '');
   if Param('BAITS', '') <> '' then
@@ -434,6 +475,12 @@ begin
   P := Param('AUTOUPDATE', '1');
   if (P <> '0') and (P <> '1') then
     Result := '/AUTOUPDATE must be 1 (on) or 0 (off).';
+  P := Param('CLIPPERS', '');
+  if (P <> '') and (P <> '0') and (P <> '1') then
+    Result := '/CLIPPERS must be 1 (detect clippers) or 0 (don''t).';
+  P := Param('MINERS', '');
+  if (P <> '') and (P <> '0') and (P <> '1') then
+    Result := '/MINERS must be 1 (detect hidden miners) or 0 (don''t).';
   P := Param('NTFYTOPIC', '');
   if (P <> '') and not ValidTopic(P) then
     Result := '/NTFYTOPIC may only have letters, digits, - and _ in it (64 at most).';
@@ -515,8 +562,10 @@ begin
       '"{#AppName}" is added to the Start menu and to Windows'' list of installed apps. The program folder is added to PATH, so the aba command works in a terminal.') +
     RtfItem('Firewall',
       'Nothing is blocked now. Only when ABA stops a threat does it add a Windows firewall rule that cuts that one program off from the internet.') +
+    RtfItem('Mining pools, if you choose to detect miners',
+      'A Windows name rule points the names of known crypto-mining pools at a fake pool on this PC. No other name changes. Turning the miner trap off, or uninstalling, removes the rule.') +
     RtfItem('Internet',
-      'ABA sends nothing about you anywhere. It uses the internet only for phone alerts and update checks, and only if you turn them on in the next two steps.') +
+      'ABA sends nothing about you anywhere. It uses the internet only for phone alerts and update checks, and only if you turn them on in the next steps.') +
     RtfText('Keep Windows Defender, or the antivirus you have, switched on. ABA works next to it.') + '\par }';
 end;
 
@@ -531,7 +580,7 @@ begin
     WizardForm.WelcomeLabel2.Caption :=
       'ABA puts fake passwords, wallets and app data around your PC. Nothing normal ever reads them. ' +
       'When something does, ABA freezes it, cuts its internet and tells you, before your real data leaves.' + #13#10#13#10 +
-      'Setup takes about a minute and asks two questions.' + #13#10#13#10 +
+      'Setup takes about a minute and asks a few questions.' + #13#10#13#10 +
       'Keep Windows Defender on. ABA works next to your antivirus. It doesn''t replace it.' + #13#10#13#10 +
       'This is version ' + BundledVersion + '. Click Next to continue.'
   else begin
@@ -599,8 +648,39 @@ begin
   PhoneNtfyRadio.OnClick := @PhoneChoiceChanged;
   PhoneChoiceChanged(nil);
 
+  // ---- clippers and miners (the terminal setup's words) ----
+  TrapsPage := CreateCustomPage(PhonePage.ID,
+    'Clippers and miners', 'Detect two more kinds of malware?');
+  T := AddText(TrapsPage, 0, 0,
+    'Two traps for malware that doesn''t go after your files. Both are recommended.');
+  Y := T.Top + T.Height + ScaleY(12);
+  ClippersCheck := TNewCheckBox.Create(TrapsPage);
+  ClippersCheck.Parent := TrapsPage.Surface;
+  ClippersCheck.Top := Y;
+  ClippersCheck.Width := TrapsPage.SurfaceWidth;
+  ClippersCheck.Height := ScaleY(21);
+  ClippersCheck.Caption := 'Detect clippers (recommended)';
+  Y := Y + ClippersCheck.Height + ScaleY(2);
+  T := AddText(TrapsPage, ScaleX(18), Y,
+    'Clippers swap a crypto wallet address you copy for the attacker''s. When you''re away from your PC, ABA puts a fake address on the clipboard and freezes any program that swaps it. Your clipboard is put back.');
+  Y := T.Top + T.Height + ScaleY(14);
+  MinersCheck := TNewCheckBox.Create(TrapsPage);
+  MinersCheck.Parent := TrapsPage.Surface;
+  MinersCheck.Top := Y;
+  MinersCheck.Width := TrapsPage.SurfaceWidth;
+  MinersCheck.Height := ScaleY(21);
+  MinersCheck.Caption := 'Detect hidden crypto miners (recommended, unless you mine yourself)';
+  Y := Y + MinersCheck.Height + ScaleY(2);
+  T := AddText(TrapsPage, ScaleX(18), Y,
+    'Hidden crypto miners use your PC to make money for someone else. ABA points the known mining pools at a fake one on this PC and freezes any program that tries to mine there. Turn it off if you mine crypto on this PC on purpose.');
+  Y := T.Top + T.Height + ScaleY(14);
+  AddText(TrapsPage, 0, Y,
+    'Change either later in a terminal: aba clipboard on|off, aba miners on|off.');
+  ClippersCheck.Checked := Param('CLIPPERS', '1') <> '0';
+  MinersCheck.Checked := Param('MINERS', '1') <> '0';
+
   // ---- automatic updates ----
-  UpdatesPage := CreateInputOptionPage(PhonePage.ID,
+  UpdatesPage := CreateInputOptionPage(TrapsPage.ID,
     'Automatic updates', 'Keep {#AppName} up to date automatically?',
     'Once a day ABA checks GitHub for a new version. It installs one only if the release is signed with ABA''s release key and the download matches its signed checksum.',
     True, False);
@@ -618,7 +698,7 @@ end;
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
   // Already set up: nothing new changes on the PC, and nothing is asked.
-  Result := Existing and ((PageID = ChangesPage.ID) or (PageID = PhonePage.ID) or (PageID = UpdatesPage.ID));
+  Result := Existing and ((PageID = ChangesPage.ID) or (PageID = PhonePage.ID) or (PageID = TrapsPage.ID) or (PageID = UpdatesPage.ID));
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -672,6 +752,16 @@ begin
     Result := Result + Space + 'ntfy, topic ' + Topic + NewLine + Space + 'a test is sent at the end' + NewLine
   else
     Result := Result + Space + 'off (turn on later with: aba configure)' + NewLine;
+  Result := Result + NewLine + 'Clippers:' + NewLine;
+  if WantClippers then
+    Result := Result + Space + 'detected: a fake wallet address when you''re away from your PC' + NewLine
+  else
+    Result := Result + Space + 'not watched (turn on later with: aba clipboard on)' + NewLine;
+  Result := Result + NewLine + 'Hidden crypto miners:' + NewLine;
+  if WantMiners then
+    Result := Result + Space + 'detected: a fake mining pool on this PC' + NewLine
+  else
+    Result := Result + Space + 'not watched (turn on later with: aba miners on)' + NewLine;
   Result := Result + NewLine + 'Updates:' + NewLine;
   if WantAutoUpdate then
     Result := Result + Space + 'automatic, signed releases only'
@@ -750,7 +840,7 @@ begin
   Lines[0] := 'Setting up A Better Antivirus';
   Lines[1] := Ok + ' Checking this PC protecting PC\you';
   Lines[2] := Ok + ' Installing program files ' + ProgramDir;
-  Lines[3] := Ok + ' Saving your settings Balanced';
+  Lines[3] := Ok + ' Saving your settings Balanced (recommended), 14 baits, automatic updates, clipper and miner traps on';
   Lines[4] := Ok + ' Turning on Windows file auditing how ABA sees who opens a bait';
   Lines[5] := Ok + ' Planting baits 14 in place';
   if Ending = 'fail' then

@@ -125,6 +125,7 @@ func (s *server) reload() error {
 	}
 	s.guard(guarded)
 	s.clipboardBait(cfg.ClipboardBait)
+	s.minerTrap(cfg.MinerTrap)
 	s.baitsChanged(st)
 	s.syncRecorder(st)
 	return nil
@@ -199,6 +200,7 @@ func (s *server) run(ctx context.Context, ctl <-chan svcctl.Signal) error {
 			s.saveProgress()
 			s.stopWatching()
 			s.clipboardBait(false) // the guards put the clipboard back as they go
+			s.minerTrapStop()
 			// Let go of every hold properly (what's frozen stays suspended): a
 			// hold that's simply dropped kills its process.
 			procinfo.DropHolds(time.Now().Add(time.Hour), func(string) bool { return false })
@@ -238,6 +240,12 @@ func (s *server) run(ctx context.Context, ctl <-chan svcctl.Signal) error {
 				on := s.cfg != nil && s.cfg.ClipboardBait
 				s.mu.Unlock()
 				s.clipboardBait(on)
+			})
+			s.safe("miner trap", func() { // repairs the redirect if something removed it
+				s.mu.Lock()
+				on := s.cfg != nil && s.cfg.MinerTrap
+				s.mu.Unlock()
+				s.minerTrap(on)
 			})
 			s.publish()
 		case <-dialRefresh.C:

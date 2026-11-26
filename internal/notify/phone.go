@@ -83,6 +83,9 @@ func FromAlert(a *alerts.Alert) Message {
 	for _, h := range a.Baits {
 		fmt.Fprintf(&b, "• %s %s\n", h.Access, h.Name)
 	}
+	for _, l := range a.Mine.Lines() {
+		fmt.Fprintln(&b, l)
+	}
 	if a.Process != nil {
 		fmt.Fprintf(&b, "Process: %s (pid %d)\n", a.ExeName(), a.Process.PID)
 		if a.Process.Image != "" {

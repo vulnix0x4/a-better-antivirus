@@ -9,11 +9,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/baits"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
+	"github.com/vulnix0x4/a-better-antivirus/internal/minertrap"
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
 	"github.com/vulnix0x4/a-better-antivirus/internal/platform"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
@@ -169,6 +171,7 @@ func Run() []Result {
 	if cfg.Learning(time.Now()) {
 		add(Note, "Learning mode", Until(cfg.LearningUntil)+": only critical readers are stopped, the rest just raise an alert", "aba learn")
 	}
+	checkTraps(cfg, add)
 	if admin {
 		if sec, err := config.LoadSecrets(); err == nil {
 			if sec.Phone.Enabled() {
@@ -179,6 +182,34 @@ func Run() []Result {
 		}
 	}
 	return out
+}
+
+// checkTraps: the clipboard bait and the miner trap, where they exist.
+func checkTraps(cfg *config.Config, add func(l Level, name, detail, fix string)) {
+	if runtime.GOOS == "windows" {
+		if cfg.ClipboardBait {
+			add(OK, "Clipboard bait", "on: clippers are caught", "")
+		} else {
+			add(Note, "Clipboard bait", "off", "aba clipboard on")
+		}
+	}
+	if !minertrap.Supported() {
+		return
+	}
+	n, err := minertrap.Installed()
+	want := minertrap.Expected()
+	switch {
+	case err != nil:
+		add(Warning, "Miner trap", "can't read the redirect: "+err.Error(), "")
+	case cfg.MinerTrap && n == want:
+		add(OK, "Miner trap", fmt.Sprintf("on: %d mining pools' names lead to ABA's fake pool", len(minertrap.Pools)), "")
+	case cfg.MinerTrap:
+		add(Warning, "Miner trap", fmt.Sprintf("on, but the redirect isn't fully in place (%d of %d rules): the service puts it back within a minute", n, want), "aba doctor --fix")
+	case n > 0:
+		add(Warning, "Miner trap", fmt.Sprintf("off, but %d of its redirect rules are left", n), "aba miners off")
+	default:
+		add(Note, "Miner trap", "off", "aba miners on")
+	}
 }
 
 // Until is duplicated from ui to keep this package UI-free.
@@ -201,6 +232,17 @@ func Fix() []string {
 	if st, err := config.LoadState(); err == nil {
 		if r := baits.CleanRecent(cfg.User.RoamingAppData, baits.Index(st)); len(r) > 0 {
 			did = append(did, fmt.Sprintf("removed %d Recent-files shortcut(s) to baits", len(r)))
+		}
+	}
+	if minertrap.Supported() {
+		if cfg.MinerTrap {
+			if changed, err := minertrap.Apply(); err != nil {
+				did = append(did, "could not put the miner trap's redirect back: "+err.Error())
+			} else if changed {
+				did = append(did, "put the miner trap's redirect back")
+			}
+		} else if n, _ := minertrap.Remove(); n > 0 {
+			did = append(did, fmt.Sprintf("removed %d redirect rule(s) the miner trap left", n))
 		}
 	}
 	if s, _ := svcctl.Status(); s != svcctl.Running {
