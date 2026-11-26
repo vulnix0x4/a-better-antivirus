@@ -291,7 +291,10 @@ func TestNamesSharedAddress(t *testing.T) {
 		r.Send(start.Add(time.Second), stealerPID, netip.AddrPortFrom(fake, 443), 600, false, false)
 		r.Resolved(start.Add(2*time.Second), stealerPID, "ip-api.com", []netip.Addr{fake})
 		r.Send(start.Add(2*time.Second), stealerPID, netip.AddrPortFrom(fake, 80), 80, false, false)
+		r.Resolved(readAt.Add(-300*time.Millisecond), stealerPID, "gstatic.com", []netip.Addr{fake})
+		r.Send(readAt.Add(-300*time.Millisecond), stealerPID, netip.AddrPortFrom(fake, 443), 0, true, false)
 		r.Resolved(readAt.Add(100*time.Millisecond), stealerPID, "discord.com", []netip.Addr{fake})
+		r.Send(readAt.Add(110*time.Millisecond), stealerPID, netip.AddrPortFrom(fake, 443), 0, true, false)
 		r.Send(readAt.Add(120*time.Millisecond), stealerPID, netip.AddrPortFrom(fake, 443), 814, false, false)
 	})))
 	if a.Sent != alerts.SentSome || !strings.Contains(a.Headline, "connected to discord.com,") {
