@@ -28,6 +28,14 @@
 - A silent install, an update and `aba install --yes` never switch either on by themselves: `/CLIPPERS=1`,
   `/MINERS=1` and `--clippers`, `--miners` do.
 
+**Fixed**
+
+- **A stealer going through several apps' data is frozen again in every case.** Since v0.8.0, a program already
+  caught sweeping other apps' data that then opened the fake Brave's `Local State` (on a PC without Brave) could
+  leave ABA waiting on itself: ABA checked whether a real Brave had taken over the fake profile by reading that same
+  bait while it was holding it. The program stayed paused but was never reported as critical, and that bait went
+  unguarded. ABA no longer reads its own baits to decide.
+
 ## v0.8.0
 
 After a catch, ABA answers the question it used to leave you with: did it already take my real passwords,
