@@ -3,10 +3,11 @@
 The click-through installer: download one file, double-click, Next, Next, Finish.
 
 It is a front end for ABA's own installer, not a second one. It carries the x64 and the Arm64 `aba.exe`, asks
-the two questions of the terminal setup's "Recommended" path (phone alerts, automatic updates), and then runs
+the questions of the terminal setup's "Recommended" path (phone alerts, the clipper and miner traps, automatic
+updates), and then runs
 
 ```
-aba.exe install --yes --keep-settings --preset balanced --learning 0 --auto-update=... [--ntfy-topic ...]
+aba.exe install --yes --keep-settings --preset balanced --learning 0 --auto-update=... [--ntfy-topic ...] [--clippers=...] [--miners=...]
 ```
 
 from the copy for this PC. ABA does the rest itself, exactly as it does when installed from PowerShell or by
@@ -26,7 +27,7 @@ it away again. So Setup puts no files on the PC and registers no uninstaller of 
 
 | On the PC | Setup |
 |---|---|
-| No ABA | Asks the two questions and installs. |
+| No ABA | Asks its questions and installs. |
 | An older version | Updates it. Asks nothing; every setting is kept. |
 | The same version | Repairs it (program files, service, Windows setting, baits). Every setting is kept. |
 | A newer version | Says so and stops. Nothing is changed. |
@@ -41,13 +42,16 @@ check were wrong: `--keep-settings` is always passed, and ABA itself then keeps 
 ABA-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 ```
 
-installs with the same defaults as clicking Next all the way: recommended baits, Balanced response, no phone
-alerts, automatic updates on. Options (all optional):
+installs with the same defaults as clicking Next all the way (recommended baits, Balanced response, no phone
+alerts, automatic updates on), except the two traps: they stay off unless asked for, so a silent install never
+turns on something that touches the clipboard or name lookups. Options (all optional):
 
 | Option | Meaning |
 |---|---|
 | `/NTFYTOPIC=my-topic` | Send phone alerts to this [ntfy](https://ntfy.sh) topic. Letters, digits, `-` and `_`. |
 | `/AUTOUPDATE=0` | Don't update automatically (`1`, the default, does). |
+| `/CLIPPERS=1` | Catch clippers with the clipboard bait (`0` or not given: off). |
+| `/MINERS=1` | Catch hidden crypto miners with the miner trap (`0` or not given: off). |
 | `/PRESET=alert\|balanced\|strict` | What happens when something takes a bait. Default `balanced`. |
 | `/LEARNING=3` | Days of learning mode. Only changes something with `strict`. Default `0`. |
 | `/CANARYEMAIL=me@example.com` | Create canary tokens that email this address. |
