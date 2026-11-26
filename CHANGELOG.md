@@ -19,7 +19,7 @@
 
 **Setup asks about clippers and miners**
 
-- Both setups (terminal and ABA-Setup.exe) ask whether to catch clippers (the clipboard bait, which used to be
+- Both setups (terminal and ABA-Setup.exe) ask whether to detect clippers (the clipboard bait, which used to be
   off unless you knew to switch it on) and hidden miners, each with a sentence on what it does. Both are
   recommended; the miner trap unless you mine yourself. An install from before is asked once, the next time setup
   runs with "Keep my settings". The review and the "Saving your settings" line say what's on.
