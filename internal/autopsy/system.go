@@ -35,7 +35,7 @@ func CaseFrom(a *alerts.Alert, cfg *config.Config, st *config.State) (Case, erro
 		return Case{}, errors.New("this alert isn't about a program")
 	}
 	c := Case{AlertID: a.ID, Test: a.Test, PID: a.Process.PID, Image: a.Process.Image, Tree: a.Process.TreePIDs, Conns: a.Process.Connections,
-		BaitFiles: map[string]string{}}
+		BaitFiles: map[string]string{}, Blocked: a.Did(config.ActionBlockProgram)}
 	if len(a.Baits) > 0 {
 		c.BaitAt = a.Baits[0].Time
 	}
