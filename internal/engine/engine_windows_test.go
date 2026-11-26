@@ -776,20 +776,72 @@ func TestEventLogPathDoesNotDoubleFreezeInstantCatch(t *testing.T) {
 	}
 }
 
-func TestInstantSkipsSelfAndElevated(t *testing.T) {
+func TestInstantSkipsSelf(t *testing.T) {
 	e, f := setup("balanced")
 	f.images[100] = `D:\a\build\dist\aba.exe` // ABA's own CLI run from a build folder (CI hang)
 	f.elevated[100] = true                    // ABA's tooling that touches baits runs as administrator
-	f.images[777] = `C:\Users\bob\Downloads\admin-tool.exe`
-	if e.DecideInstant(100, desktopBait) {
-		t.Error("ABA must never instant-freeze itself (e.g. `aba doctor`)")
-	}
-	if e.DecideInstant(777, desktopBait) {
-		t.Error("elevated programs are left to the event-log path")
+	if ok, why := e.DecideInstantWhy(100, desktopBait); ok {
+		t.Errorf("ABA must never instant-freeze itself (e.g. `aba doctor`): %s", why)
 	}
 	f.test = &TestRequest{PID: 100}
 	if !e.DecideInstant(100, desktopBait) {
 		t.Error("`aba test` reader (a copy of ABA) must still be frozen")
+	}
+}
+
+// Lab, real stealers: Umbral asks for administrator rights, Blank Grabber
+// takes them without a prompt (through ComputerDefaults.exe). Both then went
+// through the baits as administrator, and instant freeze let every open
+// through for that reason alone: they were frozen by the event log, about a
+// second after their first bait read. Running as administrator is judged like
+// anything else now: frozen inside the open, as the event log would freeze it
+// a moment later.
+func TestInstantFreezesElevatedStealers(t *testing.T) {
+	e, f := setup("balanced")
+	e.cfg.InstantFreeze = true
+	umbral := `C:\Users\bob\Downloads\Umbral.exe`
+	f.images[777] = umbral // unsigned, elevated
+	if ok, why := e.DecideInstantWhy(777, chromeBait); !ok {
+		t.Fatalf("an unsigned stealer from Downloads, elevated: frozen inside the open, got %s", why)
+	}
+	blank := `C:\Users\bob\Downloads\synapse_x_cracked.exe`
+	f.images[778] = blank
+	f.elevated[778] = true
+	f.sigs[blank] = provenance.Result{Signed: true, Valid: false, Error: "The digital signature of the object did not verify."}
+	if ok, why := e.DecideInstantWhy(778, metamaskBait); !ok {
+		t.Fatalf("a stealer with a broken signature, elevated: frozen inside the open, got %s", why)
+	}
+
+	// The event log, a moment later, doesn't freeze either one a second time.
+	e.HandleOpen(777, chromeBait, time.Now(), []uint32{777})
+	n := len(f.suspended)
+	e.HandleAccess(ev(777, umbral, chromeBait, 1))
+	if len(f.suspended) != n {
+		t.Fatalf("frozen twice: %v", f.suspended)
+	}
+}
+
+// An administrator's tool is judged by what it is, as the event log judges
+// it: a signed one isn't frozen inside the open, and its reads of several
+// apps' data don't make it a sweeper (backup and admin tools go through
+// everything).
+func TestInstantLeavesSignedAdminToolsAlone(t *testing.T) {
+	e, f := setup("balanced")
+	e.cfg.InstantFreeze = true
+	adm := `C:\Program Files\Tool\tool.exe`
+	f.images[1001] = adm
+	f.sigs[adm] = provenance.Result{Signed: true, Valid: true, Signer: "Tool Inc"}
+	f.elevated[1001] = true
+	for _, b := range []string{discordBait, chromeBait, metamaskBait, awsBait, desktopBait} {
+		if ok, why := e.DecideInstantWhy(1001, b); ok {
+			t.Fatalf("a signed admin tool opening %s: not frozen, got %s", b, why)
+		}
+	}
+	if p := e.SweepSuspect(desktopBait, []uint32{1001}); p != 0 {
+		t.Fatalf("an admin tool isn't a sweep suspect, got %d", p)
+	}
+	if len(f.suspended) != 0 {
+		t.Fatalf("froze %v", f.suspended)
 	}
 }
 

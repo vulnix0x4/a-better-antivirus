@@ -344,16 +344,31 @@ func (e *Engine) DecideInstantOpWhy(pid uint32, path string, op detect.Op) (bool
 	if done == nil {
 		return false, image + " is already being handled (another bait or the event log got there first)"
 	}
-	// Instant freeze acts on a split-second inference, so it only touches
-	// ordinary, non-elevated programs in a user session. Admin tools that inspect
-	// baits (and elevated malware, out of scope) go through the event-log path.
+	// Instant freeze only touches programs in a user session: services go
+	// through the event-log path.
 	if !e.Ops.UserSession(pid) {
 		done(false)
 		return false, image + " runs in session 0 (system/service)"
 	}
-	if e.Ops.Elevated(pid) {
+	// Running as administrator is no pass on Windows: real stealers get there first
+	// (Umbral asks for it, Blank Grabber slips past the prompt through
+	// ComputerDefaults.exe), and were caught only by the event log, a second
+	// later, after their first reads. An elevated program is judged by the
+	// same verdict the event log would give its read, so an admin tool (signed,
+	// or trusted) isn't frozen here either. ABA's own tooling (doctor, bait
+	// adoption) runs as administrator and is never frozen; and as in the event
+	// log, an admin tool's reads don't count towards a sweep, a team or
+	// wrecking (see sweepable).
+	elevated := e.Ops.Elevated(pid)
+	if elevated && !instantJudgesAdmins {
 		done(false)
 		return false, image + asAdmin
+	}
+	if elevated {
+		if self, _ := e.ownCopy(pid, image); self {
+			done(false)
+			return false, image + " is ABA's own tool" + asAdmin
+		}
 	}
 	sig := e.Ops.Verify(image)
 	v := cls.Final(image, pid, e.baitRef(baitID), sig)
@@ -371,24 +386,31 @@ func (e *Engine) DecideInstantOpWhy(pid uint32, path string, op detect.Op) (bool
 	}
 	quietRead := v.DecoyOwner || home || e.importProbe(image, baitID, path, sig)
 	if op != detect.OpDelete && !v.Host && !quietRead {
-		if swept := e.touch(pid, baitID, time.Now()); len(swept) >= sweepApps && !exempt {
+		if swept := e.touch(pid, baitID, time.Now()); len(swept) >= sweepApps && !exempt && !elevated {
 			v = e.sweepVerdict(v, swept)
 		}
 	}
 	// Going to overwrite your documents in a second folder: held here, in
 	// the open, whatever it is (see wreck).
-	if op == detect.OpWrite && !exempt && !classify.OSVendorSigned(sig) {
+	if op == detect.OpWrite && !exempt && !elevated && !classify.OSVendorSigned(sig) {
 		if wrecked := e.wreck(pid, baitID, path, time.Now()); len(wrecked) >= wreckFolders {
 			v = e.wreckVerdict(v, wrecked, "write")
 		}
 	}
 	if !v.Builtin && !v.DecoyOwner {
-		// (Elevated copies of ABA were let through above.)
+		// (Elevated copies of ABA were let through above; one that isn't
+		// elevated is something using ABA's program as a disguise.)
 		if _, disguise := e.ownCopy(pid, image); disguise {
 			v = evasive(v, disguiseWhy)
 		} else if why := e.evasion(pid); why != "" && !cls.TricksAllowed(image, pid, baitID, &sig) {
 			v = evasive(v, why)
 		}
+	}
+	if v.Host && elevated {
+		// A genuine browser running as administrator going through a fake
+		// profile: the event log, which looks at its windows, decides.
+		done(false)
+		return false, image + " (a browser going through a fake profile)" + asAdmin + ": left to the event log"
 	}
 	if v.Host {
 		// The genuine browser going through a fake profile: frozen here only
@@ -422,7 +444,7 @@ func (e *Engine) DecideInstantOpWhy(pid uint32, path string, op detect.Op) (bool
 		done(false)
 		return false, image + " is ignored or the real app"
 	}
-	if !exempt && !quietRead && v.Tier != config.TierCritical && op == detect.OpRead {
+	if !exempt && !quietRead && !elevated && v.Tier != config.TierCritical && op == detect.OpRead {
 		if units, _ := e.joinTeam(pid, baitID, image, time.Now()); units != nil {
 			v = e.teamVerdict(v, units, 0)
 		}
@@ -1772,6 +1794,9 @@ func (e *Engine) SweepSuspect(path string, pids []uint32) uint32 {
 	}
 	if ct := e.Ops.CreateTime(hit); ct != 0 && hitCT != 0 && ct != hitCT {
 		return 0 // the PID was reused by another process
+	}
+	if !e.sweepable(hit) {
+		return 0 // an admin tool or a service: its reads aren't a sweep
 	}
 	return hit
 }
