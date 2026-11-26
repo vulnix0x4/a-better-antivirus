@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+**Stealers that make themselves administrator are frozen instantly too (Windows)**
+
+- Umbral and Blank Grabber, two real stealers, give themselves administrator rights before they start stealing
+  (Umbral asks with the Windows admin prompt; Blank Grabber gets them without any prompt, through a known
+  Windows trick). Instant freeze used to step aside for every program running as administrator, so these two
+  were only caught by the backup check, about a second after their first bait, by which time they had opened
+  several more baits and Umbral had read your real Edge data.
+- Now a program running as administrator is judged the same way as any other: in the lab, Umbral was frozen
+  98 ms after it opened its first bait and Blank Grabber 127 ms after (before: 884 ms and 968 ms). Blank Grabber
+  no longer got to send anything at all, and Umbral never reached Edge.
+- Nothing changes for ABA's own tools, signed admin tools (backup, system tools), or programs you trusted; and as
+  before, an admin tool going through several apps' data doesn't count as a sweep. On Linux, programs running
+  as root are still left to the regular check.
+
 **The autopsy says whether anything left your PC (Windows)**
 
 - ABA now keeps a **network record** on Windows: which programs send something over the network, where to, when
