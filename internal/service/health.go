@@ -257,6 +257,9 @@ func (s *server) healthCheck(startup bool) {
 	} else {
 		add("Network guard", true, fmt.Sprintf("ready (%d active rules)", ns.Rules))
 	}
+	if cfg.MinerTrap {
+		s.minerHealth(add)
+	}
 
 	config.UpdateState(func(st *config.State) error {
 		st.Health = health
