@@ -13,6 +13,7 @@ require (
 	github.com/muesli/termenv v0.16.0
 	github.com/spf13/cobra v1.10.2
 	github.com/tailscale/wf v0.0.0-20240214030419-6fbb0a674ee6
+	golang.org/x/net v0.33.0
 	golang.org/x/sys v0.50.0
 	golang.org/x/term v0.48.0
 )
@@ -45,7 +46,6 @@ require (
 	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	go4.org/netipx v0.0.0-20220725152314-7e7bdc8411bf // indirect
-	golang.org/x/net v0.33.0 // indirect
 	golang.org/x/sync v0.15.0 // indirect
 	golang.org/x/text v0.23.0 // indirect
 )

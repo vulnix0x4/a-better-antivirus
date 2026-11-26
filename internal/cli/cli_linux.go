@@ -164,3 +164,6 @@ func (r *testReader) Close() {
 	}
 	os.Remove(r.Path)
 }
+
+// requireAdminQuietly is requireAdmin: sudo asks in this same terminal.
+func requireAdminQuietly(why string) error { return requireAdmin() }

@@ -537,3 +537,50 @@ func Checklist(a *Alert) []string {
 	}
 	return steps
 }
+
+// ShortID is the last part of an alert's ID: what commands about it are
+// typed with (Load finds the alert from it).
+func ShortID(id string) string {
+	if i := strings.LastIndex(id, "-"); i > 0 {
+		return id[i+1:]
+	}
+	return id
+}
+
+// NextSteps are the commands that answer an alert that's still open, each
+// with what it does, in the order they're offered: the same list the
+// terminal (`aba alerts show`) and the full report page show. None for an
+// alert that's answered, a test, or one that isn't about a program reading.
+func NextSteps(a *Alert) [][2]string {
+	if a.Status == "resolved" || a.Process == nil || a.Test || a.Kind != KindRead {
+		return nil
+	}
+	id := ShortID(a.ID)
+	held := a.Did(config.ActionFreeze) || a.Did(config.ActionBlockProgram)
+	var rows [][2]string
+	switch {
+	case a.Verdict.KeepRunning:
+		// The browser you're using: nothing to kill, and it's never
+		// trusted for a fake profile.
+		if a.Did(config.ActionBlockProgram) {
+			rows = append(rows, [2]string{"aba resume " + id, "give " + BrowserName(a.ExeName()) + " its internet back (nothing gets trusted)"})
+		}
+	case a.Verdict.Host:
+		if held {
+			rows = append(rows, [2]string{"aba kill " + id, "end that browser and what started it"},
+				[2]string{"aba resume " + id, "not sure: let them run again, without trusting them"})
+		}
+	default:
+		if held {
+			rows = append(rows, [2]string{"aba kill " + id, "it's malware: end it (it stays cut off)"})
+		}
+		rows = append(rows, [2]string{"aba trust " + id, "it's yours: undo everything and stop alerting about it"})
+		if held {
+			rows = append(rows, [2]string{"aba resume " + id, "not sure: let it run again, without trusting it"})
+		}
+	}
+	if a.Did(config.ActionIsolate) {
+		rows = append(rows, [2]string{"aba release", "reconnect the " + platform.PC + " when it's safe"})
+	}
+	return rows
+}

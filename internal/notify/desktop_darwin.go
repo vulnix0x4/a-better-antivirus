@@ -86,3 +86,20 @@ var lastToastErr string
 
 // vouchLabel names what vouches for a program, in an alert's details.
 const vouchLabel = "Signature"
+
+// askReport shows the autopsy popup: headline, text, and two buttons, "Show
+// full report" (the answer is true) and "Close".
+func askReport(title, headline, text string, icon uint32) bool {
+	ic := "stop"
+	if icon == mbIconWarning {
+		ic = "caution"
+	}
+	out, err := osascript([]string{
+		"on run argv",
+		"activate",
+		`display dialog (item 2 of argv) with title (item 1 of argv) buttons {"Close", "` + showReportLabel + `"} default button "` + showReportLabel + `" cancel button "Close" with icon ` + ic,
+		"return button returned of result",
+		"end run",
+	}, title, headline+"\n\n"+text)
+	return err == nil && out == showReportLabel
+}

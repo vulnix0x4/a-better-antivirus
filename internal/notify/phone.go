@@ -21,6 +21,8 @@ import (
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/alerts"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
+	"github.com/vulnix0x4/a-better-antivirus/internal/platform"
+	"github.com/vulnix0x4/a-better-antivirus/internal/report"
 )
 
 // Message is a channel-neutral alert.
@@ -68,7 +70,7 @@ func FromAutopsy(a *alerts.Alert) Message {
 			fmt.Fprintf(&b, "%d. %s\n", i+1, st)
 		}
 	}
-	fmt.Fprintf(&b, "Details: aba autopsy %s", a.ID)
+	b.WriteString("Full report, on the " + platform.PC + ": " + report.Where)
 	m.Body = b.String()
 	return m
 }

@@ -110,6 +110,28 @@ func UnregisterApp() error {
 
 func (e appEntry) shortcut() string { return filepath.Join(e.menuDir, AppName+".lnk") }
 
+// ReportsName is the Start menu entry that opens every report ABA wrote
+// about a program it caught (`aba reports`).
+const ReportsName = "ABA reports"
+
+func (e appEntry) reportsShortcut() string { return filepath.Join(e.menuDir, ReportsName+".lnk") }
+
+// reportsMade is set on the Installed apps entry once ABA has made the
+// reports shortcut, so an update doesn't put it back after you deleted it.
+const reportsMade = "ABAReportsShortcut"
+
+func (e appEntry) addReportsShortcut() error {
+	if err := createShortcut(e.reportsShortcut(), e.exe, "reports", e.dir, "Every program ABA caught, and what it did, in your web browser"); err != nil {
+		return err
+	}
+	k, err := registry.OpenKey(e.root, e.keyPath, registry.SET_VALUE)
+	if err != nil {
+		return err
+	}
+	defer k.Close()
+	return k.SetDWordValue(reportsMade, 1)
+}
+
 func (e appEntry) registered() bool {
 	k, err := registry.OpenKey(e.root, e.keyPath, registry.QUERY_VALUE)
 	if err != nil {
@@ -126,14 +148,33 @@ func (e appEntry) register(version string) error {
 	if err := os.MkdirAll(e.menuDir, 0o755); err != nil {
 		return err
 	}
-	return createShortcut(e.shortcut(), e.exe, e.dir, "See whether you're protected and what touched your baits")
+	if err := createShortcut(e.shortcut(), e.exe, "", e.dir, "See whether you're protected and what touched your baits"); err != nil {
+		return err
+	}
+	return e.addReportsShortcut()
 }
 
 func (e appEntry) refresh(version string) error {
 	if !e.registered() {
 		return e.register(version)
 	}
-	return e.writeKey(version)
+	if err := e.writeKey(version); err != nil {
+		return err
+	}
+	// An install from before there were reports gets their shortcut now, once.
+	k, err := registry.OpenKey(e.root, e.keyPath, registry.QUERY_VALUE)
+	if err != nil {
+		return err
+	}
+	_, _, err = k.GetIntegerValue(reportsMade)
+	k.Close()
+	if err == nil {
+		return nil
+	}
+	if err := os.MkdirAll(e.menuDir, 0o755); err != nil {
+		return err
+	}
+	return e.addReportsShortcut()
 }
 
 // UninstallCommand is what Windows runs when you pick Uninstall in its list.
@@ -193,8 +234,10 @@ func (e appEntry) unregister() error {
 	if err := registry.DeleteKey(e.root, e.keyPath); err != nil && !errors.Is(err, registry.ErrNotExist) {
 		errs = append(errs, err)
 	}
-	if err := os.Remove(e.shortcut()); err != nil && !errors.Is(err, os.ErrNotExist) {
-		errs = append(errs, err)
+	for _, lnk := range []string{e.shortcut(), e.reportsShortcut()} {
+		if err := os.Remove(lnk); err != nil && !errors.Is(err, os.ErrNotExist) {
+			errs = append(errs, err)
+		}
 	}
 	return errors.Join(errs...)
 }
@@ -236,6 +279,7 @@ const (
 
 	shellLinkSetDescription      = 7
 	shellLinkSetWorkingDirectory = 9
+	shellLinkSetArguments        = 11
 	shellLinkSetPath             = 20
 
 	persistFileSave = 6
@@ -260,8 +304,8 @@ func (o *comObject) call(method int, args ...uintptr) error {
 	return nil
 }
 
-// createShortcut writes a shortcut at lnk that starts target in workDir.
-func createShortcut(lnk, target, workDir, description string) error {
+// createShortcut writes a shortcut at lnk that starts target with args in workDir.
+func createShortcut(lnk, target, args, workDir, description string) error {
 	// COM belongs to the thread that initialised it.
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
@@ -288,7 +332,7 @@ func createShortcut(lnk, target, workDir, description string) error {
 	for _, set := range []struct {
 		method int
 		value  string
-	}{{shellLinkSetPath, target}, {shellLinkSetWorkingDirectory, workDir}, {shellLinkSetDescription, description}} {
+	}{{shellLinkSetPath, target}, {shellLinkSetArguments, args}, {shellLinkSetWorkingDirectory, workDir}, {shellLinkSetDescription, description}} {
 		p, err := windows.UTF16PtrFromString(set.value)
 		if err != nil {
 			return fmt.Errorf("create shortcut: %w", err)

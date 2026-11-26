@@ -18,6 +18,10 @@ const pauseFlag = "--elevated-pause"
 
 var errRelaunched = errors.New("continued in the administrator window")
 
+// noPause: this command's window closes at the end, even where it would
+// otherwise wait for Enter (started from the Start menu), unless it failed.
+var noPause bool
+
 func pause() {
 	fmt.Print("\n " + ui.Fainter.Render("Press Enter to close this window…"))
 	bufio.NewReader(os.Stdin).ReadString('\n')
