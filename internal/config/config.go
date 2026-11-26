@@ -216,6 +216,10 @@ type Config struct {
 	// while nobody is using the PC, to catch clippers (package clipbait).
 	// Off unless switched on: it touches the clipboard.
 	ClipboardBait bool `json:"clipboardBait,omitempty"`
+	// MinerTrap points the names of public mining pools at a fake pool on
+	// this PC, and catches any program that logs in there to mine (package
+	// minertrap). Off unless switched on.
+	MinerTrap bool `json:"minerTrap,omitempty"`
 
 	// NoRecorder switches the flight recorder off (package recorder): ABA
 	// then doesn't note who opens your real passwords, cookies and keys, and
@@ -233,7 +237,13 @@ type Config struct {
 // offers those to installs that were configured before they existed.
 // Version 4 added the Firefox profile bait on Windows and macOS, and saved git
 // passwords on Windows.
-const CurrentConfigVersion = 4
+// Version 5 added the miner trap, and setup started asking about it and the
+// clipboard bait: a re-run of setup asks installs from before once.
+const CurrentConfigVersion = 5
+
+// TrapsAskedSince is the config version from which setup has asked about the
+// clipboard bait and the miner trap.
+const TrapsAskedSince = 5
 
 func Default() *Config {
 	p, _ := PresetByID("balanced")
