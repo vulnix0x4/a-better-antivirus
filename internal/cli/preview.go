@@ -10,6 +10,8 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/baits"
 	"github.com/vulnix0x4/a-better-antivirus/internal/classify"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
+	"github.com/vulnix0x4/a-better-antivirus/internal/detect"
+	"github.com/vulnix0x4/a-better-antivirus/internal/engine"
 	"github.com/vulnix0x4/a-better-antivirus/internal/origin"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
 	"github.com/vulnix0x4/a-better-antivirus/internal/provenance"
@@ -24,6 +26,8 @@ type Screen struct{ Name, ANSI string }
 func Previews() []Screen {
 	var out []Screen
 	add := func(name, s string) { out = append(out, Screen{name, s}) }
+	// The Windows screens, from whatever system renders them.
+	ui.TrapsAvailable = func() (bool, bool) { return true, true }
 
 	add("01-welcome", renderWelcome())
 	add("02-help", rootHelp(newRoot()))
@@ -50,6 +54,13 @@ func Previews() []Screen {
 	for i, v := range ui.PreviewWizard(in, "keep", "") {
 		add("12-setup-existing-"+string(rune('a'+i)), header+v)
 	}
+	// An install from before setup asked about the traps: "Keep" asks once.
+	old := config.Default()
+	old.Version = config.TrapsAskedSince - 1
+	in.Existing = old
+	for i, v := range ui.PreviewWizard(in, "keep", "") {
+		add("13-setup-upgrade-"+string(rune('a'+i)), header+v)
+	}
 
 	steps := []ui.PreviewStep{
 		{"Checking this PC", "done", `protecting DESKTOP-7Q2\bob · C:\Users\bob`},
@@ -57,7 +68,7 @@ func Previews() []Screen {
 		{"Stopping the running service", "done", "first install"},
 		{"Installing program files", "done", `C:\Program Files\File Access Monitor`},
 		{"Locking down the data folder", "done", "only admins can change it"},
-		{"Saving your settings", "done", "Balanced (recommended) · 17 baits · automatic updates"},
+		{"Saving your settings", "done", "Balanced (recommended) · 17 baits · automatic updates · clipper and miner traps on"},
 		{"Turning on Windows file auditing", "running", ""},
 		{"Planting baits", "pending", ""},
 		{"Starting the background service", "pending", ""},
@@ -89,6 +100,7 @@ func Previews() []Screen {
 	add("41-alert-list", ui.AlertTable([]*alerts.Alert{browserKeptAlert(), browserStealerAlert(), sampleAlert(), infoAlert(), sweepAlert()}, ui.Width()))
 	add("42-alert-browser-stealer", ui.AlertDetail(browserStealerAlert()))
 	add("43-alert-browser-kept", ui.AlertDetail(browserKeptAlert()))
+	add("44-alert-miner", ui.AlertDetail(minerAlert()))
 	return out
 }
 
@@ -140,7 +152,31 @@ func browserKeptAlert() *alerts.Alert {
 func sampleConfig() *config.Config {
 	c := config.Default()
 	c.AutoUpdate = true
+	c.ClipboardBait, c.MinerTrap = true, true
 	return c
+}
+
+// minerAlert: SilentCryptoMiner's XMRig inside a hollowed conhost.exe, as
+// caught in the lab.
+func minerAlert() *alerts.Alert {
+	m := &detect.Mine{Pool: "pool.hashvault.pro", PoolSure: true, Port: 443, TLS: true, Method: "login",
+		Wallet: "43iNancbmLhdmRY5oZ8vZRS8mKmw6t1vEHGm5BuVmJ6vf1ZNREY9bZ4zxeWh6R1JSdHQDYhyWfFVnLQrYyEQrb4kv43M", Pass: "RealBigTonka#",
+		Agent: "XMRig/6.24.0 (Windows NT 10.0; Win64; x64) libuv/1.51.0 msvc/2022"}
+	img := `C:\Windows\System32\conhost.exe`
+	v := engine.MineVerdictForPreview(m, img)
+	a := &alerts.Alert{
+		ID: "20261125-213307-4b1d", Time: time.Now().Add(-1 * time.Minute), Kind: alerts.KindMiner, Tier: config.TierCritical,
+		Title: "Crypto miner caught: conhost.exe tried to mine on your PC", Status: "open", LatencyMS: 4,
+		Summary: v.Reasons[0], Verdict: v,
+		Baits: []alerts.BaitHit{{ID: engine.MinerTrap, Name: engine.MinerTrapName, Path: "pool.hashvault.pro:443", Access: "mine", Time: time.Now()}},
+		Process: &alerts.Process{PID: 6232, Image: img, CommandLine: `C:\Windows\System32\conhost.exe --cinit 0x0 --donate-level 0`, User: `DESKTOP-7Q2\bob`,
+			Signature: provenance.Result{Signed: true, Valid: true, Signer: "Microsoft Windows"},
+			Origin:    &origin.Origin{File: `C:\Users\bob\Downloads\GrandTheftAutoVI Launcher.exe`, URL: "https://cdn.example.net/gta6/GrandTheftAutoVI.zip"},
+			Parents:   []procinfo.Parent{{PID: 5120, Image: `C:\Users\bob\Downloads\GrandTheftAutoVI Launcher.exe`}}},
+	}
+	a.AddAction(config.ActionFreeze, nil, "2 process(es) frozen; with it: GrandTheftAutoVI Launcher.exe (pid 5120)")
+	a.AddAction(config.ActionBlockProgram, nil, img)
+	return a
 }
 
 func sampleState() *config.State {
