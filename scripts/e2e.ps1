@@ -569,7 +569,13 @@ $a5c = AlertFor $s5c.Id
 Check ($a5c -and (Did $a5c 'freeze')) 'the trusted program going after a different bait is still frozen'
 Aba kill $a5c.id
 Aba ignore remove 1
+$starts = @(Select-String -Path "$data\service.log" -Pattern 'watching Security log for bait access' -ErrorAction SilentlyContinue).Count
 Aba install --yes --preset balanced --learning 0 --ntfy-topic $topic
+# The reinstall restarted the service. A sweep is judged from the Security
+# log too, and reads made before its watcher has subscribed are never seen:
+# wait for the new service to say it's watching, and a moment more.
+if (-not (WaitFor { @(Select-String -Path "$data\service.log" -Pattern 'watching Security log for bait access' -ErrorAction SilentlyContinue).Count -gt $starts } 30)) { Fail 'the service did not come back after the reinstall' }
+Start-Sleep -Seconds 3
 
 Step 'A Windows program going through several apps'' data is stopped (how an injected stealer looks)'
 # find.exe is part of Windows and signed by Microsoft: one bait read by it is
