@@ -29,19 +29,22 @@ type Catch struct {
 	TLS    bool
 	SNI    string // the pool name it asked for in TLS (most miners send it)
 	Login  Login
-	// Names are the pool names looked up in the minutes before: the pool it
-	// wanted, when it didn't say (a plain connection doesn't).
+	// Names are the pool names looked up in the minutes before, oldest
+	// first: the pool it wanted, when it didn't say. (Windows looks names up
+	// for every program itself, so a lookup can't be tied to a program; and
+	// XMRig, for one, names no server in TLS.)
 	Names []string
 }
 
 // Pool is the pool it wanted, as best as ABA can tell, and whether that's
-// sure (it said so) or a guess (the pool names looked up just before).
+// sure (it said so) or a guess (the pool name looked up last before it
+// connected: programs look a name up right before connecting to it).
 func (c Catch) Pool() (string, bool) {
 	if c.SNI != "" {
 		return c.SNI, true
 	}
-	if len(c.Names) == 1 {
-		return c.Names[0], false
+	if len(c.Names) > 0 {
+		return c.Names[len(c.Names)-1], false
 	}
 	return "", false
 }

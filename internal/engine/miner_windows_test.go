@@ -39,7 +39,7 @@ func TestMinerInsideSignedSystemProgramIsCaught(t *testing.T) {
 		t.Errorf("bait hit: %+v", a.Baits)
 	}
 	why := strings.Join(a.Verdict.Reasons, " | ")
-	for _, want := range []string{"tried to mine cryptocurrency", "43iNancbmDEMOkv43M", "XMRig/6.24.0", "pool.hashvault.pro", "conhost.exe is part of Windows", "aba miners off", "ABA sent nothing anywhere"} {
+	for _, want := range []string{"tried to mine cryptocurrency", "43iNancbmDEMOkv43M", "XMRig/6.24.0", "pool.hashvault.pro", "conhost.exe is part of Windows, and Windows' own programs never mine", "aba miners off", "ABA sent nothing anywhere"} {
 		if !strings.Contains(why, want) {
 			t.Errorf("the alert should say %q: %v", want, a.Verdict.Reasons)
 		}
@@ -144,7 +144,7 @@ func TestMineVerdictWithoutPool(t *testing.T) {
 	if strings.Contains(strings.Join(v.Reasons, " "), "part of Windows") {
 		t.Error("an ordinary program called part of Windows")
 	}
-	if MinePlace(nil) != "a mining pool" || MinePlace(&detect.Mine{Port: 80}) != "a mining pool:80" {
+	if MinePlace(nil) != "a mining pool" || MinePlace(&detect.Mine{Port: 80}) != "a mining pool (port 80)" {
 		t.Error("minePlace")
 	}
 }

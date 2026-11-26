@@ -1993,14 +1993,16 @@ func MinePlace(m *detect.Mine) string {
 	if m == nil {
 		return "a mining pool"
 	}
-	where := m.Pool
-	if where == "" {
-		where = "a mining pool"
+	if m.Pool == "" {
+		if m.Port != 0 {
+			return "a mining pool (port " + strconv.Itoa(m.Port) + ")"
+		}
+		return "a mining pool"
 	}
 	if m.Port != 0 {
-		where += ":" + strconv.Itoa(m.Port)
+		return m.Pool + ":" + strconv.Itoa(m.Port)
 	}
-	return where
+	return m.Pool
 }
 
 // mineVerdict: a program logged in to mine at the fake pool the miner trap
@@ -2019,7 +2021,12 @@ func mineVerdict(m *detect.Mine, image string, system bool) classify.Verdict {
 		", which ABA's miner trap points at a fake one on this " + platform.PC + ", and logged in to mine. Hidden miners use your " + platform.PC + " to make money for someone else"}
 	if system && image != "" {
 		name := filepath.Base(image)
-		reasons = append(reasons, name+" is part of "+platform.OSName()+", and "+platform.OSName()+"'s own programs never mine: something is running a miner inside it (malware does that to hide)")
+		os := platform.OSName()
+		own := os + "'s"
+		if strings.HasSuffix(os, "s") {
+			own = os + "'"
+		}
+		reasons = append(reasons, name+" is part of "+os+", and "+own+" own programs never mine: something is running a miner inside it (malware does that to hide)")
 	}
 	if m.Wallet != "" {
 		reasons = append(reasons, "the wallet it mines for: "+m.Wallet)
