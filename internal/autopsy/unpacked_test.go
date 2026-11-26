@@ -39,11 +39,12 @@ func TestRunCountsItsOwnUnpackedCode(t *testing.T) {
 	write(t, filepath.Join(mei, "rarreg.key"), []byte("not code"))
 	write(t, filepath.Join(loot, "Wallets", "Exodus", "Location.txt"), []byte("C:\\Users\\x\\AppData\\Roaming\\Exodus"))
 	write(t, filepath.Join(startup, "svc.scr"), []byte("MZ the stealer itself"))
+	write(t, filepath.Join(root, "Downloads", "other-setup.exe"), []byte("MZ something else the person downloaded"))
 	if err := os.MkdirAll(filepath.Join(root, "evidence"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	c := Case{AlertID: "20261126-102024-4be9", PID: 900, Image: exe, Tree: []uint32{900, 901}, BaitAt: time.Now(), User: config.UserInfo{Profile: root}}
+	c := Case{AlertID: "20261126-102024-4be9", PID: 900, Image: exe, Tree: []uint32{900, 901}, BaitAt: time.Now(), User: config.UserInfo{Profile: root, Downloads: filepath.Join(root, "Downloads")}}
 	h := Hooks{
 		StartedAt: func(pid uint32) (time.Time, error) { return time.Now().Add(-5 * time.Second), nil },
 		CodeFiles: func(pid uint32) ([]string, error) {
@@ -52,7 +53,7 @@ func TestRunCountsItsOwnUnpackedCode(t *testing.T) {
 			}
 			return []string{exe}, nil
 		},
-		StagingDirs: func(*Case) []Dir { return []Dir{{Path: tmp, Depth: 3}} },
+		StagingDirs: func(*Case) []Dir { return []Dir{{Path: tmp, Depth: 3}, {Path: filepath.Join(root, "Downloads"), Depth: 1}} },
 		StartupDirs: func(*Case) []string { return []string{startup} },
 		EvidenceDir: filepath.Join(root, "evidence"),
 	}
@@ -61,7 +62,7 @@ func TestRunCountsItsOwnUnpackedCode(t *testing.T) {
 	var listed []string
 	for _, s := range a.Staged {
 		listed = append(listed, s.Path)
-		if strings.HasSuffix(s.Path, ".dll") || strings.HasSuffix(s.Path, ".pyd") || strings.HasSuffix(s.Path, ".zip") || strings.HasSuffix(s.Path, ".exe") {
+		if strings.HasSuffix(s.Path, ".dll") || strings.HasSuffix(s.Path, ".pyd") || strings.HasSuffix(s.Path, ".zip") || strings.HasSuffix(s.Path, "rar.exe") {
 			t.Errorf("its own code listed as staged: %s (%s)", s.Path, s.What)
 		}
 	}
@@ -73,7 +74,7 @@ func TestRunCountsItsOwnUnpackedCode(t *testing.T) {
 		}
 		return nil
 	}
-	if has("Location.txt") == nil || has("rarreg.key") == nil {
+	if has("Location.txt") == nil || has("rarreg.key") == nil || has("other-setup.exe") == nil {
 		t.Errorf("what it collected (and a data file beside its code) must stay listed: %v", listed)
 	}
 	if s := has("svc.scr"); s == nil || s.What != "a copy of the program itself" {

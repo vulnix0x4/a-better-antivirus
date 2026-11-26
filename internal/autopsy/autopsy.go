@@ -346,6 +346,14 @@ func Run(c Case, h Hooks) *alerts.Autopsy {
 	// folders they're in (a self-unpacking program's own libraries are
 	// counted there, not listed as what it collected).
 	code, codeDirs := map[string]bool{}, map[string]bool{}
+	// The person's own folders are never its code folder, even when it runs
+	// from one (a download): anything else that appears there gets listed.
+	personal := map[string]bool{}
+	for _, d := range []string{c.User.Downloads, c.User.Desktop, c.User.Documents, c.User.Profile, c.User.LocalAppData, c.User.RoamingAppData} {
+		if d != "" {
+			personal[paths.Key(d)] = true
+		}
+	}
 	if h.CodeFiles != nil {
 		for _, m := range members {
 			files, _ := h.CodeFiles(m.PID)
@@ -354,7 +362,9 @@ func Run(c Case, h Hooks) *alerts.Autopsy {
 					continue
 				}
 				code[paths.Key(f)] = true
-				codeDirs[paths.Key(filepath.Dir(f))] = true
+				if d := paths.Key(filepath.Dir(f)); !personal[d] {
+					codeDirs[d] = true
+				}
 			}
 		}
 	}
