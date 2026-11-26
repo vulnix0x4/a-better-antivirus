@@ -20,7 +20,9 @@ func SystemHooks(memoryImage bool) Hooks {
 		OpenFiles:   procinfo.OpenFiles,
 		ReadMemory:  procinfo.ReadMemory,
 		WorkingDir:  procinfo.WorkingDir,
+		CodeFiles:   procinfo.CodeFiles,
 		StagingDirs: DefaultStagingDirs,
+		StartupDirs: StartupDirs,
 		EvidenceDir: paths.EvidenceDir(),
 		MemoryImage: memoryImage,
 	}

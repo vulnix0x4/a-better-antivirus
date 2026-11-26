@@ -285,7 +285,9 @@ func boilerplate(host string) bool {
 		"www.apple.com", "ns.adobe.com", "purl.org", "xml.org", "www.xml.org", "ocsp.digicert.com", "crl3.digicert.com", "crl4.digicert.com",
 		"www.digicert.com", "cacerts.digicert.com", "ocsp.apple.com", "crl.apple.com", "www.microsoft.com", "go.microsoft.com",
 		"crl.microsoft.com", "ocsp.sectigo.com", "crl.sectigo.com", "ocsp.comodoca.com", "crl.comodoca.com", "ocsp.globalsign.com",
-		"crl.globalsign.com", "secure.globalsign.com", "ocsp.usertrust.com", "crl.usertrust.com", "json-schema.org", "golang.org", "go.dev"} {
+		"crl.globalsign.com", "secure.globalsign.com", "ocsp.usertrust.com", "crl.usertrust.com", "json-schema.org", "golang.org", "go.dev",
+		// the names of picture metadata (a screenshot it took carries them)
+		"ns.microsoft.com", "cipa.jp", "iptc.org", "www.iptc.org", "ns.useplus.org", "www.npes.org"} {
 		if host == b {
 			return true
 		}
@@ -311,6 +313,9 @@ func Addresses(inMemory, inFile map[string]string) []alerts.Address {
 	}
 	var out []alerts.Address
 	for v, w := range where {
+		if w == "memory" && kinds[v] == KindURL && glued(v, kinds) {
+			continue
+		}
 		out = append(out, alerts.Address{Kind: kinds[v], Value: v, Where: w})
 	}
 	rank := map[string]int{KindTelegram: 0, KindDiscord: 1, KindURL: 2, KindConn: 3}
@@ -324,6 +329,25 @@ func Addresses(inMemory, inFile map[string]string) []alerts.Address {
 		return out[i].Value < out[j].Value
 	})
 	return out
+}
+
+// glued: v is another address found with more text run on after it, not an
+// address of its own. In memory, the fields of a record lie end to end (a
+// saved login's site, then its user name, with nothing between), and the
+// scan reads on into the next field: "https://site/login" then
+// "https://site/loginemailname@mail.compassword…". Only a continuation that
+// a web address can't have after that point counts as glued: a path, query
+// or fragment going on ("/", "?", "#", "&", "=") doesn't.
+func glued(v string, kinds map[string]string) bool {
+	for u, k := range kinds {
+		if k != KindURL || len(u) >= len(v) || !strings.HasPrefix(v, u) {
+			continue
+		}
+		if !strings.ContainsRune("/?#&=;%", rune(v[len(u)])) && !strings.HasSuffix(u, "/") {
+			return true
+		}
+	}
+	return false
 }
 
 // Shareable says whether an address is certainly the attacker's, not

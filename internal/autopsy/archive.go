@@ -139,6 +139,11 @@ const (
 // gives if it can) is: a bait, a copy of a real store's file, or named like
 // one.
 func (k *known) classify(name string, size int64, crc func() (uint32, bool)) (verdict, what string) {
+	if size == 0 {
+		// Every empty file has the same (no) contents: matching an empty
+		// bait or real file by them says nothing.
+		crc = nil
+	}
 	sum, haveSum := uint32(0), false
 	sumOnce := false
 	getSum := func() (uint32, bool) {
