@@ -39,3 +39,13 @@ func DefaultStagingDirs(c *Case) []Dir {
 	}
 	return append(out, homeDirs(c)...)
 }
+
+// StartupDirs are the folders whose programs start at every sign-in (or
+// boot): launch agents and daemons.
+func StartupDirs(c *Case) []string {
+	out := []string{"/Library/LaunchAgents", "/Library/LaunchDaemons"}
+	if c.User.Profile != "" {
+		out = append([]string{filepath.Join(c.User.Profile, "Library", "LaunchAgents")}, out...)
+	}
+	return out
+}

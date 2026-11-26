@@ -26,3 +26,12 @@ func DefaultStagingDirs(c *Case) []Dir {
 	out := []Dir{{Path: filepath.Join(c.User.LocalAppData, "Temp"), Depth: 3}, {Path: `C:\Windows\Temp`, Depth: 2}, {Path: `C:\Users\Public`, Depth: 2}, {Path: `C:\ProgramData`, Depth: 1}}
 	return append(out, homeDirs(c)...)
 }
+
+// StartupDirs are the folders whose programs Windows starts at every sign-in.
+func StartupDirs(c *Case) []string {
+	var out []string
+	if c.User.RoamingAppData != "" {
+		out = append(out, filepath.Join(c.User.RoamingAppData, "Microsoft", "Windows", "Start Menu", "Programs", "Startup"))
+	}
+	return append(out, `C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup`)
+}

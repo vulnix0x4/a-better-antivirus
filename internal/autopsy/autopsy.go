@@ -76,12 +76,18 @@ type Case struct {
 // Hooks are the operating system's part, and the service's.
 type Hooks struct {
 	// Recorder asks the flight recorder; why says why it can't ("" if it can).
-	Recorder    func(q recorder.Query) (res recorder.Result, why string)
-	StartedAt   func(pid uint32) (time.Time, error)
-	OpenFiles   func(pid uint32) ([]string, error)
-	ReadMemory  func(pid uint32, limit int64, fn func(base uint64, b []byte) bool) (int64, error)
-	WorkingDir  func(pid uint32) string
+	Recorder   func(q recorder.Query) (res recorder.Result, why string)
+	StartedAt  func(pid uint32) (time.Time, error)
+	OpenFiles  func(pid uint32) ([]string, error)
+	ReadMemory func(pid uint32, limit int64, fn func(base uint64, b []byte) bool) (int64, error)
+	WorkingDir func(pid uint32) string
+	// CodeFiles lists the program files a process runs code from (its
+	// program and loaded libraries).
+	CodeFiles   func(pid uint32) ([]string, error)
 	StagingDirs func(c *Case) []Dir
+	// StartupDirs are the folders whose programs start at every sign-in: a
+	// file that appears there while it ran is listed as left behind.
+	StartupDirs func(c *Case) []string
 	// EvidenceDir is where evidence folders go ("" to save none), and
 	// MemoryImage whether one includes a copy of the program's memory.
 	EvidenceDir string
@@ -329,8 +335,42 @@ func Run(c Case, h Hooks) *alerts.Autopsy {
 			}
 		}
 	}
-	staged, where := findStaged(dirs, since.Add(-time.Second), skip, h.EvidenceDir)
+	var startup []string
+	if h.StartupDirs != nil {
+		startup = h.StartupDirs(&c)
+		for _, d := range startup {
+			dirs = append(dirs, Dir{Path: d, Depth: 0})
+		}
+	}
+	// The program's own code: the files its processes run code from, and the
+	// folders they're in (a self-unpacking program's own libraries are
+	// counted there, not listed as what it collected).
+	code, codeDirs := map[string]bool{}, map[string]bool{}
+	// The person's own folders are never its code folder, even when it runs
+	// from one (a download): anything else that appears there gets listed.
+	personal := map[string]bool{}
+	for _, d := range []string{c.User.Downloads, c.User.Desktop, c.User.Documents, c.User.Profile, c.User.LocalAppData, c.User.RoamingAppData} {
+		if d != "" {
+			personal[paths.Key(d)] = true
+		}
+	}
+	if h.CodeFiles != nil {
+		for _, m := range members {
+			files, _ := h.CodeFiles(m.PID)
+			for _, f := range files {
+				if systemFile(f) {
+					continue
+				}
+				code[paths.Key(f)] = true
+				if d := paths.Key(filepath.Dir(f)); !personal[d] {
+					codeDirs[d] = true
+				}
+			}
+		}
+	}
+	staged, where, mine := findStaged(dirs, since.Add(-time.Second), skip, h.EvidenceDir, func(p string) bool { return ownCode(p, code, codeDirs) })
 	a.StagedWhere = where
+	self := newSelfCopy(c.Image)
 	for _, st := range staged {
 		if realFiles[st.Path] != "" {
 			continue
@@ -374,7 +414,15 @@ func Run(c Case, h Hooks) *alerts.Autopsy {
 				if st.What == "" {
 					st.What = fmt.Sprintf("an archive of %d files (%d baits, %d copies of your real files)", len(entries)+more, nb, nr)
 				}
+				if err == nil && more == 0 && codeDirs[paths.Key(filepath.Dir(st.Path))] && allCode(entries) {
+					// An archive of program code beside its libraries (PyInstaller's
+					// base_library.zip): part of the program, not what it collected.
+					addMine(mine, st)
+					continue
+				}
 			}
+		} else if self.is(st.Path, st.Size) {
+			st.What = "a copy of the program itself"
 		} else {
 			size := st.Size
 			p := st.Path
@@ -386,7 +434,17 @@ func Run(c Case, h Hooks) *alerts.Autopsy {
 			}
 		}
 		a.Staged = append(a.Staged, *st)
+		for _, d := range startup {
+			if paths.Same(filepath.Dir(st.Path), d) {
+				what := "a new file"
+				if st.What == "a copy of the program itself" {
+					what = "a copy of itself"
+				}
+				a.Left = append(a.Left, fmt.Sprintf("It put %s in a folder whose programs start at every sign-in: %s. Delete it once you've ended the program (aba kill), or it may start again.", what, st.Path))
+			}
+		}
 	}
+	a.Unpacked = unpackedList(mine)
 
 	// Where it was sending: its memory, its file, its connections.
 	mem := NewScanner()
@@ -463,6 +521,9 @@ func storeOfWhat(stores []baits.Store, what string) (name, id, kind string) {
 // systemFile: the operating system's own files every program has open.
 func systemFile(p string) bool {
 	l := strings.ToLower(filepath.ToSlash(p))
+	if l == "c:/windows" {
+		return true // the folder itself, which programs hold open as where they started
+	}
 	for _, pre := range []string{"c:/windows/", "/system/", "/usr/lib/", "/usr/share/", "/lib/", "/lib64/", "/usr/lib64/", "/dev/", "/proc/", "/sys/",
 		"/private/var/db/", "/library/preferences/", "/usr/libexec/"} {
 		if strings.HasPrefix(l, pre) {
