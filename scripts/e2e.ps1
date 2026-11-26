@@ -415,6 +415,28 @@ Aba kill $a1.id
 Check (WaitFor { -not (Get-Process -Id $s1.Id -ErrorAction SilentlyContinue) } 10) 'killed'
 Check (WaitFor { NtfyMessages | Where-Object { $_.message -match $a1.id } } 60) 'critical alert reached the phone (ntfy)'
 
+Step 'Stealer running as administrator: frozen the moment it opens the bait'
+# Real stealers (Umbral, Blank Grabber) make themselves administrator first,
+# with the admin prompt or a way around it. Instant freeze used to let every
+# program running as administrator through, so they were only caught by the
+# event log, a second later. This one keeps the runner's admin token.
+$exe = Join-Path $env:TEMP 'stealer-admin.exe'
+Copy-Item $Aba $exe -Force
+[IO.File]::AppendAllText($exe, [guid]::NewGuid().ToString())
+Snap
+$sa = Start-Process -FilePath $exe -ArgumentList 'test-reader', "`"$desktopBait`"" -PassThru -WindowStyle Hidden
+$aa = AlertFor $sa.Id
+Check ($aa -and $aa.tier -eq 'critical' -and (Did $aa 'freeze')) "caught and frozen ($($aa.id), $($aa.latencyMs) ms)"
+if ($sess -eq 0) {
+    Ok 'instant freeze deliberately skips session 0 (services); caught via the event log instead'
+} else {
+    Check ($aa.instant -eq $true) "running as administrator, still caught the moment it opened the bait (frozen $($aa.latencyMs) ms after the open)"
+}
+Select-String -Path "$data\service.log" -Pattern "pid $($sa.Id)\b" | ForEach-Object { "  log: " + $_.Line } | Out-Host
+if ($aa) { Aba kill $aa.id }
+Check (WaitFor { -not (Get-Process -Id $sa.Id -ErrorAction SilentlyContinue) } 10) 'killed'
+Start-Sleep -Seconds 2
+
 Step 'Autopsy: a stealer that read a real key before the bait'
 # The answer has to be "it read your real SSH keys", with the evidence saved,
 # the bot token in its memory found, and a shareable file with nothing of yours.
