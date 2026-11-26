@@ -2046,6 +2046,7 @@ func mineVerdict(m *detect.Mine, image string, system bool) classify.Verdict {
 	case m.Pool != "":
 		reasons = append(reasons, fmt.Sprintf("the pool it most likely wanted: %s, looked up just before (port %d)", m.Pool, m.Port))
 	}
+	reasons = append(reasons, "whatever started it may still be on this "+platform.PC+" and start it again: run a full antivirus scan")
 	reasons = append(reasons, "nothing reached the real pool, and ABA sent nothing anywhere: the pool it reached is ABA's fake one, on this "+platform.PC)
 	if m.Wallet != "" {
 		reasons = append(reasons, "you can report the wallet to the pool: pools block wallets that malware mines for")
