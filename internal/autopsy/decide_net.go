@@ -201,7 +201,7 @@ func sendLine(s alerts.NetSend, after bool) string {
 		where = s.To
 	}
 	if s.LAN {
-		where += ", a device on your local network (one that may pass things on to the internet, like a router or a proxy)"
+		where += " on your local network"
 	}
 	bytes, at := s.Bytes, s.First
 	if after {
@@ -240,6 +240,12 @@ func netWords(n netAnswer, f facts, a *alerts.Autopsy) {
 			when = "While it ran, "
 		}
 		a.Summary = append(a.Summary, when+strings.Join(ls, "; ")+".")
+		for _, s := range n.after {
+			if s.LAN {
+				a.Summary = append(a.Summary, "An address on your local network still counts: it left this "+pcWord+", and a router or a proxy there passes things on to the internet.")
+				break
+			}
+		}
 	case alerts.SentNothing:
 		since := "it started"
 		if n.read {

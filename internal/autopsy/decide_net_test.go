@@ -146,7 +146,7 @@ func TestChildrenLoopbackAndLAN(t *testing.T) {
 	a = run(netFacts(netOf(func(r *netrec.Record) {
 		r.Send(readAt.Add(time.Second), stealerPID, netip.MustParseAddrPort("192.168.89.1:443"), 4000, false, false)
 	})))
-	if a.Sent != alerts.SentSome || !a.Sends[0].LAN || !strings.Contains(strings.Join(a.Summary, " "), "a device on your local network") {
+	if a.Sent != alerts.SentSome || !a.Sends[0].LAN || !strings.Contains(strings.Join(a.Summary, " "), "192.168.89.1:443 on your local network") || !strings.Contains(strings.Join(a.Summary, " "), "a proxy there passes things on") {
 		t.Errorf("LAN: %s %+v %q", a.Sent, a.Sends, a.Summary)
 	}
 }
