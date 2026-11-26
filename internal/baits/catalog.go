@@ -418,6 +418,17 @@ func Adopted(s Spec, u config.UserInfo) bool {
 	return used
 }
 
+// ProfilesIndex is the file in which the real browser lists its profiles,
+// the one Adopted and Crowded read for an embedded bait; "" for a bait that
+// isn't embedded. Where that browser isn't installed, ABA may have put a fake
+// one there (a decoy), and then this file is itself a bait.
+func ProfilesIndex(s Spec, u config.UserInfo) string {
+	if s.Inside == nil {
+		return ""
+	}
+	return j(s.Inside(u), s.profilesFile())
+}
+
 const firefoxIndex = "profiles.ini"
 
 func (s Spec) profilesFile() string {
