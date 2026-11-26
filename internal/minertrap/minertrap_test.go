@@ -392,9 +392,22 @@ func TestTrapDNSAndRecentNames(t *testing.T) {
 		t.Errorf("pool %q %v (%v)", p, sure, got.Names)
 	}
 	mu.Lock()
-	defer mu.Unlock()
 	if len(heard) != 2 {
 		t.Errorf("heard %+v", heard)
+	}
+	mu.Unlock()
+	// Two pools looked up: the last one before it connected is the likely one.
+	u.Write(query(9, "pool.hashvault.pro", dnsTypeA))
+	u.Read(buf)
+	c2, err := net.Dial("tcp", st.Pool[0].String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c2.Close()
+	fmt.Fprint(c2, xmrigLogin+"\n")
+	got = wait(t, caught)
+	if p, _ := got.Pool(); p != "pool.hashvault.pro" || len(got.Names) != 2 {
+		t.Errorf("pool %q (%v)", p, got.Names)
 	}
 }
 
