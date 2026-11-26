@@ -20,6 +20,7 @@ import (
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/alerts"
 	"github.com/vulnix0x4/a-better-antivirus/internal/baits"
+	"github.com/vulnix0x4/a-better-antivirus/internal/netrec"
 	"github.com/vulnix0x4/a-better-antivirus/internal/recorder"
 )
 
@@ -38,6 +39,16 @@ type facts struct {
 	// normally and is caught (see Case.Running): it opens its own data all
 	// the time, so whether the code in it took that data can't be told.
 	ownBusy []baits.Store
+
+	// The network record (see decide_net.go).
+	netOn  bool
+	netWhy string // why it isn't on
+	net    netrec.Result
+	// busy are processes of a genuine browser that had been running
+	// normally (Case.Running): they send all the time.
+	busy            map[uint32]bool
+	frozen, blocked bool
+	alertID         string
 }
 
 // busyLine is the "can't tell" for a store its own, normally running browser
@@ -140,10 +151,19 @@ func decide(f facts, a *alerts.Autopsy) {
 	a.Unsure = unsure
 
 	byStore := groupReads(reads)
+	net := netCheck(f, reads, len(unsure) == 0 && len(leads) == 0)
 	switch {
 	case len(reads) > 0:
 		a.Answer = alerts.AnswerRead
-		a.Headline = "It opened " + joinNames(storeNames(byStore)) + ". Act on it now."
+		names := joinNames(storeNames(byStore))
+		switch net.state {
+		case alerts.SentNothing:
+			a.Headline = "It opened " + names + ", but it was frozen before it sent anything: nothing left this " + pcWord + ". End it; you don't need to change anything."
+		case alerts.SentSome:
+			a.Headline = "It opened " + names + " and then connected to " + hosts(net.after) + ", so assume it was sent. Act on it now."
+		default:
+			a.Headline = "It opened " + names + ". Act on it now."
+		}
 		for _, g := range byStore {
 			r := g[0]
 			line := fmt.Sprintf("%s: %s at %s", capital(r.Name), fileList(g), clock(r.At))
@@ -151,16 +171,21 @@ func decide(f facts, a *alerts.Autopsy) {
 				line += ", " + rel
 			}
 			a.Summary = append(a.Summary, line+" ("+r.How+").")
-			a.Steps = append(a.Steps, advice(r.Store, r.Kind, r.Name)...)
+			if net.state != alerts.SentNothing {
+				a.Steps = append(a.Steps, advice(r.Store, r.Kind, r.Name)...)
+			}
 		}
 		if len(unsure) > 0 {
 			a.Summary = append(a.Summary, "It may have taken more than this: "+lower(unsure[0]))
 		}
-		for _, s := range f.ownBusy {
-			if _, read := idxStore(byStore, s.ID); !read {
-				a.Steps = append(a.Steps, advice(s.ID, s.Kind, s.Name)...)
+		if net.state != alerts.SentNothing {
+			for _, s := range f.ownBusy {
+				if _, read := idxStore(byStore, s.ID); !read {
+					a.Steps = append(a.Steps, advice(s.ID, s.Kind, s.Name)...)
+				}
 			}
 		}
+		netWords(net, f, a)
 	case len(unsure) > 0 || len(leads) > 0:
 		a.Answer = alerts.AnswerUnknown
 		first := ""
@@ -169,25 +194,37 @@ func decide(f facts, a *alerts.Autopsy) {
 		} else {
 			first = unsure[0]
 		}
-		a.Headline = "ABA can't tell whether it read anything real. " + first
+		switch net.state {
+		case alerts.SentNothing:
+			a.Headline = "ABA can't tell whether it read anything real, but nothing it ran sent anything over the network before it was frozen: nothing left this " + pcWord + ". You don't need to change anything."
+			a.Summary = append(a.Summary, "Why ABA can't tell what it read: "+lower(first))
+		case alerts.SentSome:
+			a.Headline = "ABA can't tell whether it read anything real, and it connected to " + hosts(net.after) + " while it ran. " + first
+		default:
+			a.Headline = "ABA can't tell whether it read anything real. " + first
+		}
 		if len(watched) > 0 && f.recorderOn {
 			a.Summary = append(a.Summary, "It saw no open of "+joinNames(watched)+" by it while it ran.")
 		}
-		a.Summary = append(a.Summary, "To be safe, treat what ABA couldn't see as taken:")
-		advised := map[string]bool{}
-		for _, s := range f.ownBusy {
-			advised[s.ID] = true
-			a.Steps = append(a.Steps, advice(s.ID, s.Kind, s.Name)...)
-		}
-		for _, n := range unwatchedStores(f.res.Stores, f.res.Doubts, f.stagedReal, !f.recorderOn || f.start.IsZero() || len(f.res.Lapses) > 0 || !f.res.Forgot.IsZero()) {
-			if !advised[n.Store] {
-				a.Steps = append(a.Steps, advice(n.Store, n.Kind, n.Name)...)
+		if net.state != alerts.SentNothing {
+			a.Summary = append(a.Summary, "To be safe, treat what ABA couldn't see as taken:")
+			advised := map[string]bool{}
+			for _, s := range f.ownBusy {
+				advised[s.ID] = true
+				a.Steps = append(a.Steps, advice(s.ID, s.Kind, s.Name)...)
+			}
+			for _, n := range unwatchedStores(f.res.Stores, f.res.Doubts, f.stagedReal, !f.recorderOn || f.start.IsZero() || len(f.res.Lapses) > 0 || !f.res.Forgot.IsZero()) {
+				if !advised[n.Store] {
+					a.Steps = append(a.Steps, advice(n.Store, n.Kind, n.Name)...)
+				}
 			}
 		}
+		netWords(net, f, a)
 	case present == 0:
 		a.Answer = alerts.AnswerNoSign
 		a.Headline = "No sign it read anything real: ABA found none of the usual places your passwords, cookies, wallets and keys are kept on this " + pcWord + ", so there was nothing of that kind to take."
 		a.Summary = append(a.Summary, "ABA only knows the places listed in its catalog; data kept anywhere else wasn't watched.")
+		netNeutral(net, a)
 	default:
 		a.Answer = alerts.AnswerNoSign
 		since := ""
@@ -196,6 +233,7 @@ func decide(f facts, a *alerts.Autopsy) {
 		}
 		a.Headline = "No sign it read anything real. ABA was watching " + joinNames(watched) + since + " the whole time it ran, and saw it open none of them."
 		a.Summary = append(a.Summary, "That's what ABA saw, not proof: "+limits)
+		netNeutral(net, a)
 	}
 }
 

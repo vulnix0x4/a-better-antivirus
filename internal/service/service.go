@@ -28,6 +28,7 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/engine"
 	"github.com/vulnix0x4/a-better-antivirus/internal/logx"
 	"github.com/vulnix0x4/a-better-antivirus/internal/netguard"
+	"github.com/vulnix0x4/a-better-antivirus/internal/netrec"
 	"github.com/vulnix0x4/a-better-antivirus/internal/notify"
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
@@ -82,6 +83,7 @@ func newServer(echo bool) *server {
 	}
 	s.eng = engine.New(s, uint32(os.Getpid()))
 	s.rec = recorder.New()
+	s.netRec = netrec.New()
 	s.initWatchers()
 	config.SlowLock = func(d time.Duration, caller string) {
 		s.log.Printf("state lock held %v by %s", d.Round(time.Millisecond), caller)
@@ -201,6 +203,7 @@ func (s *server) run(ctx context.Context, ctl <-chan svcctl.Signal) error {
 			s.stopWatching()
 			s.clipboardBait(false) // the guards put the clipboard back as they go
 			s.minerTrapStop()
+			s.netOff("the service stopped")
 			// Let go of every hold properly (what's frozen stays suspended): a
 			// hold that's simply dropped kills its process.
 			procinfo.DropHolds(time.Now().Add(time.Hour), func(string) bool { return false })

@@ -2,11 +2,29 @@
 
 ## Unreleased
 
+**The autopsy says whether anything left your PC (Windows)**
+
+- ABA now keeps a **network record** on Windows: which programs send something over the network, where to, when
+  and roughly how much, from Windows' own event tracing (no driver). It stays in memory, never alerts, and costs
+  well under a tenth of a percent of one processor core.
+- After a catch, the autopsy uses it to say whether your data got out before the freeze, with one of three
+  answers: **nothing was sent** (then there's nothing to change, only the program to end), **it sent something**
+  after opening your data (where to, roughly how much, and what to do now), or **ABA can't tell**, and why. A
+  program it started counts as it; sends from before it opened anything of yours are only mentioned; traffic that
+  stays on this PC never counts.
+- In the lab, Phemedrone got "nothing left this PC". Umbral and Blank Grabber got "it sent something": each sent
+  the Discord login it had just read to discord.com (to check it) about a tenth of a second after reading it,
+  before the freeze landed. ABA can't see inside encrypted traffic, so it says to assume the login was taken.
+- The popup, the phone alert and `aba autopsy` say so in plain words; the `aba` dashboard shows whether the
+  network record is running. On Linux and macOS the autopsy says it can't tell yet.
+
 **The autopsy, tested against real stealers**
 
 - Tested in an isolated lab against three real stealers (Umbral, Phemedrone, Blank Grabber): each was frozen
-  before it sent anything, and the autopsy found where it was sending (its Discord webhook or Telegram bot) in
-  its memory or program file, and what real data it had opened first.
+  before it uploaded what it collected, and the autopsy found where it was sending (its Discord webhook or
+  Telegram bot) in its memory or program file, and what real data it had opened first. (Two of them had already
+  sent the Discord login they read to discord.com, to check it, in the second before the freeze: the network
+  record below now shows that.)
 - A stealer that unpacks itself (a Python one, for example) no longer floods "Files that appeared while it ran"
   with its own libraries: those are counted in one line per folder, and what it collected stays listed.
 - A copy of itself that a stealer puts in a startup folder is now found, with a line saying to delete it.

@@ -7,7 +7,8 @@
   freeze, per-program block, kill, resume + ignore, release, strict-mode
   isolation (with a phone alert sent *while* isolated), bait repair, decoy
   retirement, custom baits, the autopsy of a stealer that read a real key
-  before the bait and of one that didn't, and a complete uninstall.
+  before the bait (one that sent nothing, one that sent something after) and
+  of one that didn't, and a complete uninstall.
 
   DO NOT run this on a PC you care about: it isolates the network for a few
   seconds and changes system settings. It's meant for CI runners.
@@ -422,7 +423,7 @@ Check ((RecorderRule $sshDir).Count -eq 1) 'the flight recorder''s audit rule is
 $token = '7134567890:AAHk3n2Lq9xZr8Yv6Tt5Ww4Uu3Ss2Rr1Qq0'
 # Readers: copies of aba.exe (unsigned, in Temp) running test-reader, which
 # reads each file it's given in turn, then waits to be frozen.
-function Reader([string]$name, [string[]]$files, [string]$beacon, [string]$do) {
+function Reader([string]$name, [string[]]$files, [string]$beacon, [string]$do, [string]$send) {
     $exe = Join-Path $env:TEMP "$name.exe"
     Copy-Item $Aba $exe -Force
     [IO.File]::AppendAllText($exe, [guid]::NewGuid().ToString())
@@ -430,6 +431,7 @@ function Reader([string]$name, [string[]]$files, [string]$beacon, [string]$do) {
     $readerArgs = @($exe, 'test-reader')
     if ($beacon) { $readerArgs += @('--beacon', $beacon) }
     if ($do) { $readerArgs += @('--do', $do) }   # overwrite | delete, instead of reading
+    if ($send) { $readerArgs += @('--send', $send) }   # sends to it after the first file
     $procId = & $Medium @readerArgs @files
     if ($LASTEXITCODE -or -not $procId) { Fail "fake stealer $name didn't start" }
     return [int]$procId
@@ -444,7 +446,9 @@ $aa = Autopsied $aa.id
 Check ($aa) 'its autopsy finished'
 Check ($aa.autopsy.answer -eq 'read') "the autopsy says it read real data: $($aa.autopsy.headline) $($aa.autopsy.unsure -join ' ')"
 Check (@($aa.autopsy.reads | Where-Object { $_.path -match 'id_e2e_real' }).Count -ge 1) "the real key is among what it read: $(($aa.autopsy.reads.path) -join ', ')"
-Check ($aa.autopsy.steps[0] -match 'SSH') "the first thing to do is about the SSH keys: $($aa.autopsy.steps[0])"
+# It sent nothing: the network record proves nothing left, so there's nothing to change.
+Check ($aa.autopsy.sent -eq 'nothing') "nothing left the PC (answer 1): $($aa.autopsy.headline) | $($aa.autopsy.sentWhy -join ' | ') | sends: $(($aa.autopsy.sends | ForEach-Object { "$($_.pid) $($_.name) $($_.to)" }) -join ', ')"
+Check ($aa.autopsy.headline -match 'nothing left this' -and -not $aa.autopsy.steps) "so it says there's nothing to change: $($aa.autopsy.headline)"
 Check (@($aa.autopsy.addresses | Where-Object { $_.kind -eq 'telegram-bot' -and $_.value -eq $token }).Count -eq 1) "the bot token in its memory was found ($($aa.autopsy.memoryScanned) bytes looked through) $($aa.autopsy.notes -join ' ')"
 $ev = Join-Path $data "evidence\$($aa.id)"
 Check ((Test-Path "$ev\README.txt") -and (Test-Path "$ev\autopsy.json") -and @(Get-ChildItem "$ev\program\*.sample").Count -eq 1) "evidence saved to $ev"
@@ -457,6 +461,21 @@ Check ($iocJson.file.sha256.Length -eq 64 -and $iocJson.sendingTo.value -contain
 Check (-not $iocText.Contains($env:USERPROFILE) -and -not $iocText.Contains($env:USERPROFILE.Replace('\', '\\')) -and -not $iocText.Contains('BEGIN OPENSSH')) 'and nothing of yours'
 Aba kill $aa.id
 Check (Test-Path "$ev\autopsy.json") 'the evidence outlives aba kill'
+
+Step 'Autopsy: a stealer that sent something after reading a real key'
+# It reads the real key, posts to example.com, then opens the bait: answer 2,
+# where it sent and what to do.
+$pc = Reader 'stealer-c' @($realKey, $desktopBait) '' '' 'http://example.com/'
+$ac = AlertFor $pc
+Check ($ac -and (Did $ac 'freeze')) "caught and frozen ($($ac.id))"
+$ac = Autopsied $ac.id
+Check ($ac) 'its autopsy finished'
+Check ($ac.autopsy.answer -eq 'read' -and $ac.autopsy.sent -eq 'sent') "it read real data and sent something (answer 2): $($ac.autopsy.headline) | $($ac.autopsy.sentWhy -join ' | ')"
+Check (@($ac.autopsy.sends | Where-Object { $_.after -and $_.to -match ':80$' }).Count -ge 1) "the send to example.com is listed: $(($ac.autopsy.sends | ForEach-Object { "$($_.name) $($_.to) $($_.bytesAfter) B" }) -join ', ')"
+Check ($ac.autopsy.headline -match 'connected to' -and $ac.autopsy.headline -match 'Act on it now') "the headline says where it connected: $($ac.autopsy.headline)"
+Check ($ac.autopsy.steps[0] -match 'SSH') "the first thing to do is about the SSH keys: $($ac.autopsy.steps[0])"
+Aba autopsy $ac.id
+Aba kill $ac.id
 
 Step 'Autopsy: a stealer that only touched the bait'
 $pb = Reader 'stealer-b' @($desktopBait) ''

@@ -37,6 +37,13 @@ jobs:
           ABA_INTEGRATION: "1"
         run: go test -count=1 -v ./internal/integration/
 
+      # The network record against Windows' real event tracing: a request
+      # of its own and one by a program it starts, by name.
+      - name: Network record (admin)
+        env:
+          ABA_INTEGRATION: "1"
+        run: go test -count=1 -v -run 'TestWatch|TestLayouts' ./internal/netrec/ ./internal/etw/
+
       # The clipboard bait's guard the way the service runs it: as SYSTEM in
       # the desktop's session, against fake clippers running as whoever is
       # logged on (inside a private window station: no real clipboard).
