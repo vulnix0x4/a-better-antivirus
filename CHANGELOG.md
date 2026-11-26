@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+**Miner trap: hidden crypto miners are caught (Windows)**
+
+- **A new trap for miners.** Hidden miners use your PC to make money for someone else, and to be paid they have
+  to reach a mining pool. With the trap on, the names of the public pools miners use lead to a fake pool on this
+  PC (a Windows name-resolution rule for those names only, and a small name server and fake pool in ABA's
+  service, on the loopback address `127.97.98.97`). A program that logs in there to mine is frozen and cut off
+  like a stealer at a bait, whatever it is: a miner hidden inside `conhost.exe`, a program Microsoft signed, is
+  caught by its login, which no signature or trust rule changes. The alert names the wallet it mines for, the
+  pool it wanted, what the miner calls itself and where the program came from. Nothing reaches the real pool
+  and nothing is sent anywhere. Tested against a real SilentCryptoMiner (XMRig inside two hollowed `conhost.exe`)
+  in an isolated lab.
+- `aba miners on|off|test`. The test runs a harmless fake miner that looks up a real pool's name and logs in.
+  Turning the trap off, or uninstalling, removes the rule at once. `aba doctor` and the dashboard show it.
+- Someone who mines on purpose is told, in the alert, how to turn the trap off and let their miner go.
+
+**Setup asks about clippers and miners**
+
+- Both setups (terminal and ABA-Setup.exe) ask whether to catch clippers (the clipboard bait, which used to be
+  off unless you knew to switch it on) and hidden miners, each with a sentence on what it does. Both are
+  recommended; the miner trap unless you mine yourself. An install from before is asked once, the next time setup
+  runs with "Keep my settings". The review and the "Saving your settings" line say what's on.
+- A silent install, an update and `aba install --yes` never switch either on by themselves: `/CLIPPERS=1`,
+  `/MINERS=1` and `--clippers`, `--miners` do.
+
 ## v0.8.0
 
 After a catch, ABA answers the question it used to leave you with: did it already take my real passwords,

@@ -30,7 +30,7 @@ On a Mac or Linux? See [Linux and macOS](#linux-and-macos-early).
 
 ### Installer (Windows 10/11, 64-bit)
 
-Download **[ABA-Setup.exe](https://github.com/vulnix0x4/a-better-antivirus/releases/latest/download/ABA-Setup.exe)** and double-click it. It carries both the x64 and Arm64 builds of `aba.exe`, asks two questions (phone alerts and automatic updates), sets up the recommended baits with Balanced protection, and offers a **safe test** at the end. Running it again on an existing install updates or repairs ABA without changing your settings.
+Download **[ABA-Setup.exe](https://github.com/vulnix0x4/a-better-antivirus/releases/latest/download/ABA-Setup.exe)** and double-click it. It carries both the x64 and Arm64 builds of `aba.exe`, asks a few questions (phone alerts, whether to catch clippers and hidden crypto miners, automatic updates), sets up the recommended baits with Balanced protection, and offers a **safe test** at the end. Running it again on an existing install updates or repairs ABA without changing your settings.
 
 > Releases aren't code-signed yet, so Windows SmartScreen may warn you. Check the file's SHA-256 against `SHA256SUMS.txt` on [Releases](https://github.com/vulnix0x4/a-better-antivirus/releases/latest) first:
 > ```powershell
@@ -48,7 +48,7 @@ irm https://raw.githubusercontent.com/vulnix0x4/a-better-antivirus/main/install.
 
 It downloads the latest release for your PC, checks that its checksum list carries a valid signature from ABA's release key, checks the download against it, and starts the guided setup ([read the script first](install.ps1) if you like). Setup takes about a minute:
 
-- **Recommended** asks just two things — phone alerts and automatic updates — and uses sensible defaults for the rest. **Customize** lets you pick every bait and response.
+- **Recommended** asks just a few things (phone alerts, whether to catch [clippers](#clipboard-bait-windows) and [hidden crypto miners](#miner-trap-windows), automatic updates) and uses sensible defaults for the rest. **Customize** lets you pick every bait and response.
 - If you set up phone alerts, it sends a test notification so you know they work.
 - It ends by offering a **safe test**: a harmless fake stealer reads a bait and you watch ABA freeze it.
 - Afterwards `aba` works in the same PowerShell window.
@@ -58,7 +58,7 @@ It downloads the latest release for your PC, checks that its checksum list carri
 <details>
 <summary><b>Other ways to install (silent flags, test VMs, by hand)</b></summary>
 
-**Silent installer** (same defaults as clicking Next all the way — recommended baits, Balanced response, no phone alerts, automatic updates on):
+**Silent installer** (same defaults as clicking Next all the way — recommended baits, Balanced response, no phone alerts, automatic updates on — except that the clipper and miner traps stay off unless you ask for them):
 
 ```powershell
 .\ABA-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
@@ -70,6 +70,8 @@ Optional flags (first install only; an existing install keeps its settings):
 |---|---|
 | `/NTFYTOPIC=my-topic` | Send phone alerts to this [ntfy](https://ntfy.sh) topic (letters, digits, `-`, `_`) |
 | `/AUTOUPDATE=0` | Don't update automatically (`1`, the default, does) |
+| `/CLIPPERS=1` | Catch clippers with the clipboard bait (`0` or not given: off) |
+| `/MINERS=1` | Catch hidden crypto miners with the miner trap (`0` or not given: off) |
 | `/PRESET=alert\|balanced\|strict` | Response preset (default `balanced`) |
 | `/LEARNING=3` | Days of learning mode; only changes something with `strict` (default `0`) |
 | `/CANARYEMAIL=me@example.com` | Create canary tokens that email this address |
@@ -249,9 +251,22 @@ Before anything can end the program, an **evidence folder** only administrators 
 
 How the recorder watches: on **Windows**, an audit rule on the folders those files are in, inherited only by the files directly in each folder and only for reading data (browsers replace some of these files all the time, and a rule on a file goes with it). A folder that logs more than 600 opens in an hour is let go of for a day, so the Security log keeps room for the baits. On **Linux**, fanotify marks on the same folders, reporting opens (nothing is held). On **macOS**, the eslogger stream the baits already use.
 
-## Clipboard bait (optional, Windows)
+## Clipboard bait (Windows)
 
-Clippers are malware that swap a crypto wallet address you copy for the attacker's, so a payment you paste goes to them. Switch the clipboard bait on with `aba clipboard on`: while nobody is using the PC, ABA puts a wallet address on the clipboard, and a program that swaps it is frozen like any stealer, and your clipboard put back. The addresses are real ones ABA made and holds the keys to (`aba clipboard key <address>`), so a clipper that checks addresses can't tell them apart and nothing sent to one is lost. `aba clipboard test` lets a harmless fake clipper try it. It's off by default.
+Clippers are malware that swap a crypto wallet address you copy for the attacker's, so a payment you paste goes to them. While nobody is using the PC, ABA puts a wallet address on the clipboard, and a program that swaps it is frozen like any stealer, and your clipboard put back. The addresses are real ones ABA made and holds the keys to (`aba clipboard key <address>`), so a clipper that checks addresses can't tell them apart and nothing sent to one is lost. `aba clipboard test` lets a harmless fake clipper try it.
+
+Setup asks whether to turn it on (recommended). Change it any time with `aba clipboard on` or `aba clipboard off`.
+
+## Miner trap (Windows)
+
+Hidden crypto miners use your PC to make money for someone else: they come with cracked games, cheats and "free" tools, hide inside Windows' own programs (`conhost.exe`, `explorer.exe`) and keep your processor busy. To be paid, a miner has to reach a mining pool, and nearly all of them use a few dozen public pools (hashvault.pro, supportxmr.com, moneroocean.stream, nanopool.org, c3pool.com, 2miners.com, herominers.com, unMineable…).
+
+With the miner trap on, those pools' names lead to a fake pool on this PC. A program that logs in there to mine has given itself away, whatever it is and whoever signed it: it's frozen and cut off like a stealer at a bait, and the alert says which wallet it mines for, which pool it wanted, what the miner calls itself and where the program came from. You can report the wallet to the pool, which can block it. Nothing reaches the real pool, and ABA sends nothing anywhere.
+
+- **How:** a Windows name-resolution rule (the Name Resolution Policy Table, the same mechanism VPNs use) sends lookups of the pools' names, and only those, to a small name server ABA's service runs on the loopback address `127.97.98.97`. It answers with that same address, where the fake pool listens on the ports pools use (443, 3333, 5555, 7777, 10128, 14444 and more), with or without TLS. The list of pools is in [internal/minertrap/pools.go](internal/minertrap/pools.go).
+- **If you mine on purpose,** turn it off: `aba miners off`. With it on, your miner is caught like any other, and the alert says so. While it's on, the pools' websites don't open either.
+- **What it can't catch:** a miner that connects to a pool by its IP address, to a private pool or proxy, or through its own encrypted DNS. Those still need Defender. While the service isn't running, the pools' names lead nowhere.
+- `aba miners test` lets a harmless fake miner try it: it looks up a real pool's name and logs in, and connects only once the name has led to the fake pool. Setup asks whether to turn the trap on (recommended, unless you mine yourself). `aba miners on|off` changes it; turning it off or uninstalling removes the rule at once.
 
 ## Phone alerts
 
@@ -297,6 +312,7 @@ So a swapped release file, a compromised mirror or a proxy can't get code onto y
 | Evidence | `C:\ProgramData\FileAccessMonitor\evidence` (admins only): one folder per caught program | kept unless `--purge` |
 | Baits | your folders + fake app folders | ✓ (files you made yourself are kept) |
 | Firewall filters | WFP provider "A Better Antivirus" (only while responding) | ✓ |
+| Name rules (miner trap on) | Name Resolution Policy Table rules `{ABA0A0A0-…}` under `HKLM\SYSTEM\CurrentControlSet\Services\Dnscache\Parameters\DnsPolicyConfig`, for mining pools' names only | ✓ (and by `aba miners off`) |
 | Installed apps & Start menu | **A Better Antivirus** entry in Windows' Installed apps and Start menu | ✓ |
 | PATH | adds the program folder | ✓ |
 
