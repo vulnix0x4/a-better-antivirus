@@ -160,7 +160,7 @@ func (s *server) recorderHealth(add func(name string, ok bool, detail string)) {
 			add("Network record", true, fmt.Sprintf("on since %s: notes which programs send data off this %s, so after a catch ABA can say whether anything left (it never alerts on its own)",
 				ns.Since.Local().Format("Jan 2 15:04"), platform.PC))
 		case runtime.GOOS != "windows":
-			add("Network record", true, "not on "+platform.OSName()+" yet: after a catch, ABA can't say whether anything left this "+platform.PC)
+			// Not there yet: nothing to check.
 		default:
 			add("Network record", false, "not running: "+ns.Why+". After a catch, ABA can't say whether anything left this "+platform.PC)
 		}
