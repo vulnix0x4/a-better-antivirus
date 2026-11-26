@@ -85,6 +85,9 @@ func Details(a *alerts.Alert) string {
 	for _, h := range a.Baits {
 		fmt.Fprintf(&b, "\nIt %s: %s\n%s\n", accessVerb(h.Access), h.Name, h.Path)
 	}
+	for _, l := range a.Mine.Lines() {
+		fmt.Fprintln(&b, l)
+	}
 	if len(a.Actions) > 0 {
 		fmt.Fprintln(&b, "\nWhat ABA did:")
 		for _, r := range a.Actions {

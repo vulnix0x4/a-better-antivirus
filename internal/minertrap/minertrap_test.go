@@ -444,3 +444,19 @@ func TestTrapPortTaken(t *testing.T) {
 		t.Errorf("%+v", st)
 	}
 }
+
+func FuzzParseMessage(f *testing.F) {
+	f.Add([]byte(xmrigLogin))
+	f.Add([]byte(`{"id":2,"method":"mining.authorize","params":["w","x"]}`))
+	f.Add([]byte(`{"method":"eth_submitLogin","params":[1,{"a":[]}]}`))
+	f.Fuzz(func(t *testing.T, b []byte) {
+		l, _, ok := ParseMessage(b)
+		if !ok {
+			return
+		}
+		if !IsStratum(l.Method) || len(l.Wallet) > 250 || len(l.Agent) > 350 || len(l.Algo) > 16 ||
+			strings.ContainsAny(l.Wallet+l.Agent+l.Pass+l.Rig, "\x00\n\r\x1b") {
+			t.Fatalf("%+v", l)
+		}
+	})
+}
