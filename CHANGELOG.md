@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased
+## v0.9.0
 
-**Miner trap: hidden crypto miners are caught (Windows)**
+**Miner trap: hidden crypto miners are detected (Windows)**
 
 - **A new trap for miners.** Hidden miners use your PC to make money for someone else, and to be paid they have
   to reach a mining pool. With the trap on, the names of the public pools miners use lead to a fake pool on this
@@ -16,6 +16,8 @@
 - `aba miners on|off|test`. The test runs a harmless fake miner that looks up a real pool's name and logs in.
   Turning the trap off, or uninstalling, removes the rule at once. `aba doctor` and the dashboard show it.
 - Someone who mines on purpose is told, in the alert, how to turn the trap off and let their miner go.
+- The alert also says to run a full antivirus scan: whatever started the miner (often a hidden watchdog) may
+  still be on the PC and start it again.
 
 **Setup asks about clippers and miners**
 
