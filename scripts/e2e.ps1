@@ -372,8 +372,11 @@ Check $mine "the fake miner was caught logging in at the fake pool ($($mine.titl
 Check (Did $mine 'freeze') 'it was frozen'
 Check (($mine.verdict.reasons -join ' ') -match 'ABA-TEST-not-a-real-wallet') 'the alert names the wallet it mines for'
 # A browser opening a pool's website gets a page saying why, and isn't caught.
+# (Over HTTPS: port 80 can be held by Windows' own web server, as on CI
+# runners, and the trap then does without it. -k: the trap's certificate is
+# its own, which a browser warns about first.)
 Snap
-$page = (& curl.exe -s --max-time 10 http://supportxmr.com/) -join "`n"
+$page = (& curl.exe -sk --max-time 10 https://supportxmr.com/) -join "`n"
 Check ($page -match 'miner trap') 'a pool''s website explains why it doesn''t open'
 Start-Sleep -Seconds 2
 Check (-not @(Fresh | Where-Object { $_.baits -and $_.baits[0].access -eq 'mine' }).Count) 'and opening it isn''t taken for mining'
