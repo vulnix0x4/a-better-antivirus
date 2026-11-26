@@ -47,6 +47,9 @@ func TestMinerInsideSignedSystemProgramIsCaught(t *testing.T) {
 	if len(f.phone) != 1 || len(f.desktop) != 1 {
 		t.Errorf("notified: phone %v desktop %v", f.phone, f.desktop)
 	}
+	if a.Mine == nil || a.Mine.Wallet != "43iNancbmDEMOkv43M" || a.Mine.Pool != "pool.hashvault.pro" {
+		t.Errorf("the popup's facts: %+v", a.Mine)
+	}
 	// Looked into while frozen, with the wallet it mines for.
 	waitAutopsy(t, f)
 	if len(f.cases) != 1 || f.cases[0].Wallet != "43iNancbmDEMOkv43M" || f.cases[0].WalletNote == "" {

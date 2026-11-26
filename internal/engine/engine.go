@@ -1091,6 +1091,9 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	}
 	if access == "mine" {
 		a.Kind = alerts.KindMiner
+		if m := oa.Mine; m != nil {
+			a.Mine = &alerts.Mine{Pool: m.Pool, Wallet: m.Wallet, Agent: m.Agent}
+		}
 	}
 	if test {
 		a.Kind = alerts.KindTest

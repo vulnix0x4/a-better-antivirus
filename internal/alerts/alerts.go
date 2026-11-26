@@ -43,6 +43,28 @@ const (
 // ("open" waits for one; "resolved" got one.)
 const StatusNoted = "noted"
 
+// Mine is a caught miner's login: what the popup and phone alert show.
+type Mine struct {
+	Pool   string `json:"pool,omitempty"`
+	Wallet string `json:"wallet,omitempty"`
+	Agent  string `json:"agent,omitempty"`
+}
+
+// Lines are the miner's details, one fact per line.
+func (m *Mine) Lines() []string {
+	if m == nil {
+		return nil
+	}
+	var out []string
+	if m.Wallet != "" {
+		out = append(out, "Wallet it mines for: "+m.Wallet)
+	}
+	if m.Agent != "" {
+		out = append(out, "Miner: "+m.Agent)
+	}
+	return out
+}
+
 type BaitHit struct {
 	ID     string    `json:"id"`
 	Name   string    `json:"name"`
@@ -98,6 +120,8 @@ type Alert struct {
 	// frozen: what real things it had opened, what it staged, where it was
 	// sending. Filled in a moment after the alert went out (see package autopsy).
 	Autopsy *Autopsy `json:"autopsy,omitempty"`
+	// Mine is what a program caught by the miner trap asked for.
+	Mine *Mine `json:"mine,omitempty"`
 }
 
 // The three answers an autopsy gives to "did it take my real data?".
