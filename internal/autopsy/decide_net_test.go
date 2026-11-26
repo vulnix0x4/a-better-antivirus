@@ -280,3 +280,28 @@ func TestReportSaysWhatItSent(t *testing.T) {
 		t.Errorf("report:\n%s", text)
 	}
 }
+
+// Umbral in the lab: every name answered with one address. Each send is
+// named by what it looked up just before, and one connection used before
+// and after it opened your data is told apart.
+func TestNamesSharedAddress(t *testing.T) {
+	fake := netip.MustParseAddr("192.168.89.1")
+	a := run(netFacts(netOf(func(r *netrec.Record) {
+		r.Resolved(start.Add(time.Second), stealerPID, "gstatic.com", []netip.Addr{fake})
+		r.Send(start.Add(time.Second), stealerPID, netip.AddrPortFrom(fake, 443), 600, false, false)
+		r.Resolved(start.Add(2*time.Second), stealerPID, "ip-api.com", []netip.Addr{fake})
+		r.Send(start.Add(2*time.Second), stealerPID, netip.AddrPortFrom(fake, 80), 80, false, false)
+		r.Resolved(readAt.Add(100*time.Millisecond), stealerPID, "discord.com", []netip.Addr{fake})
+		r.Send(readAt.Add(120*time.Millisecond), stealerPID, netip.AddrPortFrom(fake, 443), 814, false, false)
+	})))
+	if a.Sent != alerts.SentSome || !strings.Contains(a.Headline, "connected to discord.com,") {
+		t.Fatalf("sent %s headline %q", a.Sent, a.Headline)
+	}
+	all := strings.Join(a.Summary, " ")
+	for _, want := range []string{"it sent about 600 bytes to gstatic.com (192.168.89.1:443)", "it sent about 80 bytes to ip-api.com (192.168.89.1:80)",
+		"After it opened your data, it sent about 814 bytes to discord.com (192.168.89.1:443)"} {
+		if !strings.Contains(all, want) {
+			t.Errorf("summary lacks %q: %q", want, a.Summary)
+		}
+	}
+}

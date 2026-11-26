@@ -52,6 +52,15 @@ type burst struct {
 	bytes    int64
 }
 
+// lookup is a name a process looked up, and when.
+type lookup struct {
+	name string
+	at   time.Time
+}
+
+// maxLookups is how many names are kept per address of one process.
+const maxLookups = 4
+
 type dest struct {
 	addr        netip.AddrPort // the zero AddrPort: "other addresses" (more than maxDests)
 	udp         bool
@@ -69,7 +78,10 @@ type proc struct {
 	image       string
 	dests       map[netip.AddrPort]*dest
 	other       *dest
-	names       map[netip.Addr]string
+	// names are the names it looked up, per address, with when: one
+	// address can serve many names (a CDN), and the one it looked up just
+	// before connecting is the one it meant.
+	names       map[netip.Addr][]lookup
 	first, last time.Time // its first and last activity
 }
 
@@ -260,12 +272,22 @@ func (r *Record) Resolved(at time.Time, pid uint32, name string, addrs []netip.A
 	}
 	if p := r.find(pid, at, time.Time{}); p != nil {
 		if p.names == nil {
-			p.names = map[netip.Addr]string{}
+			p.names = map[netip.Addr][]lookup{}
 		}
 		for _, a := range addrs {
-			if len(p.names) < maxProcName {
-				p.names[a.Unmap()] = name
+			a = a.Unmap()
+			l, ok := p.names[a]
+			if !ok && len(p.names) >= maxProcName {
+				continue
 			}
+			if n := len(l); n > 0 && l[n-1].name == name {
+				continue // looked up again
+			}
+			l = append(l, lookup{name: name, at: at})
+			if len(l) > maxLookups {
+				l = l[1:]
+			}
+			p.names[a] = l
 		}
 	}
 }

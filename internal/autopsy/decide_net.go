@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/alerts"
+	"github.com/vulnix0x4/a-better-antivirus/internal/netrec"
 )
 
 type netAnswer struct {
@@ -57,25 +58,42 @@ func netCheck(f facts, reads []alerts.StoreRead, certain bool) netAnswer {
 	}
 
 	busy := false
-	for _, s := range f.net.Sends {
+	conv := func(s netrec.Send, after bool) alerts.NetSend {
 		ns := alerts.NetSend{PID: s.PID, Image: s.Image, Via: s.Via, Name: s.Name, LAN: s.LAN, UDP: s.UDP,
-			First: s.First, Last: s.Last, Bytes: s.Bytes, Conns: s.Conns}
+			First: s.First, Last: s.Last, Bytes: s.Bytes, Conns: s.Conns, After: after}
+		if after {
+			ns.BytesAfter = s.Bytes
+		}
 		if s.Remote.IsValid() {
 			ns.To = s.Remote.String()
 		}
-		if !n.from.IsZero() {
-			ns.BytesAfter, ns.After = s.Since(n.from)
-		} else {
-			ns.BytesAfter, ns.After = s.Bytes, true
+		return ns
+	}
+	for _, s := range f.net.Sends {
+		if n.from.IsZero() {
+			ns := conv(s, true)
+			n.all = append(n.all, ns)
+			if f.busy[s.PID] {
+				busy = true
+			} else {
+				n.after = append(n.after, ns)
+			}
+			continue
 		}
-		n.all = append(n.all, ns)
-		switch {
-		case ns.After && f.busy[s.PID]:
-			busy = true
-		case ns.After:
-			n.after = append(n.after, ns)
-		default:
+		before, after, okB, okA := s.Split(n.from)
+		if okB {
+			ns := conv(before, false)
+			n.all = append(n.all, ns)
 			n.before = append(n.before, ns)
+		}
+		if okA {
+			ns := conv(after, true)
+			n.all = append(n.all, ns)
+			if f.busy[s.PID] {
+				busy = true
+			} else {
+				n.after = append(n.after, ns)
+			}
 		}
 	}
 
