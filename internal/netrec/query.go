@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/netip"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -29,7 +30,7 @@ type Send struct {
 	// member itself: "started by pid 812".
 	Via    string
 	Remote netip.AddrPort // the zero AddrPort: more addresses than the record keeps apart
-	Name   string         // the name it was looked up by, if the record saw that
+	Name   string         // the name it was looked up by, if the record saw that (the last one, if more)
 	UDP    bool
 	LAN    bool // on a local network (see LocalNetwork)
 	First  time.Time
@@ -38,6 +39,77 @@ type Send struct {
 	Sends  int
 	Conns  int // connections it opened
 	bursts []burst
+	names  []string // per burst: the name it had looked the address up by
+	global string   // the name anyone looked it up by
+}
+
+// NameSince is the name (or names) of the address in what it sent at t or
+// later: "discord.com".
+func (s Send) NameSince(t time.Time) string {
+	var out []string
+	for i, b := range s.bursts {
+		if b.to.Before(t) || s.names[i] == "" {
+			continue
+		}
+		if len(out) == 0 || out[len(out)-1] != s.names[i] {
+			out = append(out, s.names[i])
+		}
+	}
+	if len(out) == 0 {
+		return s.global
+	}
+	if len(out) > 2 {
+		out = append(out[:2], "…")
+	}
+	return strings.Join(out, " / ")
+}
+
+// Split parts what it sent before t from what it sent at t or later (a
+// burst that began before t and went on after counts as after). Either can
+// be empty: then ok is false for it.
+func (s Send) Split(t time.Time) (before, after Send, okBefore, okAfter bool) {
+	part := func(keep func(b burst) bool) (Send, bool) {
+		x := s
+		x.bursts, x.names, x.Bytes, x.First, x.Last = nil, nil, 0, time.Time{}, time.Time{}
+		for i, b := range s.bursts {
+			if !keep(b) {
+				continue
+			}
+			x.bursts = append(x.bursts, b)
+			x.names = append(x.names, s.names[i])
+			x.Bytes += b.bytes
+			if x.First.IsZero() || b.from.Before(x.First) {
+				x.First = b.from
+			}
+			if b.to.After(x.Last) {
+				x.Last = b.to
+			}
+		}
+		if len(x.bursts) == 0 {
+			return Send{}, false
+		}
+		x.Name = x.NameSince(time.Time{})
+		if len(x.bursts) != len(s.bursts) {
+			x.Sends, x.Conns = 0, 0
+		}
+		return x, true
+	}
+	before, okBefore = part(func(b burst) bool { return b.to.Before(t) })
+	after, okAfter = part(func(b burst) bool { return !b.to.Before(t) })
+	return
+}
+
+// FirstSince is when it first sent something at t or later.
+func (s Send) FirstSince(t time.Time) time.Time {
+	for _, b := range s.bursts {
+		if !b.to.Before(t) {
+			if b.from.Before(t) {
+				return t
+			}
+			return b.from
+		}
+	}
+	return time.Time{}
 }
 
 // Since says whether it sent anything at t or later (a connection opened
@@ -94,6 +166,22 @@ type Result struct {
 	// reached it.
 	Behind bool
 	Sends  []Send
+}
+
+// nameAt is the name looked up last before at (a moment's slack: the
+// answer and the connection are reported by different parts of the system),
+// or the first one looked up after.
+func nameAt(l []lookup, at time.Time) string {
+	name := ""
+	for _, x := range l {
+		if !x.at.After(at.Add(100 * time.Millisecond)) {
+			name = x.name
+		}
+	}
+	if name == "" && len(l) > 0 {
+		name = l[0].name
+	}
+	return name
 }
 
 // catchUpWait is how long a query waits for the last moments to come in.
@@ -195,14 +283,13 @@ func (r *Record) Query(q Query) Result {
 		}
 		add := func(d *dest) {
 			s := Send{PID: p.pid, Image: p.image, Via: via, Remote: d.addr, UDP: d.udp}
+			var looked []lookup
 			if d.addr.IsValid() {
 				s.LAN = LocalNetwork(d.addr.Addr())
-				s.Name = p.names[d.addr.Addr()]
-				if s.Name == "" {
-					s.Name = r.names[d.addr.Addr()]
-				}
-				if s.Name == "" {
-					s.Name = r.old[d.addr.Addr()]
+				looked = p.names[d.addr.Addr()]
+				s.global = r.names[d.addr.Addr()]
+				if s.global == "" {
+					s.global = r.old[d.addr.Addr()]
 				}
 			}
 			bs := d.bursts
@@ -214,6 +301,7 @@ func (r *Record) Query(q Query) Result {
 					continue
 				}
 				s.bursts = append(s.bursts, b)
+				s.names = append(s.names, nameAt(looked, b.from))
 				s.Bytes += b.bytes
 				if s.First.IsZero() || b.from.Before(s.First) {
 					s.First = b.from
@@ -227,6 +315,10 @@ func (r *Record) Query(q Query) Result {
 			}
 			if s.First.Before(lo) {
 				s.First = lo
+			}
+			s.Name = s.NameSince(time.Time{})
+			if i := strings.LastIndex(s.Name, " / "); i >= 0 {
+				s.Name = s.Name[i+3:]
 			}
 			if s.Bytes == d.bytes || len(s.bursts) == len(bs) {
 				s.Sends, s.Conns = d.sends, d.conns
