@@ -435,7 +435,12 @@ func TestProfileAddedInTheBrowserTimeline(t *testing.T) {
 			done <- true
 		}()
 	}
+	// The test's folder is removed when it ends: wait for the "browser" to
+	// finish making its profile first, or the removal races it.
+	rebuilt := make(chan struct{})
+	t.Cleanup(func() { <-rebuilt })
 	go func() {
+		defer close(rebuilt)
 		time.Sleep(280 * time.Millisecond)
 		os.RemoveAll(prof)
 		time.Sleep(1020 * time.Millisecond) // +1.3 s: a real profile
