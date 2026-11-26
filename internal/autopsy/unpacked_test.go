@@ -53,7 +53,9 @@ func TestRunCountsItsOwnUnpackedCode(t *testing.T) {
 			}
 			return []string{exe}, nil
 		},
-		StagingDirs: func(*Case) []Dir { return []Dir{{Path: tmp, Depth: 3}, {Path: filepath.Join(root, "Downloads"), Depth: 1}} },
+		StagingDirs: func(*Case) []Dir {
+			return []Dir{{Path: tmp, Depth: 3}, {Path: filepath.Join(root, "Downloads"), Depth: 1}}
+		},
 		StartupDirs: func(*Case) []string { return []string{startup} },
 		EvidenceDir: filepath.Join(root, "evidence"),
 	}
