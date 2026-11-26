@@ -273,3 +273,10 @@ func RunElevated(exe string, args ...string) error {
 // Linux, a package ("Package: part of the git package", "Package: no package
 // owns it").
 const vouchLabel = "Package"
+
+// askReport shows the autopsy popup: a notification with two buttons, "Show
+// full report" (the answer is true) and "Close", where the desktop shows
+// buttons.
+func askReport(title, headline, text string, icon uint32) bool {
+	return messageBox(title, headline+"\n\n"+text+"\n\nYes = "+showReportLabel+"\nNo = Close", mbYesNo|icon) == idYes
+}

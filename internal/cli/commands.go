@@ -29,6 +29,7 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
 	"github.com/vulnix0x4/a-better-antivirus/internal/platform"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
+	"github.com/vulnix0x4/a-better-antivirus/internal/report"
 	"github.com/vulnix0x4/a-better-antivirus/internal/respond"
 	"github.com/vulnix0x4/a-better-antivirus/internal/svcctl"
 	"github.com/vulnix0x4/a-better-antivirus/internal/trust"
@@ -62,6 +63,7 @@ func alertsCmd() *cobra.Command {
 			}
 			fmt.Println(ui.AlertTable(list, ui.Width()))
 			fmt.Println("\n" + ui.Hint("Details:", "aba alerts show <id>") + ui.Dim.Render("  (the last part of the ID is enough)"))
+			fmt.Println(ui.Hint("Full reports, in your web browser:", "aba reports") + ui.Dim.Render("  (also: "+report.Where+")"))
 			return nil
 		},
 	}

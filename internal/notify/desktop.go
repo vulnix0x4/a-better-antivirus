@@ -12,6 +12,7 @@ import (
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/alerts"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
+	"github.com/vulnix0x4/a-better-antivirus/internal/report"
 	"github.com/vulnix0x4/a-better-antivirus/internal/trust"
 )
 
@@ -28,16 +29,36 @@ type Envelope struct {
 
 // ShowAutopsy tells the person what the autopsy of a caught program found:
 // that it had read real data, whether any of it left the PC, and what to do
-// about it.
+// about it. Its "Show full report" button opens the whole report in the
+// browser (package report), from the alert this popup already holds: the
+// report files themselves are for administrators only.
 func ShowAutopsy(a *alerts.Alert) {
 	ap := a.Autopsy
 	if ap == nil {
 		return
 	}
+	title := "ABA: what " + a.ExeName() + " had already opened"
+	icon := uint32(mbIconError)
+	if ap.Sent == alerts.SentNothing {
+		title, icon = "ABA: "+a.ExeName()+" was stopped before it sent anything", mbIconWarning
+	}
+	if !ask(title, ap.Headline, autopsyText(a), icon) {
+		return
+	}
+	if err := showReport(a); err != nil {
+		messageBox("ABA: the full report didn't open", "ABA couldn't open the report in your web browser ("+err.Error()+").\n\nTo see it: "+report.Where+".", mbOK|mbIconWarning)
+	}
+}
+
+// autopsyText is what the autopsy popup says under its headline.
+func autopsyText(a *alerts.Alert) string {
+	ap := a.Autopsy
 	var b strings.Builder
-	b.WriteString(ap.Headline + "\n")
-	for _, l := range ap.Summary {
-		b.WriteString("\n" + l)
+	for i, l := range ap.Summary {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(l)
 	}
 	if len(ap.Steps) > 0 {
 		b.WriteString("\n\nFrom another device (your phone), now:")
@@ -45,13 +66,19 @@ func ShowAutopsy(a *alerts.Alert) {
 			fmt.Fprintf(&b, "\n%d. %s", i+1, st)
 		}
 	}
-	b.WriteString("\n\nEverything ABA found: aba autopsy " + a.ID)
-	if ap.Sent == alerts.SentNothing {
-		messageBox("ABA: "+a.ExeName()+" was stopped before it sent anything", b.String(), mbOK|mbIconWarning)
-		return
-	}
-	messageBox("ABA: what "+a.ExeName()+" had already opened", b.String(), mbOK|mbIconError)
+	b.WriteString("\n\nThe full report shows everything ABA found: what it opened, where it sent it, what it left behind and how to report the thief. To see it later: " + report.Where + ".")
+	return strings.TrimLeft(b.String(), "\n")
 }
+
+// ask is askReport (desktop_<os>.go), swapped in tests.
+var ask = askReport
+
+// showReport opens the alert's full report in the browser and waits until
+// it has loaded (swapped in tests).
+var showReport = func(a *alerts.Alert) error { return report.Show(report.Page(a)) }
+
+// showReportLabel is the autopsy popup's button (askReport, desktop_<os>.go).
+const showReportLabel = "Show full report"
 
 // What messageBox is asked to show (buttons and icon) and what it answers.
 // (The values are Windows' own; other systems translate.)
