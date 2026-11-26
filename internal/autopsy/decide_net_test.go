@@ -182,8 +182,9 @@ func TestCannotTellWhetherSent(t *testing.T) {
 		"lapse": func(f *facts) {
 			f.net.Lapses = []netrec.Lapse{{From: readAt.Add(time.Second), To: readAt.Add(2 * time.Second), Why: "Windows dropped some of its reports"}}
 		},
-		"behind": func(f *facts) { f.net.Behind = true },
-		"forgot": func(f *facts) { f.net.Forgot = readAt.Add(time.Second) },
+		"behind":     func(f *facts) { f.net.Behind = true },
+		"not frozen": func(f *facts) { f.frozen = false },
+		"forgot":     func(f *facts) { f.net.Forgot = readAt.Add(time.Second) },
 		"start unknown": func(f *facts) {
 			f.start, f.startWhy = time.Time{}, "it had exited by the time ABA looked"
 		},

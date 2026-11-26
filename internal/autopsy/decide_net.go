@@ -96,6 +96,9 @@ func netCheck(f facts, reads []alerts.StoreRead, certain bool) netAnswer {
 		}
 		n.why = append(n.why, "ABA doesn't know when it started ("+why+"), so it can't tell how far back to look.")
 	}
+	if !f.frozen {
+		n.why = append(n.why, "It wasn't frozen (ABA's response to it was only an alert), so it could still send things after ABA looked.")
+	}
 	if busy {
 		n.why = append(n.why, "Part of it ran inside a program that had been running normally (your browser), which was sending as usual: ABA can't tell what it sent from what that program sent.")
 	}
