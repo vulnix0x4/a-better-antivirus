@@ -151,7 +151,13 @@ type Autopsy struct {
 	OpenFiles    []FileSeen   `json:"openFiles,omitempty"`
 	Staged       []Staged     `json:"staged,omitempty"`
 	StagedWhere  []string     `json:"stagedWhere,omitempty"` // the folders looked through for staged files
-	Addresses    []Address    `json:"addresses,omitempty"`
+	// Unpacked are folders of the program's own code that appeared while it
+	// ran (a self-unpacking program's libraries): counted, not listed.
+	Unpacked []Unpacked `json:"unpacked,omitempty"`
+	// Left is what it left behind that will start it again (a copy of itself
+	// in a startup folder…), in words.
+	Left      []string  `json:"left,omitempty"`
+	Addresses []Address `json:"addresses,omitempty"`
 
 	MemoryScanned  int64    `json:"memoryScanned,omitempty"` // bytes of its memory looked through
 	AttackerWallet string   `json:"attackerWallet,omitempty"`
@@ -204,6 +210,13 @@ type Staged struct {
 	Entries  []ArchiveEntry `json:"entries,omitempty"`
 	More     int            `json:"more,omitempty"`  // entries not listed
 	Saved    string         `json:"saved,omitempty"` // its copy in the evidence folder
+}
+
+// Unpacked is a folder of a program's own code that appeared while it ran.
+type Unpacked struct {
+	Dir   string `json:"dir"`
+	Files int    `json:"files"`
+	Size  int64  `json:"size"`
 }
 
 // ArchiveEntry is one file inside a staged archive.

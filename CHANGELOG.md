@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+**The autopsy, tested against real stealers**
+
+- Tested in an isolated lab against three real stealers (Umbral, Phemedrone, Blank Grabber): each was frozen
+  before it sent anything, and the autopsy found where it was sending (its Discord webhook or Telegram bot) in
+  its memory or program file, and what real data it had opened first.
+- A stealer that unpacks itself (a Python one, for example) no longer floods "Files that appeared while it ran"
+  with its own libraries: those are counted in one line per folder, and what it collected stays listed.
+- A copy of itself that a stealer puts in a startup folder is now found, with a line saying to delete it.
+- A folder named with invisible characters (to hide what a stealer collects) is shown with them marked.
+- Shorter "Where it was sending": at most eight addresses found only in its memory are shown (all are kept in the
+  evidence folder), and pieces of saved logins run together are no longer taken for web addresses.
+- An empty file is no longer taken for a copy of a bait; the Credential Manager is listed once.
+
 ## v0.9.0
 
 **Miner trap: hidden crypto miners are detected (Windows)**

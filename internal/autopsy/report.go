@@ -6,6 +6,7 @@ package autopsy
 import (
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/alerts"
 )
@@ -66,7 +67,13 @@ func Render(a *alerts.Alert) []Section {
 	add("Real data it opened", reads...)
 
 	var watch []string
+	seenWatch := map[string]bool{}
 	for _, w := range ap.Watched {
+		if k := w.Name + "|" + fmt.Sprint(w.Watched, w.Absent, w.Why); seenWatch[k] {
+			continue // two stores with one name (the Credential Manager's two folders)
+		} else {
+			seenWatch[k] = true
+		}
 		switch {
 		case w.Watched:
 			l := "watched   " + w.Name
@@ -87,7 +94,7 @@ func Render(a *alerts.Alert) []Section {
 
 	var files []string
 	for _, f := range ap.OpenFiles {
-		l := fmt.Sprintf("pid %d  %s", f.PID, f.Path)
+		l := fmt.Sprintf("pid %d  %s", f.PID, visible(f.Path))
 		if f.What != "" {
 			l += "  (" + f.What + ")"
 		}
@@ -96,8 +103,11 @@ func Render(a *alerts.Alert) []Section {
 	add("Files it has open", files...)
 
 	var staged []string
+	hidden := false
 	for _, s := range ap.Staged {
-		l := fmt.Sprintf("%s  %s  %s", clock(s.Appeared), size(s.Size), s.Path)
+		p := visible(s.Path)
+		hidden = hidden || p != s.Path
+		l := fmt.Sprintf("%s  %s  %s", clock(s.Appeared), size(s.Size), p)
 		if s.HeldOpen {
 			l += "  (it has this open)"
 		}
@@ -105,16 +115,32 @@ func Render(a *alerts.Alert) []Section {
 			l += "  " + s.What
 		}
 		staged = append(staged, l)
+		// Every entry that's a bait, a copy of a real file or named like
+		// one; of the rest, only the first few.
+		plain, more := 0, s.More
 		for _, e := range s.Entries {
-			el := "    " + e.Name
+			if e.What == "" {
+				if plain >= maxPlainEntries {
+					more++
+					continue
+				}
+				plain++
+			}
+			el := "    " + visible(e.Name)
 			if e.What != "" {
 				el += "  - " + e.What
 			}
 			staged = append(staged, el)
 		}
-		if s.More > 0 {
-			staged = append(staged, fmt.Sprintf("    … and %d more", s.More))
+		if more > 0 {
+			staged = append(staged, fmt.Sprintf("    … and %d more", more))
 		}
+	}
+	for _, u := range ap.Unpacked {
+		staged = append(staged, fmt.Sprintf("%s  %d files, %s: the program's own code, unpacked there while it ran (it runs code from this folder); not listed", visible(u.Dir), u.Files, size(u.Size)))
+	}
+	if hidden {
+		staged = append(staged, "(‹U+…› marks characters that don't show on screen: a folder or file named so you can't see or type its name is a stealer's trick to hide what it collects.)")
 	}
 	if len(staged) > 0 {
 		staged = append(staged, "(Files that appeared in these places while it ran. Unless it has one open, ABA can't prove it made it.)")
@@ -122,14 +148,30 @@ func Render(a *alerts.Alert) []Section {
 		staged = append(staged, "Nothing new in the places stealers usually put what they collect.")
 	}
 	add("Files that appeared while it ran", staged...)
+	add("What it left behind", ap.Left...)
 
 	var addrs []string
+	unsure, after := 0, -1
 	for _, ad := range ap.Addresses {
 		l := fmt.Sprintf("%-16s %s  (seen in its %s)", ad.Kind, ad.Value, ad.Where)
 		if ad.Kind == KindURL && !Shareable(ad.Kind, ad.Value, ad.Where) {
+			// Only in its memory: as likely the text of its own libraries or
+			// your data it collected as where it sends. Only the first few.
+			if unsure++; unsure > maxUnsureURLs {
+				continue
+			}
 			l += ", may be from your own data it collected"
+			after = len(addrs) + 1
 		}
 		addrs = append(addrs, l)
+	}
+	if unsure > maxUnsureURLs {
+		where := ""
+		if ap.Evidence != "" {
+			where = " (all of them are in autopsy.json in the evidence folder)"
+		}
+		l := fmt.Sprintf("… and %d more web addresses found only in its memory: text of its own libraries, or your data it collected, more likely than where it sends%s.", unsure-maxUnsureURLs, where)
+		addrs = append(addrs[:after], append([]string{l}, addrs[after:]...)...)
 	}
 	if ap.AttackerWallet != "" {
 		note := ap.WalletNote
@@ -154,6 +196,57 @@ func Render(a *alerts.Alert) []Section {
 	add("Evidence", ev...)
 	add("Notes", ap.Notes...)
 	return out
+}
+
+// How much of the long lists the report shows.
+const (
+	maxPlainEntries = 20 // archive entries that are none of yours, per archive
+	maxUnsureURLs   = 8  // web addresses found only in its memory
+)
+
+// visible shows the characters of a name that don't show on screen (a
+// zero-width space, a direction mark, a space at the start or end of a
+// folder's name) as ‹U+200B›, so a folder named to be invisible can be seen
+// and found.
+func visible(p string) string {
+	parts := strings.FieldsFunc(p, func(r rune) bool { return r == '/' || r == '\\' })
+	if len(parts) == 0 {
+		return p
+	}
+	changed := false
+	var b strings.Builder
+	start := 0
+	for _, part := range parts {
+		i := strings.Index(p[start:], part) + start
+		b.WriteString(p[start:i])
+		start = i + len(part)
+		blank := strings.TrimSpace(part) != part
+		var e strings.Builder
+		for _, r := range part {
+			if hiddenRune(r) {
+				fmt.Fprintf(&e, "‹U+%04X›", r)
+				blank = true
+				continue
+			}
+			e.WriteRune(r)
+		}
+		if blank {
+			changed = true
+			b.WriteString("\"" + e.String() + "\"")
+		} else {
+			b.WriteString(part)
+		}
+	}
+	b.WriteString(p[start:])
+	if !changed {
+		return p
+	}
+	return b.String()
+}
+
+// hiddenRune: a character that takes no room or looks like a plain space.
+func hiddenRune(r rune) bool {
+	return unicode.Is(unicode.Cf, r) || (unicode.IsSpace(r) && r != ' ') || r == 0x2800 || r == 0x3164 || r == 0x115F || r == 0x1160 || r == 0xFFA0
 }
 
 // Section is one part of the report.

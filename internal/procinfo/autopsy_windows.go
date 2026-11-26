@@ -191,3 +191,73 @@ func ReadMemory(pid uint32, limit int64, fn func(base uint64, b []byte) bool) (i
 	}
 	return total, nil
 }
+
+var (
+	procGetMappedFileNameW = windows.NewLazySystemDLL("psapi.dll").NewProc("GetMappedFileNameW")
+	procQueryDosDeviceW    = windows.NewLazySystemDLL("kernel32.dll").NewProc("QueryDosDeviceW")
+)
+
+// CodeFiles lists the program files a process runs code from: its own
+// program and every DLL it has loaded, wherever they are on disk. A
+// self-unpacking program (a PyInstaller or Electron bundle) loads its
+// libraries from the folder it unpacked itself into. The list comes from the
+// files mapped into its memory, which works for a program of any
+// architecture (an x64 program under emulation on Arm too).
+func CodeFiles(pid uint32) ([]string, error) {
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_INFORMATION|windows.PROCESS_VM_READ, false, pid)
+	if err != nil {
+		return nil, err
+	}
+	defer windows.CloseHandle(h)
+	const memImage = 0x1000000
+	devices := dosDevices()
+	seen := map[string]bool{}
+	var out []string
+	buf := make([]uint16, windows.MAX_LONG_PATH)
+	var mbi windows.MemoryBasicInformation
+	for addr := uintptr(0); windows.VirtualQueryEx(h, addr, &mbi, unsafe.Sizeof(mbi)) == nil; {
+		next := mbi.BaseAddress + mbi.RegionSize
+		if mbi.Type == memImage && mbi.BaseAddress == mbi.AllocationBase {
+			n, _, _ := procGetMappedFileNameW.Call(uintptr(h), mbi.BaseAddress, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
+			if n > 0 && int(n) < len(buf) {
+				if p := dosPath(windows.UTF16ToString(buf[:n]), devices); p != "" && !seen[strings.ToLower(p)] {
+					seen[strings.ToLower(p)] = true
+					out = append(out, p)
+				}
+			}
+		}
+		if next <= addr {
+			break
+		}
+		addr = next
+	}
+	return out, nil
+}
+
+// dosDevices maps the kernel's names of the drives (\Device\HarddiskVolume3)
+// to their letters (C:).
+func dosDevices() map[string]string {
+	m := map[string]string{}
+	buf := make([]uint16, 1024)
+	for c := 'A'; c <= 'Z'; c++ {
+		drive := string(c) + ":"
+		d, _ := windows.UTF16PtrFromString(drive)
+		n, _, _ := procQueryDosDeviceW.Call(uintptr(unsafe.Pointer(d)), uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
+		if n > 0 {
+			m[strings.ToLower(windows.UTF16ToString(buf[:n]))] = drive
+		}
+	}
+	return m
+}
+
+// dosPath turns \Device\HarddiskVolume3\Users\x into C:\Users\x ("" if the
+// drive isn't known).
+func dosPath(p string, devices map[string]string) string {
+	l := strings.ToLower(p)
+	for dev, drive := range devices {
+		if strings.HasPrefix(l, dev+`\`) {
+			return drive + p[len(dev):]
+		}
+	}
+	return ""
+}
