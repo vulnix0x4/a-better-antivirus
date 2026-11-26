@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/vulnix0x4/a-better-antivirus/internal/platform"
+	"github.com/vulnix0x4/a-better-antivirus/internal/report"
 	"strings"
 	"time"
 
@@ -241,10 +242,12 @@ func RenderStatus(d StatusData) string {
 			b.WriteString(Dim.Render("  "+plural(d.AlertCount, "alert", "alerts")+" in the history, all answered.  ") + Hint("See them:", "aba alerts") + "\n")
 		}
 		b.WriteString(Fainter.Render("  Alerts and baits are only shown to administrators (the commands ask for it).") + "\n")
+		b.WriteString("  " + Hint("Full reports, in your web browser:", "aba reports") + Fainter.Render("  ("+report.Where+")") + "\n")
 	} else if len(d.Alerts) == 0 {
 		b.WriteString(Dim.Render("  Nothing has touched your baits yet. ") + Hint("See what a catch looks like:", "aba test") + "\n")
 	} else {
 		b.WriteString(AlertTable(d.Alerts, w) + "\n")
+		b.WriteString("  " + Hint("Full reports, in your web browser:", "aba reports") + Fainter.Render("  ("+report.Where+")") + "\n")
 	}
 	return b.String()
 }
@@ -366,7 +369,7 @@ func AlertDetail(a *alerts.Alert) string {
 			}
 			b.WriteString(wrap(fmt.Sprintf("%d. %s", i+1, st), 4) + "\n")
 		}
-		b.WriteString("  " + Hint("Everything ABA found:", "aba autopsy "+shortID(a.ID)) + "\n")
+		b.WriteString("  " + Hint("The full report, in your browser:", "aba report "+shortID(a.ID)) + "\n")
 	}
 	if p := a.Process; p != nil {
 		b.WriteString(Heading("Reader") + "\n")
@@ -501,36 +504,8 @@ func AlertDetail(a *alerts.Alert) string {
 	}
 	if a.Status == "resolved" {
 		b.WriteString("\n" + Good.Render(IconOK+" Resolved: "+a.Note) + "\n")
-	} else if a.Process != nil && !a.Test && a.Kind == alerts.KindRead {
-		id := shortID(a.ID)
-		var rows [][2]string
-		switch {
-		case a.Verdict.KeepRunning:
-			// The browser you're using: nothing to kill, and it's never
-			// trusted for a fake profile.
-			if a.Did(config.ActionBlockProgram) {
-				rows = append(rows, [2]string{"aba resume " + id, "give " + alerts.BrowserName(a.ExeName()) + " its internet back (nothing gets trusted)"})
-			}
-		case a.Verdict.Host:
-			if a.Did(config.ActionFreeze) || a.Did(config.ActionBlockProgram) {
-				rows = append(rows, [2]string{"aba kill " + id, "end that browser and what started it"},
-					[2]string{"aba resume " + id, "not sure: let them run again, without trusting them"})
-			}
-		default:
-			if a.Did(config.ActionFreeze) || a.Did(config.ActionBlockProgram) {
-				rows = append(rows, [2]string{"aba kill " + id, "it's malware: end it (it stays cut off)"})
-			}
-			rows = append(rows, [2]string{"aba trust " + id, "it's yours: undo everything and stop alerting about it"})
-			if a.Did(config.ActionFreeze) || a.Did(config.ActionBlockProgram) {
-				rows = append(rows, [2]string{"aba resume " + id, "not sure: let it run again, without trusting it"})
-			}
-		}
-		if a.Did(config.ActionIsolate) {
-			rows = append(rows, [2]string{"aba release", "reconnect the " + platform.PC + " when it's safe"})
-		}
-		if len(rows) > 0 {
-			b.WriteString(Heading("What now") + "\n" + indent(Cmd(rows), 2) + "\n")
-		}
+	} else if rows := alerts.NextSteps(a); len(rows) > 0 {
+		b.WriteString(Heading("What now") + "\n" + indent(Cmd(rows), 2) + "\n")
 	}
 	if a.Tier == config.TierCritical && !a.Test && a.Status != "resolved" {
 		b.WriteString(Heading("If you didn't cause this") + "\n")
@@ -541,12 +516,7 @@ func AlertDetail(a *alerts.Alert) string {
 	return b.String()
 }
 
-func shortID(id string) string {
-	if i := strings.LastIndex(id, "-"); i > 0 {
-		return id[i+1:]
-	}
-	return id
-}
+func shortID(id string) string { return alerts.ShortID(id) }
 
 func indent(s string, n int) string {
 	pad := strings.Repeat(" ", n)

@@ -27,7 +27,7 @@ func Execute() int {
 		ui.Fail(err)
 		code = 1
 	}
-	if shouldPause() {
+	if shouldPause() && !(noPause && code == 0) {
 		pause()
 	}
 	return code
@@ -71,7 +71,7 @@ func newRoot() *cobra.Command {
 		}
 	}
 	add("main", statusCmd(), alertsCmd(), testCmd(), doctorCmd(), learnCmd())
-	add("respond", trustCmd(), killCmd(), resumeCmd(), releaseCmd(), autopsyCmd(), exportIOCCmd())
+	add("respond", trustCmd(), killCmd(), resumeCmd(), releaseCmd(), reportCmd(), reportsCmd(), autopsyCmd(), exportIOCCmd())
 	add("setup", installCmd(), configureCmd(), updateCmd(), baitCmd(), ignoreCmd(), instantCmd(), recorderCmd(), clipboardCmd(), minersCmd(), phoneCmd(), uninstallCmd())
 	root.AddCommand(serviceCmd(), notifyCmd(), testReaderCmd())
 	root.AddCommand(clipGuardCmds()...)

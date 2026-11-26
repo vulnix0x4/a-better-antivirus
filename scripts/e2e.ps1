@@ -497,6 +497,51 @@ Check (@($ac.autopsy.sends | Where-Object { $_.after -and $_.to -match ':80$' })
 Check ($ac.autopsy.headline -match 'connected to' -and $ac.autopsy.headline -match 'Act on it now') "the headline says where it connected: $($ac.autopsy.headline)"
 Check ($ac.autopsy.steps[0] -match 'SSH') "the first thing to do is about the SSH keys: $($ac.autopsy.steps[0])"
 Aba autopsy $ac.id
+
+Step 'The full report opens as a page, once, and leaves no copy behind'
+# `aba report` hands the page to the browser from 127.0.0.1, once, at a random
+# address; --no-browser prints the address instead (this runner has no one at
+# its screen). The report names bait files, so no copy may be left anywhere
+# a program running as the user could read it.
+$tempDirs = @($env:TEMP, (Join-Path $env:LOCALAPPDATA 'Temp'), (Join-Path $env:SystemRoot 'Temp')) | Select-Object -Unique
+function PageFiles { foreach ($d in $tempDirs) { Get-ChildItem -LiteralPath $d -Recurse -File -Force -ErrorAction SilentlyContinue | Where-Object { $_.Extension -match '^\.(html?|mht)$' } | ForEach-Object FullName } }
+function ReportPage([string[]]$cmd) {
+    $out = Join-Path $env:TEMP ("aba-report-out-" + [guid]::NewGuid().ToString('N') + '.txt')
+    $p = Start-Process -FilePath $Aba -ArgumentList (($cmd + '--no-browser') -join ' ') -RedirectStandardOutput $out -NoNewWindow -PassThru
+    $null = $p.Handle
+    $url = WaitFor { if (Test-Path $out) { (Get-Content $out -ErrorAction SilentlyContinue | Where-Object { $_ -match '^http://127\.0\.0\.1:\d+/[0-9a-f]{32}$' } | Select-Object -First 1) } } 30
+    if (-not $url) { Get-Content $out -ErrorAction SilentlyContinue | Out-Host; $p.Kill(); Fail "aba $($cmd -join ' ') printed no address" }
+    $r = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 20
+    $again = $null
+    try { $again = (Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 10).StatusCode } catch { $again = 'gone' }
+    $ended = $p.WaitForExit(20000)
+    if (-not $ended) { $p.Kill() }
+    $page = [System.Net.WebUtility]::HtmlDecode($r.Content)
+    Remove-Item -LiteralPath $out -ErrorAction SilentlyContinue
+    return [pscustomobject]@{ Url = $url; Status = $r.StatusCode; Page = $page; Raw = $r.Content; CacheControl = "$($r.Headers['Cache-Control'])"; Again = $again; Ended = $ended; ExitCode = $p.ExitCode }
+}
+$pagesBefore = @(PageFiles)
+$rp = ReportPage @('report', $ac.id)
+Check ($rp.Status -eq 200 -and $rp.Page.Contains($ac.autopsy.headline)) "aba report $($ac.id): the page has the headline ($($rp.Url))"
+Check ($rp.Page.Contains('What it sent over the network') -and $rp.Page.Contains("aba kill $(($ac.id -split '-')[-1])")) 'and the rest of the report: where it sent, and how to end it'
+# Only markup counts: the report's text quotes addresses the stealer used
+# (escaped, never loaded), which may well end in .png or .js.
+$loads = [regex]::Matches($rp.Raw, '(?i)<(script|iframe|object|embed)\b|@import|<[a-z][^>]*\s(src|href|action|data)\s*=\s*["'']?\s*(https?:|//|javascript:)|url\(\s*["'']?\s*(https?:|//)') | ForEach-Object { $_.Value }
+Check (-not $loads) "the page runs no script and loads nothing from anywhere$(if ($loads) { ': ' + ($loads -join ', ') })"
+Check ($rp.CacheControl -match 'no-store') 'the browser is told not to keep a copy (no-store)'
+Check ($rp.Again -ne 200) "the address works once: a second load gets nothing ($($rp.Again))"
+Check ($rp.Ended -and $rp.ExitCode -eq 0) 'aba report ends once the page was loaded'
+$ri = ReportPage @('reports')
+Check ($ri.Status -eq 200 -and $ri.Page.Contains($ac.id) -and $ri.Page.Contains($aa.id)) 'aba reports lists the reports (this one and the first stealer''s)'
+Check ($ri.Again -ne 200 -and $ri.Ended) 'and works once too'
+$leftover = @(PageFiles | Where-Object { $pagesBefore -notcontains $_ })
+Check ($leftover.Count -eq 0) "no copy of a report page left in a temp folder $($leftover -join ', ')"
+$nowAt = Get-Date
+$lasting = @(foreach ($d in @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('MyDocuments'), (Join-Path $env:USERPROFILE 'Downloads'))) {
+    # (Names and dates only: nothing here is opened, the baits are among them.)
+    Get-ChildItem -LiteralPath $d -File -Force -ErrorAction SilentlyContinue | Where-Object { $_.CreationTime -gt $nowAt.AddMinutes(-3) -and $_.Extension -match '^\.(html?|mht)$' } | ForEach-Object FullName
+})
+Check ($lasting.Count -eq 0) "nor on the Desktop, in Documents or Downloads $($lasting -join ', ')"
 Aba kill $ac.id
 
 Step 'Autopsy: a stealer that only touched the bait'

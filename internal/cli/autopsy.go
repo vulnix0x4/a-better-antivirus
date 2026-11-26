@@ -87,17 +87,13 @@ func printAutopsy(a *alerts.Alert) {
 		for j, l := range s.Lines {
 			text := l
 			if i == 0 && j == 0 {
-				switch a.Autopsy.Answer {
-				case alerts.AnswerRead:
-					if a.Autopsy.Sent == alerts.SentNothing {
-						text = ui.Warn.Render(l) // it read, but nothing left
-					} else {
-						text = ui.Bad.Render(l)
-					}
-				case alerts.AnswerNoSign:
+				switch autopsy.Tone(a.Autopsy) {
+				case "bad":
+					text = ui.Bad.Render(l)
+				case "good":
 					text = ui.Good.Render(l)
 				default:
-					text = ui.Warn.Render(l)
+					text = ui.Warn.Render(l) // it read, but nothing left; or can't tell
 				}
 			}
 			fmt.Println(indentWrap(text, w))

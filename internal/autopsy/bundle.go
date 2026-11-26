@@ -28,7 +28,7 @@ This folder was saved by A Better Antivirus while the program it caught was
 frozen, before anything could end it. Only administrators can read it.
 
   autopsy.json     what ABA found: real data it opened, files it staged,
-                   addresses it was sending to (also: aba autopsy %s)
+                   addresses it was sending to (also: aba report %s)
   program/         a copy of the program itself (renamed so it can't be run
                    by a double-click). It is MALWARE: don't run it.
   staged/          copies of files it had collected, when there were any.
