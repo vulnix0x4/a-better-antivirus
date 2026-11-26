@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -101,6 +102,9 @@ type TestRequest struct {
 	// Clipboard: `aba clipboard test`. The reader is a fake clipper, and the
 	// clipboard guards put a bait out now instead of waiting for a quiet moment.
 	Clipboard bool `json:"clipboard,omitempty"`
+	// Miner: `aba miners test`. The reader is a fake miner that logs in at
+	// the miner trap's fake pool.
+	Miner bool `json:"miner,omitempty"`
 }
 
 // Engine is safe for concurrent use.
@@ -607,6 +611,9 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	if oa.Op == detect.OpSwap && oa.Swap != nil {
 		baitID, ok = ClipboardBait, true
 	}
+	if oa.Op == detect.OpMine && oa.Mine != nil {
+		baitID, ok = MinerTrap, true
+	}
 	if !ok || oa.PID == e.SelfPID {
 		return
 	}
@@ -619,9 +626,14 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 		access = "write"
 	case detect.OpSwap:
 		access = "swap"
+	case detect.OpMine:
+		access = "mine"
 	default:
 		return
 	}
+	// A trap rather than a file: the clipboard bait, the miner trap. What the
+	// program did there is the whole verdict, whatever it is.
+	trap := access == "swap" || access == "mine"
 
 	if oa.UserID != "" {
 		e.mu.Lock()
@@ -636,7 +648,7 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	// (Nor the genuine app at home in its decoy, or a genuine browser's import
 	// probe: see probe.go.)
 	unswept, home := e.quietAccess(oa.Image, oa.PID, baitID, oa.Path)
-	if home != "" && home != baitID && access != "swap" {
+	if home != "" && home != baitID && !trap {
 		// The genuine app using a bait that lives inside its decoy (the
 		// MetaMask wallet inside the fake browser it moved into). Its reads of
 		// the decoy itself retire that decoy, with what's inside it (see
@@ -686,6 +698,9 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	if access == "swap" {
 		hit.Name, hit.Path = clipboardBaitName, "the clipboard"
 	}
+	if access == "mine" {
+		hit.Name, hit.Path = MinerTrapName, MinePlace(oa.Mine)
+	}
 	if inc := e.incidents[oa.PID]; !instant && inc != nil && len(swept) >= sweepApps && (inc.alert.Tier != config.TierCritical || inc.alert.Verdict.KeepRunning) {
 		// It started out looking harmless (or as the browser you're using,
 		// left running) and has now read several apps' data: handle it again
@@ -700,8 +715,8 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 		// alert that did nothing: that one is handled again too.)
 		delete(e.incidents, oa.PID)
 	}
-	if inc := e.incidents[oa.PID]; access == "swap" && inc != nil && inc.alert.Tier != config.TierCritical {
-		delete(e.incidents, oa.PID) // same: now it's a caught clipper
+	if inc := e.incidents[oa.PID]; trap && inc != nil && inc.alert.Tier != config.TierCritical {
+		delete(e.incidents, oa.PID) // same: now it's a caught clipper or miner
 	}
 	if inc := e.incidents[oa.PID]; !instant && inc != nil && ((inc.quiet && access != "read") || (inc.alert.Tier != config.TierCritical && hostOpen && !inc.alert.Verdict.Host)) {
 		// Same: noted quietly as a read, and now it goes to change or delete
@@ -788,6 +803,9 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	if access == "swap" {
 		pre = swapVerdict(oa.Swap) // whatever it is: nothing legitimate does that
 	}
+	if access == "mine" {
+		pre = mineVerdict(oa.Mine, image, cls.SystemBinary(image)) // whatever it is, whoever signed it
+	}
 	// One of your rules covers it: done, unless it used a trick to dodge
 	// detection (decided further down). Only a rule an administrator made for
 	// exactly that covers a trick (`aba ignore add --allow-tricks`), and none
@@ -815,7 +833,7 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	// frozen before its signature is known: a browser installed in your own
 	// folders looks like any unsigned program there until then, and if it's
 	// the one you're using, it's never frozen at all (see host.go).
-	ownerWait := ref.Unadopted && !isSweep && !evading && access != "swap" && cls.OwnerCandidate(image, ref)
+	ownerWait := ref.Unadopted && !isSweep && !evading && !trap && cls.OwnerCandidate(image, ref)
 	if instant {
 		latency = time.Since(oa.Time)
 	} else if canTouch && !ownerWait && config.Has(actionsFor(pre.Tier), config.ActionFreeze) {
@@ -848,6 +866,12 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	}
 	if access == "swap" {
 		v = swapVerdict(oa.Swap)
+	}
+	if access == "mine" {
+		// Trust rules and signatures don't change this: a miner hides in
+		// signed Windows programs (conhost.exe), and its connection to the
+		// fake pool is the evidence.
+		v = mineVerdict(oa.Mine, image, cls.SystemBinary(image))
 	}
 	// A Windows program reading app data is how injected stealers look: check
 	// whether it's running code that isn't from any file on disk. (Trust rules
@@ -1064,6 +1088,9 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	}
 	if access == "swap" {
 		a.Kind = alerts.KindClipper
+	}
+	if access == "mine" {
+		a.Kind = alerts.KindMiner
 	}
 	if test {
 		a.Kind = alerts.KindTest
@@ -1342,6 +1369,9 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 		if oa.Swap != nil {
 			c.Wallet = oa.Swap.Replacement
 		}
+		if oa.Mine != nil {
+			c.Wallet, c.WalletNote = oa.Mine.Wallet, "the wallet it mines for"
+		}
 		procs := append(append([]uint32{oa.PID}, frozen...), a.Process.TreePIDs...)
 		switch {
 		case host == nil && !test:
@@ -1503,7 +1533,7 @@ func wantsAutopsy(a *alerts.Alert, v classify.Verdict, frozen []uint32) bool {
 		return false
 	}
 	switch a.Kind {
-	case alerts.KindRead, alerts.KindWrite, alerts.KindDelete, alerts.KindClipper, alerts.KindTest:
+	case alerts.KindRead, alerts.KindWrite, alerts.KindDelete, alerts.KindClipper, alerts.KindMiner, alerts.KindTest:
 	default:
 		return false
 	}
@@ -1885,6 +1915,10 @@ func (e *Engine) describe(a *alerts.Alert, v classify.Verdict) {
 		a.Title = "Test detection: " + exe + " was caught swapping a wallet address on the clipboard"
 	case a.Kind == alerts.KindClipper:
 		a.Title = "Clipper caught: " + exe + " swapped a wallet address on your clipboard"
+	case a.Test && len(a.Baits) > 0 && a.Baits[0].Access == "mine":
+		a.Title = "Test detection: " + exe + " was caught trying to mine at ABA's fake pool"
+	case a.Kind == alerts.KindMiner:
+		a.Title = "Crypto miner caught: " + exe + " tried to mine on your " + platform.PC
 	case a.Test && a.Instant:
 		a.Title = "Test detection: " + exe + " was frozen the moment it opened a bait"
 	case a.Test:
@@ -1945,6 +1979,68 @@ func swapVerdict(sw *detect.Swap) classify.Verdict {
 	} else {
 		reasons = append(reasons, "the bait address: "+sw.Bait+" (invalid on purpose: no wallet accepts it)")
 	}
+	return classify.Verdict{Tier: config.TierCritical, Reasons: reasons}
+}
+
+// MinerTrap is the bait ID of the miner trap's fake mining pool (package
+// minertrap). Like the clipboard bait, it's not a file.
+const MinerTrap = "miners"
+
+const MinerTrapName = "Mining pool (ABA's fake one on this " + platform.PC + ")"
+
+// MinePlace is the pool a miner wanted, for the alert: "pool.hashvault.pro:443".
+func MinePlace(m *detect.Mine) string {
+	if m == nil {
+		return "a mining pool"
+	}
+	where := m.Pool
+	if where == "" {
+		where = "a mining pool"
+	}
+	if m.Port != 0 {
+		where += ":" + strconv.Itoa(m.Port)
+	}
+	return where
+}
+
+// mineVerdict: a program logged in to mine at the fake pool the miner trap
+// runs on this PC. Only a miner does that, so it's critical, whatever the
+// program is and whoever signed it; no rule makes it otherwise. (Someone who
+// mines on purpose is told how to turn the trap off.)
+func mineVerdict(m *detect.Mine, image string, system bool) classify.Verdict {
+	if m == nil {
+		m = &detect.Mine{}
+	}
+	pool := "a mining pool"
+	if m.Pool != "" {
+		pool = "a mining pool (" + m.Pool + ")"
+	}
+	reasons := []string{"it tried to mine cryptocurrency on this " + platform.PC + ": it connected to " + pool +
+		", which ABA's miner trap points at a fake one on this " + platform.PC + ", and logged in to mine. Hidden miners use your " + platform.PC + " to make money for someone else"}
+	if system && image != "" {
+		name := filepath.Base(image)
+		reasons = append(reasons, name+" is part of "+platform.OSName()+", and "+platform.OSName()+"'s own programs never mine: something is running a miner inside it (malware does that to hide)")
+	}
+	if m.Wallet != "" {
+		reasons = append(reasons, "the wallet it mines for: "+m.Wallet)
+	}
+	if m.Agent != "" {
+		reasons = append(reasons, "the miner says it is: "+m.Agent)
+	}
+	if m.Pass != "" && m.Pass != "x" {
+		reasons = append(reasons, "the password it gave the pool: "+m.Pass)
+	}
+	switch {
+	case m.Pool != "" && m.PoolSure:
+		reasons = append(reasons, fmt.Sprintf("the pool it asked for: %s (port %d%s)", m.Pool, m.Port, map[bool]string{true: ", encrypted"}[m.TLS]))
+	case m.Pool != "":
+		reasons = append(reasons, fmt.Sprintf("the pool it most likely wanted: %s, looked up just before (port %d)", m.Pool, m.Port))
+	}
+	reasons = append(reasons, "nothing reached the real pool, and ABA sent nothing anywhere: the pool it reached is ABA's fake one, on this "+platform.PC)
+	if m.Wallet != "" {
+		reasons = append(reasons, "you can report the wallet to the pool: pools block wallets that malware mines for")
+	}
+	reasons = append(reasons, "mining on purpose? Then this is your own miner, caught by ABA's miner trap: turn the trap off with `aba miners off`, then let the program go (answer this alert \"It's mine\", or `aba resume` with its number)")
 	return classify.Verdict{Tier: config.TierCritical, Reasons: reasons}
 }
 

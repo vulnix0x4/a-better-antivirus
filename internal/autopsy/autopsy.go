@@ -48,8 +48,11 @@ type Case struct {
 	Frozen  []uint32 // everything frozen for this alert
 	BaitAt  time.Time
 	Wallet  string // the attacker's wallet address, when a clipper swapped one in
-	Conns   []procinfo.Conn
-	User    config.UserInfo
+	// WalletNote says what Wallet is, when it isn't what a clipper swapped
+	// in ("the wallet it mines for").
+	WalletNote string
+	Conns      []procinfo.Conn
+	User       config.UserInfo
 	// BaitFiles are the bait files (path -> the bait's name), and Stores the
 	// real stores: what's found is checked against both.
 	BaitFiles map[string]string
@@ -176,7 +179,7 @@ func addBusy(list []baits.Store, stores []baits.Store, id string) []baits.Store 
 // Run looks into c and returns what it found. It never fails as a whole:
 // what it couldn't do is in Notes.
 func Run(c Case, h Hooks) *alerts.Autopsy {
-	a := &alerts.Autopsy{Started: time.Now(), AttackerWallet: c.Wallet}
+	a := &alerts.Autopsy{Started: time.Now(), AttackerWallet: c.Wallet, WalletNote: c.WalletNote}
 	if h.Settle > 0 {
 		time.Sleep(h.Settle)
 	}
