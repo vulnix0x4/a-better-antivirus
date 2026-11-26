@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.10.0
 
 **The full report, one click from the popup, and every report in the Start menu**
 
