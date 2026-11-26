@@ -68,6 +68,10 @@ func trapLookup(wait time.Duration) (bool, string) {
 // fakeMiner logs in at the trap, the way XMRig does, and waits. It connects
 // only if the pool's name led to the trap: never to a real pool.
 func fakeMiner(stay time.Duration) error {
+	// `aba miners test` can only tell the service which process is the test
+	// once this one is running. Logging in before that lands would be taken
+	// for a real miner (and the test would wait in vain), so wait for it.
+	waitToldIsTest(10 * time.Second)
 	if ok, why := trapLookup(10 * time.Second); !ok {
 		return fmt.Errorf("%s doesn't lead to the trap (%s): not connecting", minertrap.TestPool, why)
 	}
@@ -84,6 +88,18 @@ func fakeMiner(stay time.Duration) error {
 	c.SetReadDeadline(time.Now().Add(stay))
 	c.Read(make([]byte, 1))
 	return nil
+}
+
+// waitToldIsTest waits until the pending test request names this process
+// (or the wait is over: then it carries on, and the service sees a miner).
+func waitToldIsTest(wait time.Duration) {
+	me := uint32(os.Getpid())
+	for deadline := time.Now().Add(wait); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		var tr engine.TestRequest
+		if b, err := os.ReadFile(paths.TestFile()); err == nil && json.Unmarshal(b, &tr) == nil && tr.PID == me {
+			return
+		}
+	}
 }
 
 // runMinerTest is `aba miners test`: a harmless fake miner, caught the way a
