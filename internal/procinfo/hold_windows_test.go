@@ -28,6 +28,9 @@ func busyChild(t *testing.T) (*exec.Cmd, func() bool) {
 		return fi.Size()
 	}
 	running := func() bool {
+		// A write already under way when it was frozen can still land: let
+		// it settle before taking the first size.
+		time.Sleep(150 * time.Millisecond)
 		a := size()
 		time.Sleep(400 * time.Millisecond)
 		return size() != a
