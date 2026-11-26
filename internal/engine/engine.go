@@ -1387,7 +1387,8 @@ func (e *Engine) handle(oa *detect.Access, preFrozen []uint32) {
 	// 7. The autopsy, now that the alert is out: what had it already taken?
 	if wantsAutopsy(a, v, frozen) {
 		c := autopsy.Case{AlertID: a.ID, Test: test, PID: oa.PID, Image: image, Tree: append([]uint32(nil), a.Process.TreePIDs...),
-			Frozen: append([]uint32(nil), frozen...), BaitAt: oa.Time, Conns: append([]procinfo.Conn(nil), a.Process.Connections...)}
+			Frozen: append([]uint32(nil), frozen...), BaitAt: oa.Time, Conns: append([]procinfo.Conn(nil), a.Process.Connections...),
+			Blocked: a.Did(config.ActionBlockProgram)}
 		if oa.Swap != nil {
 			c.Wallet = oa.Swap.Replacement
 		}

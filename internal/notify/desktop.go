@@ -27,7 +27,8 @@ type Envelope struct {
 }
 
 // ShowAutopsy tells the person what the autopsy of a caught program found:
-// that it had read real data, and what to do about it.
+// that it had read real data, whether any of it left the PC, and what to do
+// about it.
 func ShowAutopsy(a *alerts.Alert) {
 	ap := a.Autopsy
 	if ap == nil {
@@ -45,6 +46,10 @@ func ShowAutopsy(a *alerts.Alert) {
 		}
 	}
 	b.WriteString("\n\nEverything ABA found: aba autopsy " + a.ID)
+	if ap.Sent == alerts.SentNothing {
+		messageBox("ABA: "+a.ExeName()+" was stopped before it sent anything", b.String(), mbOK|mbIconWarning)
+		return
+	}
 	messageBox("ABA: what "+a.ExeName()+" had already opened", b.String(), mbOK|mbIconError)
 }
 

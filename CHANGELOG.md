@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+**The autopsy says whether anything left your PC (Windows)**
+
+- ABA now keeps a **network record** on Windows: which programs send something over the network, where to, when
+  and roughly how much, from Windows' own event tracing (no driver). It stays in memory, never alerts, and costs
+  well under a tenth of a percent of one processor core.
+- After a catch, the autopsy uses it to say whether your data got out before the freeze, with one of three
+  answers: **nothing was sent** (then there's nothing to change, only the program to end), **it sent something**
+  after opening your data (where to, roughly how much, and what to do now), or **ABA can't tell**, and why. A
+  program it started counts as it; sends from before it opened anything of yours are only mentioned; traffic that
+  stays on this PC never counts.
+- The popup, the phone alert and `aba autopsy` say so in plain words; `aba doctor` shows whether the network record
+  is running. On Linux and macOS the autopsy says it can't tell yet.
+
 **The autopsy, tested against real stealers**
 
 - Tested in an isolated lab against three real stealers (Umbral, Phemedrone, Blank Grabber): each was frozen

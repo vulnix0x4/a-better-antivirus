@@ -52,9 +52,12 @@ func cleanName(s string) string {
 // for whoever gets alerts from more than one (a laptop and a desktop, a
 // parent's PC).
 // FromAutopsy is the phone message for an autopsy that found the caught
-// program had read real data.
+// program had read real data (and whether any of it left).
 func FromAutopsy(a *alerts.Alert) Message {
 	m := Message{Title: "What " + a.ExeName() + " had already opened", Priority: 5}
+	if a.Autopsy != nil && a.Autopsy.Sent == alerts.SentNothing {
+		m = Message{Title: a.ExeName() + " was stopped before it sent anything", Priority: 3}
+	}
 	if host := machineName(); host != "" {
 		m.Title += " (" + host + ")"
 	}

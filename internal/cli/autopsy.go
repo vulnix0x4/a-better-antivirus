@@ -29,7 +29,7 @@ func autopsyCmd() *cobra.Command {
 			"passwords, cookies, wallets and keys it had opened (from the flight recorder), what it has open,\n" +
 			"what it staged, and where it was sending. ABA does this by itself a moment after every catch.\n\n" +
 			"--now looks into the program again from here (if it's still frozen), without the flight\n" +
-			"recorder, which only the service has.",
+			"recorder and the network record, which only the service has.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireAdmin(); err != nil {
@@ -89,7 +89,11 @@ func printAutopsy(a *alerts.Alert) {
 			if i == 0 && j == 0 {
 				switch a.Autopsy.Answer {
 				case alerts.AnswerRead:
-					text = ui.Bad.Render(l)
+					if a.Autopsy.Sent == alerts.SentNothing {
+						text = ui.Warn.Render(l) // it read, but nothing left
+					} else {
+						text = ui.Bad.Render(l)
+					}
 				case alerts.AnswerNoSign:
 					text = ui.Good.Render(l)
 				default:
