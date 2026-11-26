@@ -460,7 +460,7 @@ func (e *Engine) takenOver(baitID string) bool {
 	e.mu.Lock()
 	cfg := e.cfg
 	e.mu.Unlock()
-	return ok && cfg != nil && s.Inside != nil && (baits.Adopted(s, cfg.User) || baits.TakenOver(s, cfg.User))
+	return ok && cfg != nil && s.Inside != nil && (e.adopted(s, cfg.User) || baits.TakenOver(s, cfg.User))
 }
 
 // hostRead reports, before the reader is classified, whether oa is the
