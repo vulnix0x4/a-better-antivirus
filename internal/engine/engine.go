@@ -371,6 +371,14 @@ func (e *Engine) DecideInstantOpWhy(pid uint32, path string, op detect.Op) (bool
 		}
 	}
 	sig := e.Ops.Verify(image)
+	if elevated && classify.OSVendorSigned(sig) {
+		// A part of Windows running as administrator is an admin console
+		// (PowerShell, cmd) or a system tool: Windows often doesn't say what
+		// an open asked for, so a cleanup deleting a bait would look like a
+		// read here. The event log sees what it actually did, a moment later.
+		done(false)
+		return false, image + " is part of " + platform.OSName() + asAdmin + ": left to the event log"
+	}
 	v := cls.Final(image, pid, e.baitRef(baitID), sig)
 	exempt := cls.SweepExempt(image, pid, &sig)
 	// Deleting several apps' data isn't going through it: uninstallers and

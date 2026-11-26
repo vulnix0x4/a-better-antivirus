@@ -840,6 +840,17 @@ func TestInstantLeavesSignedAdminToolsAlone(t *testing.T) {
 	if p := e.SweepSuspect(desktopBait, []uint32{1001}); p != 0 {
 		t.Fatalf("an admin tool isn't a sweep suspect, got %d", p)
 	}
+	// An admin PowerShell (CI's own e2e script cleaning up a hard link to a
+	// bait): Windows didn't say the open was a delete, so it arrives as a
+	// read. Part of Windows, elevated: left to the event log, never frozen
+	// inside the open.
+	ps := `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`
+	f.images[1002] = ps
+	f.sigs[ps] = provenance.Result{Signed: true, Valid: true, Signer: "Microsoft Windows"}
+	f.elevated[1002] = true
+	if ok, why := e.DecideInstantWhy(1002, discordBait); ok {
+		t.Fatalf("an admin PowerShell opening a bait: left to the event log, got %s", why)
+	}
 	if len(f.suspended) != 0 {
 		t.Fatalf("froze %v", f.suspended)
 	}
