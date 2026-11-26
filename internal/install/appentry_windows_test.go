@@ -105,10 +105,31 @@ func TestRegisterAppWritesTheEntryAndTheShortcut(t *testing.T) {
 	if !paths.Same(paths.Long(target), paths.Long(e.exe)) {
 		t.Errorf("the shortcut opens %s, want %s", target, e.exe)
 	}
+	// And "ABA reports" next to it, which runs `aba reports`.
+	target, err = shortcutTarget(filepath.Join(e.menuDir, "ABA reports.lnk"))
+	if err != nil {
+		t.Fatalf("the reports shortcut can't be read: %v", err)
+	}
+	if !paths.Same(paths.Long(target), paths.Long(e.exe)) {
+		t.Errorf("the reports shortcut opens %s, want %s", target, e.exe)
+	}
+	if args, err := shortcutArgs(filepath.Join(e.menuDir, "ABA reports.lnk")); err != nil || args != "reports" {
+		t.Errorf("the reports shortcut runs aba with %q (%v), want \"reports\"", args, err)
+	}
+	if args, _ := shortcutArgs(e.shortcut()); args != "" {
+		t.Errorf("the main shortcut runs aba with %q, want nothing (the dashboard)", args)
+	}
 }
 
 // shortcutTarget loads a .lnk and returns the program it starts.
-func shortcutTarget(lnk string) (string, error) {
+func shortcutTarget(lnk string) (string, error) { return shortcutGet(lnk, 3) }
+
+// shortcutArgs loads a .lnk and returns what it passes the program.
+func shortcutArgs(lnk string) (string, error) { return shortcutGet(lnk, 10) }
+
+// shortcutGet loads a .lnk and asks it IShellLinkW's GetPath (3) or
+// GetArguments (10).
+func shortcutGet(lnk string, method int) (string, error) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	if err := windows.CoInitializeEx(0, windows.COINIT_APARTMENTTHREADED); err == nil {
@@ -126,7 +147,7 @@ func shortcutTarget(lnk string) (string, error) {
 		return "", err
 	}
 	defer file.call(comRelease)
-	const persistFileLoad, shellLinkGetPath = 5, 3
+	const persistFileLoad = 5
 	p, err := windows.UTF16PtrFromString(lnk)
 	if err != nil {
 		return "", err
@@ -135,7 +156,11 @@ func shortcutTarget(lnk string) (string, error) {
 		return "", err
 	}
 	buf := make([]uint16, windows.MAX_LONG_PATH)
-	if err := link.call(shellLinkGetPath, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)), 0, 0); err != nil {
+	args := []uintptr{uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf))}
+	if method == 3 {
+		args = append(args, 0, 0) // GetPath: no WIN32_FIND_DATA, no flags
+	}
+	if err := link.call(method, args...); err != nil {
 		return "", err
 	}
 	return windows.UTF16ToString(buf), nil
@@ -162,8 +187,10 @@ func TestRefreshAppAfterAnUpdate(t *testing.T) {
 	}
 	k.SetStringValue("InstallDate", "20200102")
 	k.Close()
-	if err := os.Remove(e.shortcut()); err != nil {
-		t.Fatal(err)
+	for _, lnk := range []string{e.shortcut(), e.reportsShortcut()} {
+		if err := os.Remove(lnk); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	if err := e.refresh("v1.1.0"); err != nil {
@@ -176,8 +203,39 @@ func TestRefreshAppAfterAnUpdate(t *testing.T) {
 	if strs["InstallDate"] != "20200102" {
 		t.Errorf("InstallDate = %q: an update must not change it", strs["InstallDate"])
 	}
-	if exists(e.shortcut()) {
+	if exists(e.shortcut()) || exists(e.reportsShortcut()) {
 		t.Error("an update put back a shortcut the owner had deleted")
+	}
+}
+
+func TestRefreshAppAddsTheReportsShortcutOnce(t *testing.T) {
+	// Listed by a version from before there were reports: an entry and the
+	// one shortcut, no reports shortcut and no note that it was ever made.
+	e := testEntry(t)
+	if err := e.writeKey("v0.9.0"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(e.menuDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.refresh("v0.10.0"); err != nil {
+		t.Fatal(err)
+	}
+	if !exists(e.reportsShortcut()) {
+		t.Fatal("the update didn't add the ABA reports shortcut")
+	}
+	if exists(e.shortcut()) {
+		t.Error("the update put back the main shortcut, which this install didn't have")
+	}
+	// Deleted by the owner afterwards: the next update leaves it deleted.
+	if err := os.Remove(e.reportsShortcut()); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.refresh("v0.10.1"); err != nil {
+		t.Fatal(err)
+	}
+	if exists(e.reportsShortcut()) {
+		t.Error("a second update put back the reports shortcut the owner had deleted")
 	}
 }
 
@@ -191,8 +249,8 @@ func TestRefreshAppGivesAnOlderInstallItsEntry(t *testing.T) {
 	if strs["DisplayVersion"] != "2.0.0" {
 		t.Errorf("DisplayVersion = %q, want 2.0.0", strs["DisplayVersion"])
 	}
-	if !exists(e.shortcut()) {
-		t.Error("no Start menu shortcut after the update")
+	if !exists(e.shortcut()) || !exists(e.reportsShortcut()) {
+		t.Error("no Start menu shortcuts after the update")
 	}
 }
 
@@ -207,8 +265,8 @@ func TestUnregisterAppRemovesBoth(t *testing.T) {
 	if e.registered() {
 		t.Error("the Installed apps entry is still there")
 	}
-	if exists(e.shortcut()) {
-		t.Error("the Start menu shortcut is still there")
+	if exists(e.shortcut()) || exists(e.reportsShortcut()) {
+		t.Error("a Start menu shortcut is still there")
 	}
 	// Uninstalling something that was never listed (an older install) is not an error.
 	if err := e.unregister(); err != nil {

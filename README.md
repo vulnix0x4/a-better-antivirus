@@ -192,7 +192,9 @@ aba trust <id>       it's yours: undo everything and stop alerting about it
 aba kill <id>        it's malware: end what the alert froze (it stays cut off; the evidence is kept)
 aba resume <id>      not sure: let it run again, without trusting it
 aba release          undo all responses: network back, everything unfrozen/unblocked
-aba autopsy <id>     did it take your real data? everything ABA found while it was frozen
+aba report <id>      did it take your real data? the full report, as a page in your web browser
+aba reports          every report, newest first (Windows: Start menu > ABA reports)
+aba autopsy <id>     the same report in the terminal
 aba export-ioc <id>  write a file of what's safe to share about it (nothing is uploaded)
 ```
 
@@ -248,8 +250,10 @@ Traffic that stays on this PC (loopback, where the miner trap's fake pool lives)
 
 It also lists the files the program has open, files that appeared where stealers stage what they collect while it ran (and the names inside an archive it made, each marked as a bait, a byte-for-byte copy of your real file, or merely named like one), and where it was sending: its open connections, and any Telegram bot, Discord webhook or web address in its memory and its program file. Only these generic shapes are looked for, never one stealer family's config.
 
+The popup about it has a **Show full report** button that opens all of this as a readable page in your web browser; later, the Start menu's **ABA reports** (on a Mac or Linux, `sudo aba reports`) lists every report, newest first. The reports stay where only administrators can read them, because they name ABA's bait files: the page is handed to your browser once, from this computer only, at an address with a random one-time key, and isn't saved anywhere (print it to keep it).
+
 ```
-aba autopsy <id>      everything found
+aba report <id>       everything found, in your web browser (aba autopsy <id>: in the terminal)
 aba export-ioc <id>   a local file to share if you want: the program's fingerprint, the bot tokens,
                       webhooks and addresses that are certainly the attacker's, a clipper's wallet.
                       Nothing of yours, and nothing is uploaded.

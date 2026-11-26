@@ -1,7 +1,8 @@
 package autopsy
 
 // The report in words: the short form for a notification, the full form
-// for `aba autopsy`.
+// for `aba autopsy` and the full report page (package report), which both
+// show exactly these sections.
 
 import (
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"unicode"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/alerts"
+	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 )
 
 // Short is the autopsy's answer in a sentence or two, for a notification.
@@ -23,6 +25,41 @@ func Short(ap *alerts.Autopsy) string {
 	return s
 }
 
+// Tone is how the answer should look: "bad" (it read your data and may
+// have sent it), "warn" (it read your data but nothing left, or ABA can't
+// tell) or "good" (no sign it read anything of yours).
+func Tone(ap *alerts.Autopsy) string {
+	switch {
+	case ap == nil:
+		return ""
+	case ap.Answer == alerts.AnswerRead && ap.Sent != alerts.SentNothing:
+		return "bad"
+	case ap.Answer == alerts.AnswerNoSign:
+		return "good"
+	}
+	return "warn"
+}
+
+// What each section of the report is (Section.Key), for the page that lays
+// them out.
+const (
+	SecAnswer    = "answer"    // the headline, then the lines that explain it
+	SecSteps     = "steps"     // what to do now
+	SecUnsure    = "unsure"    // why ABA can't be sure
+	SecLeads     = "leads"     // things that point to a theft without proving it
+	SecSent      = "sent"      // what left the PC
+	SecReads     = "reads"     // the real data it opened
+	SecWatched   = "watched"   // what ABA was watching
+	SecOpen      = "open"      // files it has open
+	SecStaged    = "staged"    // files that appeared while it ran
+	SecLeft      = "left"      // what will start it again
+	SecAddresses = "addresses" // where it was sending: its webhook, bot, addresses
+	SecProgram   = "program"   // the program itself
+	SecDid       = "did"       // what ABA did, and what's left to do
+	SecEvidence  = "evidence"  // where the evidence is
+	SecNotes     = "notes"     // what couldn't be looked at
+)
+
 // Render is the full report, as plain text lines (the CLI styles them).
 func Render(a *alerts.Alert) []Section {
 	ap := a.Autopsy
@@ -30,12 +67,12 @@ func Render(a *alerts.Alert) []Section {
 		return nil
 	}
 	var out []Section
-	add := func(title string, lines ...string) {
+	add := func(key, title string, lines ...string) {
 		if len(lines) > 0 {
-			out = append(out, Section{Title: title, Lines: lines})
+			out = append(out, Section{Key: key, Title: title, Lines: lines})
 		}
 	}
-	add("Answer", append([]string{ap.Headline}, ap.Summary...)...)
+	add(SecAnswer, "Answer", append([]string{ap.Headline}, ap.Summary...)...)
 	if len(ap.Steps) > 0 {
 		var steps []string
 		for i, s := range ap.Steps {
@@ -45,11 +82,11 @@ func Render(a *alerts.Alert) []Section {
 		if ap.Answer != alerts.AnswerRead {
 			title = "To be safe"
 		}
-		add(title, steps...)
+		add(SecSteps, title, steps...)
 	}
-	add("Why ABA can't be sure", ap.Unsure...)
-	add("Leads", ap.Leads...)
-	add("What it sent over the network", sentLines(ap)...)
+	add(SecUnsure, "Why ABA can't be sure", ap.Unsure...)
+	add(SecLeads, "Leads", ap.Leads...)
+	add(SecSent, "What it sent over the network", sentLines(ap)...)
 
 	var reads []string
 	for _, r := range ap.Reads {
@@ -65,7 +102,7 @@ func Render(a *alerts.Alert) []Section {
 		}
 		reads = append(reads, l+"  - "+r.How)
 	}
-	add("Real data it opened", reads...)
+	add(SecReads, "Real data it opened", reads...)
 
 	var watch []string
 	seenWatch := map[string]bool{}
@@ -91,7 +128,7 @@ func Render(a *alerts.Alert) []Section {
 	if !ap.ProcessStart.IsZero() {
 		watch = append([]string{"It started at " + clock(ap.ProcessStart) + "; it opened the bait at " + clock(ap.BaitAt) + "."}, watch...)
 	}
-	add("What ABA was watching while it ran", watch...)
+	add(SecWatched, "What ABA was watching while it ran", watch...)
 
 	var files []string
 	for _, f := range ap.OpenFiles {
@@ -101,7 +138,7 @@ func Render(a *alerts.Alert) []Section {
 		}
 		files = append(files, l)
 	}
-	add("Files it has open", files...)
+	add(SecOpen, "Files it has open", files...)
 
 	var staged []string
 	hidden := false
@@ -148,13 +185,13 @@ func Render(a *alerts.Alert) []Section {
 	} else if len(ap.StagedWhere) > 0 {
 		staged = append(staged, "Nothing new in the places stealers usually put what they collect.")
 	}
-	add("Files that appeared while it ran", staged...)
-	add("What it left behind", ap.Left...)
+	add(SecStaged, "Files that appeared while it ran", staged...)
+	add(SecLeft, "What it left behind", ap.Left...)
 
 	var addrs []string
 	unsure, after := 0, -1
 	for _, ad := range ap.Addresses {
-		l := fmt.Sprintf("%-16s %s  (seen in its %s)", ad.Kind, ad.Value, ad.Where)
+		l := fmt.Sprintf("%-16s %s  (seen in its %s)", kindWord(ad.Kind), ad.Value, ad.Where)
 		if ad.Kind == KindURL && !Shareable(ad.Kind, ad.Value, ad.Where) {
 			// Only in its memory: as likely the text of its own libraries or
 			// your data it collected as where it sends. Only the first few.
@@ -184,7 +221,10 @@ func Render(a *alerts.Alert) []Section {
 	if ap.MemoryScanned > 0 {
 		addrs = append(addrs, fmt.Sprintf("(%s of its memory looked through.)", size(ap.MemoryScanned)))
 	}
-	add("Where it was sending", addrs...)
+	addrs = append(addrs, reportHints(ap)...)
+	add(SecAddresses, "Where it was sending", addrs...)
+	add(SecProgram, "The program", programLines(a)...)
+	add(SecDid, "What ABA did", didLines(a)...)
 
 	var ev []string
 	if ap.Evidence != "" {
@@ -194,8 +234,8 @@ func Render(a *alerts.Alert) []Section {
 		}
 		ev = append(ev, "To share what's safe to share: aba export-ioc "+a.ID)
 	}
-	add("Evidence", ev...)
-	add("Notes", ap.Notes...)
+	add(SecEvidence, "Evidence", ev...)
+	add(SecNotes, "Notes", ap.Notes...)
 	return out
 }
 
@@ -299,8 +339,112 @@ func hiddenRune(r rune) bool {
 
 // Section is one part of the report.
 type Section struct {
+	Key   string // one of the Sec* constants
 	Title string
 	Lines []string
+}
+
+// kindWord is what an address is, in words.
+func kindWord(kind string) string {
+	switch kind {
+	case KindTelegram:
+		return "Telegram bot"
+	case KindDiscord:
+		return "Discord webhook"
+	case KindURL:
+		return "web address"
+	}
+	return kind
+}
+
+// reportHints say who can shut down the stealer's own mailbox, when it
+// sends to a Discord webhook or a Telegram bot: both take them down once
+// they're reported.
+func reportHints(ap *alerts.Autopsy) []string {
+	var discord, telegram bool
+	for _, ad := range ap.Addresses {
+		discord = discord || ad.Kind == KindDiscord
+		telegram = telegram || ad.Kind == KindTelegram
+	}
+	var out []string
+	if discord {
+		out = append(out, "The Discord webhook is the stealer's own mailbox, not yours. You can report it to Discord (Trust & Safety, at dis.gd/request): Discord deletes webhooks used for stealing, and then nothing more reaches the thief through it.")
+	}
+	if telegram {
+		out = append(out, "The Telegram bot is the stealer's own, not yours. You can report it to Telegram (abuse@telegram.org, with the bot's token): Telegram shuts such bots down.")
+	}
+	return out
+}
+
+// programLines are the caught program's details.
+func programLines(a *alerts.Alert) []string {
+	p := a.Process
+	if p == nil {
+		return nil
+	}
+	out := []string{fmt.Sprintf("Name: %s (pid %d)", a.ExeName(), p.PID)}
+	if p.Image != "" {
+		out = append(out, "File: "+visible(p.Image))
+	}
+	out = append(out, vouchWord+": "+p.Signature.String())
+	if p.SHA256 != "" {
+		out = append(out, "Fingerprint (SHA-256): "+p.SHA256)
+	}
+	if l := p.Origin.Line(p.Image); l != "" {
+		out = append(out, l)
+	}
+	if len(p.Parents) > 0 {
+		par := p.Parents[0]
+		if par.Exited || par.Image == "" {
+			out = append(out, fmt.Sprintf("Started by: a program that has ended since (pid %d)", par.PID))
+		} else {
+			out = append(out, fmt.Sprintf("Started by: %s (pid %d)", baseName(par.Image), par.PID))
+		}
+	}
+	if p.CommandLine != "" {
+		out = append(out, "Command line: "+p.CommandLine)
+	}
+	if p.User != "" {
+		out = append(out, "Ran as: "+p.User)
+	}
+	return out
+}
+
+// didLines are what ABA did about the program, and the commands left to
+// answer it with.
+func didLines(a *alerts.Alert) []string {
+	var out []string
+	if !a.Time.IsZero() {
+		l := "Caught on " + a.Time.Local().Format("Mon Jan 2 2006 at 15:04:05")
+		if a.Instant {
+			l += ", the moment it opened the bait"
+		}
+		if a.LatencyMS > 0 {
+			l += fmt.Sprintf(" (stopped %d ms after)", a.LatencyMS)
+		}
+		out = append(out, l+".")
+	}
+	for _, r := range a.Actions {
+		if r.OK {
+			out = append(out, "Done: "+config.Action(r.Action).Done(r.Detail))
+		} else {
+			out = append(out, "Couldn't "+config.Action(r.Action).Verb()+": "+r.Detail)
+		}
+	}
+	if a.Status == "resolved" {
+		l := "Answered"
+		if a.Note != "" {
+			l += ": " + a.Note
+		}
+		out = append(out, l+".")
+	}
+	if rows := alerts.NextSteps(a); len(rows) > 0 {
+		out = append(out, "To answer it, "+adminWhere+":")
+		for _, r := range rows {
+			out = append(out, r[0]+"  "+r[1])
+		}
+	}
+	return out
 }
 
 func size(n int64) string {

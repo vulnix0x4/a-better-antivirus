@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+**The full report, one click from the popup, and every report in the Start menu**
+
+- The popup that says what a caught program had already taken now has a **Show full report** button. It opens
+  everything ABA found as a readable page in your web browser: the answer and what to do first, what it opened of
+  yours (with times), where it sent things, what it left behind (like a hidden copy of itself that starts at
+  sign-in), the stealer's own Discord webhook or Telegram bot (with how to report it so it's shut down), the
+  program's details, and what ABA did, with what's left to do about it. Light and dark mode, and it prints.
+- A new Start menu entry, **ABA reports**, lists every report, newest first; pick one to see it whole. It asks for
+  the Windows admin approval first. Also `aba report <id>` and `aba reports`; the dashboard and `aba alerts` point to them.
+- The reports stay in ABA's protected folder, where only administrators can read them, because they name ABA's
+  bait files: a lasting copy you could read would tell a stealer running as you which files to leave alone. So the
+  page is never saved anywhere: your browser gets it once, from this computer only, at an address with a random
+  one-time key, and is told not to keep a copy. To keep a report, print it.
+- On a Mac the popup has the same button; on Linux it's a button on the notification where the desktop shows
+  buttons. There's no menu entry on a Mac or Linux yet: `sudo aba reports` in a terminal.
+
 **Stealers that make themselves administrator are frozen instantly too (Windows)**
 
 - Umbral and Blank Grabber, two real stealers, give themselves administrator rights before they start stealing
