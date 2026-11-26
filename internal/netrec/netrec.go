@@ -228,7 +228,9 @@ func (d *dest) add(at time.Time, bytes int64, conn bool) {
 		d.sends++
 		d.bytes += bytes
 	}
-	if n := len(d.bursts); n > 0 {
+	if n := len(d.bursts); n > 0 && !conn {
+		// (A new connection starts a burst of its own: it may be to
+		// another name at the same address.)
 		b := &d.bursts[n-1]
 		if !at.Before(b.from) && at.Sub(b.to) <= burstGap {
 			if at.After(b.to) {
