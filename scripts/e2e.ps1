@@ -524,7 +524,10 @@ $pagesBefore = @(PageFiles)
 $rp = ReportPage @('report', $ac.id)
 Check ($rp.Status -eq 200 -and $rp.Page.Contains($ac.autopsy.headline)) "aba report $($ac.id): the page has the headline ($($rp.Url))"
 Check ($rp.Page.Contains('What it sent over the network') -and $rp.Page.Contains("aba kill $(($ac.id -split '-')[-1])")) 'and the rest of the report: where it sent, and how to end it'
-Check (-not ($rp.Raw -match '<script|https?://(?!127\.0\.0\.1)[^"\s<]+\.(js|css|woff2?|png|svg)')) 'the page runs no script and loads nothing from anywhere'
+# Only markup counts: the report's text quotes addresses the stealer used
+# (escaped, never loaded), which may well end in .png or .js.
+$loads = [regex]::Matches($rp.Raw, '(?i)<(script|iframe|object|embed)\b|@import|<[a-z][^>]*\s(src|href|action|data)\s*=\s*["'']?\s*(https?:|//|javascript:)|url\(\s*["'']?\s*(https?:|//)') | ForEach-Object { $_.Value }
+Check (-not $loads) "the page runs no script and loads nothing from anywhere$(if ($loads) { ': ' + ($loads -join ', ') })"
 Check ($rp.CacheControl -match 'no-store') 'the browser is told not to keep a copy (no-store)'
 Check ($rp.Again -ne 200) "the address works once: a second load gets nothing ($($rp.Again))"
 Check ($rp.Ended -and $rp.ExitCode -eq 0) 'aba report ends once the page was loaded'
