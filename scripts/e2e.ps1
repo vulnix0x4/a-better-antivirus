@@ -380,12 +380,12 @@ $page = (& curl.exe -sk --max-time 10 https://supportxmr.com/) -join "`n"
 Check ($page -match 'miner trap') 'a pool''s website explains why it doesn''t open'
 Start-Sleep -Seconds 2
 Check (-not @(Fresh | Where-Object { $_.baits -and $_.baits[0].access -eq 'mine' }).Count) 'and opening it isn''t taken for mining'
-Aba doctor
 $reloads = Reloads
 Aba miners off
 WaitReloaded $reloads
 Check (-not @(TrapRules).Count) 'off: no name rules are left'
 Check (WaitFor { $r = Resolves 'pool.supportxmr.com'; $r.Count -gt 0 -and -not ($r -contains $trapIP) } 30) 'off: pool names resolve normally again'
+Start-Sleep -Seconds 3   # let everything settle before the next fake stealer
 
 Step 'Real stealer: frozen, blocked, then killed'
 $s1 = Stealer 'stealer1' $desktopBait
@@ -864,6 +864,10 @@ Check ($cfg.minerTrap -eq $true -and -not $cfg.clipboardBait) '--miners turns th
 Check (WaitFor { (Resolves 'pool.supportxmr.com') -contains $trapIP } 60) 'pool names lead to the trap'
 Aba install --yes --keep-settings
 Check ((Get-Content (Join-Path $data 'config.json') -Raw | ConvertFrom-Json).minerTrap -eq $true) '--keep-settings keeps it'
+# (Here, not earlier: doctor opens every bait to check it, which lifts instant
+# freeze off each for a moment, and no fake stealer follows from here on.)
+$doc = (& $Aba doctor 2>&1 | Out-String)
+Check ($doc -match 'Miner trap\s+on: \d+ mining pools') "aba doctor shows the miner trap on: $(($doc -split "`n" | Select-String 'Miner trap') -join '')"
 
 Step 'What the flight recorder cost'
 # Informational, for deciding between audit rules and other ways of watching:
