@@ -18,6 +18,7 @@ func TestCost(t *testing.T) {
 	if secs == 0 {
 		t.Skip("ABA_NET_COST=<seconds>")
 	}
+	sessionName = SessionName + " (test)"
 	r := New()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)

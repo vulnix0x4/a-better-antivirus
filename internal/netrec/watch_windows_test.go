@@ -25,6 +25,7 @@ func TestWatchSeesWhatLeaves(t *testing.T) {
 	if !windows.GetCurrentProcessToken().IsElevated() {
 		t.Skip("needs an elevated shell")
 	}
+	sessionName = SessionName + " (test)"
 	r := New()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)

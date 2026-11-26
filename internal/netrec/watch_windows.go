@@ -34,6 +34,10 @@ import (
 // SessionName is the name of ABA's trace session (logman query -ets lists it).
 const SessionName = "ABA Network Record"
 
+// sessionName is the session Watch starts (tests use their own, so they
+// don't stop an installed service's).
+var sessionName = SessionName
+
 var (
 	kernelNetwork = windows.GUID{Data1: 0x7DD42A49, Data2: 0x5329, Data3: 0x4832, Data4: [8]byte{0x8D, 0xFD, 0x43, 0xD9, 0x79, 0x15, 0x3A, 0x88}}
 	kernelProcess = windows.GUID{Data1: 0x22FB2CD6, Data2: 0x0E7B, Data3: 0x422B, Data4: [8]byte{0xA0, 0xC7, 0x2F, 0xAD, 0x1F, 0xD0, 0xE7, 0x16}}
@@ -77,7 +81,7 @@ type watcher struct {
 // Watch keeps r from Windows' event tracing until ctx is done, or the
 // session fails. r says, all along, whether it's running.
 func Watch(ctx context.Context, r *Record, logf func(string, ...any)) error {
-	s, err := etw.Start(SessionName, providers)
+	s, err := etw.Start(sessionName, providers)
 	if err != nil {
 		r.Stopped(time.Now(), "it couldn't start: "+err.Error())
 		return err
@@ -119,7 +123,7 @@ func Watch(ctx context.Context, r *Record, logf func(string, ...any)) error {
 				err = fmt.Errorf("Windows stopped it")
 			}
 			r.Stopped(time.Now(), err.Error())
-			etw.StopByName(SessionName)
+			etw.StopByName(sessionName)
 			return err
 		case now := <-tick.C:
 			ev, buf, err := s.Losses()
