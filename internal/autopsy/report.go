@@ -49,6 +49,7 @@ func Render(a *alerts.Alert) []Section {
 	}
 	add("Why ABA can't be sure", ap.Unsure...)
 	add("Leads", ap.Leads...)
+	add("What it sent over the network", sentLines(ap)...)
 
 	var reads []string
 	for _, r := range ap.Reads {
@@ -195,6 +196,53 @@ func Render(a *alerts.Alert) []Section {
 	}
 	add("Evidence", ev...)
 	add("Notes", ap.Notes...)
+	return out
+}
+
+// sentLines are what the network record saw it send, and how sure that is.
+func sentLines(ap *alerts.Autopsy) []string {
+	var out []string
+	for _, s := range ap.Sends {
+		l := clock(s.First) + "  " + hostOf(s)
+		if s.Name != "" && s.To != "" {
+			l += " (" + s.To + ")"
+		}
+		var what []string
+		if s.Bytes > 0 {
+			what = append(what, "about "+amount(s.Bytes))
+		}
+		switch {
+		case s.Conns == 1:
+			what = append(what, "1 connection")
+		case s.Conns > 1:
+			what = append(what, fmt.Sprintf("%d connections", s.Conns))
+		}
+		if len(what) > 0 {
+			l += "  " + strings.Join(what, ", ")
+		}
+		l += fmt.Sprintf("  pid %d", s.PID)
+		if s.Via != "" {
+			l += " (" + s.Image + ", " + s.Via + ")"
+		}
+		if s.LAN {
+			l += "  on your local network"
+		}
+		switch {
+		case !s.After:
+			l += "  - before it opened anything of yours"
+		case ap.Answer == alerts.AnswerRead:
+			l += "  - after it opened your data"
+		}
+		out = append(out, l)
+	}
+	switch ap.Sent {
+	case alerts.SentNothing:
+		out = append(out, "Nothing left this "+pcWord+" once it could have had your data: ABA's network record ran the whole time and saw no send by it or anything it started.")
+	case alerts.SentUnknown:
+		for _, w := range ap.SentWhy {
+			out = append(out, "ABA can't tell: "+lower(w))
+		}
+	}
 	return out
 }
 

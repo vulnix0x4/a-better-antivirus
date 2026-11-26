@@ -10,7 +10,9 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"runtime"
 	"sync"
 	"time"
 
@@ -18,7 +20,9 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/autopsy"
 	"github.com/vulnix0x4/a-better-antivirus/internal/baits"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
+	"github.com/vulnix0x4/a-better-antivirus/internal/netrec"
 	"github.com/vulnix0x4/a-better-antivirus/internal/notify"
+	"github.com/vulnix0x4/a-better-antivirus/internal/platform"
 	"github.com/vulnix0x4/a-better-antivirus/internal/recorder"
 	"github.com/vulnix0x4/a-better-antivirus/internal/session"
 )
@@ -31,6 +35,54 @@ type recorderState struct {
 	// recWhy says why the recorder can't watch anything at all ("" if it
 	// can): this system's watcher couldn't start.
 	recWhy string
+
+	// The network record: what programs sent, for the autopsy (see
+	// package netrec). It runs while the flight recorder is on.
+	netRec    *netrec.Record
+	netMu     sync.Mutex
+	netCancel context.CancelFunc
+}
+
+// netOn starts the network record, if it isn't running.
+func (s *server) netOn() {
+	s.netMu.Lock()
+	defer s.netMu.Unlock()
+	if s.netCancel != nil {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	s.netCancel = func() { cancel(); <-done }
+	go func() {
+		defer close(done)
+		for {
+			err := netrec.Watch(ctx, s.netRec, s.log.Printf)
+			if ctx.Err() != nil {
+				return
+			}
+			if errors.Is(err, platform.ErrUnsupported) {
+				return
+			}
+			s.log.Printf("network record: %v; trying again in a minute", err)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Minute):
+			}
+		}
+	}()
+}
+
+// netOff stops the network record.
+func (s *server) netOff(why string) {
+	s.netMu.Lock()
+	stop := s.netCancel
+	s.netCancel = nil
+	s.netMu.Unlock()
+	if stop != nil {
+		stop()
+		s.netRec.Stopped(time.Now(), why)
+	}
 }
 
 // syncRecorder works out the real stores again and makes sure they're
@@ -50,8 +102,10 @@ func (s *server) syncRecorder(st *config.State) {
 		if cfg.NoRecorder {
 			s.rec.SetStores(nil, nil)
 			s.watchStores(nil)
+			s.netOff("it's switched off (`aba recorder on`)")
 			return
 		}
+		s.netOn()
 		planted := map[string]bool{}
 		for id, bs := range st.Baits {
 			if bs.Status != "retired" {
@@ -100,6 +154,16 @@ func (s *server) recorderHealth(add func(name string, ok bool, detail string)) {
 		st := s.rec.Status()
 		add("Flight recorder", st.Stores == 0 || st.Watched > 0,
 			fmtRecorder(st))
+		ns := s.netRec.Status()
+		switch {
+		case ns.Running:
+			add("Network record", true, fmt.Sprintf("on since %s: notes which programs send data off this %s, so after a catch ABA can say whether anything left (it never alerts on its own)",
+				ns.Since.Local().Format("Jan 2 15:04"), platform.PC))
+		case runtime.GOOS != "windows":
+			// Not there yet: nothing to check.
+		default:
+			add("Network record", false, "not running: "+ns.Why+". After a catch, ABA can't say whether anything left this "+platform.PC)
+		}
 	}
 }
 
@@ -146,6 +210,13 @@ func (s *server) Autopsy(c autopsy.Case) *alerts.Autopsy {
 			return res, "it's switched off (`aba recorder on`)"
 		case s.recWhy != "":
 			return res, s.recWhy
+		}
+		return res, ""
+	}
+	h.Network = func(q netrec.Query) (netrec.Result, string) {
+		res := s.netRec.Query(q)
+		if cfg.NoRecorder {
+			return res, "it's switched off (`aba recorder on`)"
 		}
 		return res, ""
 	}

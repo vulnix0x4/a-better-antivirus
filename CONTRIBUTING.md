@@ -28,6 +28,12 @@ elevated shell:
 $env:ABA_INTEGRATION = "1"; go test -count=1 -v ./internal/integration/
 ```
 
+The network record against Windows' own event tracing (elevated and online: it makes two small web requests):
+
+```
+$env:ABA_INTEGRATION = "1"; go test -count=1 -v -run TestWatch ./internal/netrec/
+```
+
 The clipboard bait's guard, started the way the service starts it (as SYSTEM, through a temporary
 service it removes again), against fake clippers inside a private window station, so your own clipboard
 is never touched:
@@ -75,6 +81,7 @@ system has to provide:
 | Package | In its `_<os>.go` file |
 |---|---|
 | `service` | Running under the service manager, and noticing a bait being opened. Package `detect` says how to report one: `decideOpen` while the opener is held, `detect.Access` after the fact |
+| `netrec` | `Watch`: the record of what programs send over the network (a stub says it can't tell yet) |
 | `procinfo` | List and inspect processes (`WorkingDir` too, where the system shows it), suspend, resume, kill, and `Hold`: keep one frozen so that nothing else running as the user can thaw it |
 | `netguard` | Cut one program's network access; isolate the PC |
 | `provenance` | `Verify`: who made a program, and does the system vouch for it (a code signature, or a package that owns the file) |
@@ -89,7 +96,7 @@ system has to provide:
 Two rules keep the systems out of each other's way. Work in your system's files; if the core needs
 something new from the system, add it to all three (a stub that returns `platform.Unsupported(...)` is
 fine for the ones you can't write). And helpers only one system needs go in their own package, like
-`winsec`, `evtlog` and `instant` for Windows, and `fanwatch` for Linux.
+`winsec`, `evtlog`, `etw` and `instant` for Windows, and `fanwatch` for Linux.
 
 CI vets and tests on Windows, Linux and macOS. To check the others from one machine:
 

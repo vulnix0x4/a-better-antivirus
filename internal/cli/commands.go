@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -423,7 +424,7 @@ func runTest() error {
 }
 
 func testReaderCmd() *cobra.Command {
-	var beacon, do string
+	var beacon, do, send string
 	c := &cobra.Command{
 		Use:    "test-reader <path>...",
 		Hidden: true,
@@ -436,6 +437,14 @@ func testReaderCmd() *cobra.Command {
 			for i, p := range args {
 				if i > 0 {
 					time.Sleep(300 * time.Millisecond)
+				}
+				if i == 1 && send != "" {
+					// --send: what a stealer does with what it read, after
+					// the first file and before the next (the bait).
+					cl := &http.Client{Timeout: 10 * time.Second}
+					if r, err := cl.Post(send, "text/plain", strings.NewReader("aba end-to-end test")); err == nil {
+						r.Body.Close()
+					}
 				}
 				switch do {
 				case "overwrite":
@@ -462,6 +471,7 @@ func testReaderCmd() *cobra.Command {
 		},
 	}
 	c.Flags().StringVar(&beacon, "beacon", "", "")
+	c.Flags().StringVar(&send, "send", "", "")
 	// --do overwrite|delete: act like ransomware or a wiper on the files
 	// instead of reading them (for the end-to-end tests).
 	c.Flags().StringVar(&do, "do", "", "")
@@ -1059,7 +1069,11 @@ func notifyCmd() *cobra.Command {
 			}
 			a := env.Alert
 			if env.Autopsy && a.Autopsy != nil {
-				notify.Toast("ABA: what "+a.ExeName()+" had already opened", a.Autopsy.Headline)
+				title := "ABA: what " + a.ExeName() + " had already opened"
+				if a.Autopsy.Sent == alerts.SentNothing {
+					title = "ABA: " + a.ExeName() + " was stopped before it sent anything"
+				}
+				notify.Toast(title, a.Autopsy.Headline)
 				notify.ShowAutopsy(a)
 				return nil
 			}

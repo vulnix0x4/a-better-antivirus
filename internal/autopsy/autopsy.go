@@ -15,6 +15,9 @@
 //   - Where it was sending: its connections still open, and the generic
 //     shapes of an exfiltration address (a Telegram bot, a Discord webhook, a
 //     web address) in its memory and its program file.
+//   - From the network record (package netrec): whether it, or anything it
+//     started, sent anything off this PC, and whether that was before or
+//     after it first opened real data.
 //
 // Then one of three honest answers (see decide.go), and an evidence folder
 // only administrators can read, saved before `aba kill` can erase anything.
@@ -32,6 +35,7 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/alerts"
 	"github.com/vulnix0x4/a-better-antivirus/internal/baits"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
+	"github.com/vulnix0x4/a-better-antivirus/internal/netrec"
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
 	"github.com/vulnix0x4/a-better-antivirus/internal/recorder"
@@ -71,12 +75,16 @@ type Case struct {
 	// "read", and aren't dropped either. (A browser created suspended never
 	// ran as one: everything it opened counts, and it's in neither map.)
 	Running map[uint32]string
+	// Blocked: ABA cut its network access when it froze it.
+	Blocked bool
 }
 
 // Hooks are the operating system's part, and the service's.
 type Hooks struct {
 	// Recorder asks the flight recorder; why says why it can't ("" if it can).
-	Recorder   func(q recorder.Query) (res recorder.Result, why string)
+	Recorder func(q recorder.Query) (res recorder.Result, why string)
+	// Network asks the network record; why says why it can't ("" if it can).
+	Network    func(q netrec.Query) (res netrec.Result, why string)
 	StartedAt  func(pid uint32) (time.Time, error)
 	OpenFiles  func(pid uint32) ([]string, error)
 	ReadMemory func(pid uint32, limit int64, fn func(base uint64, b []byte) bool) (int64, error)
@@ -249,6 +257,41 @@ func Run(c Case, h Hooks) *alerts.Autopsy {
 			n := len(s.Resolve())
 			f.res.Stores = append(f.res.Stores, recorder.Coverage{Store: s.ID, Name: s.Name, Kind: s.Kind, Files: n, Absent: n == 0, Why: "not watched"})
 		}
+	}
+
+	// What it sent.
+	f.frozen, f.blocked, f.alertID = len(c.Frozen) > 0, c.Blocked, c.AlertID
+	f.busy = map[uint32]bool{}
+	for p := range c.Running {
+		f.busy[p] = true
+	}
+	if h.Network != nil {
+		var nm []netrec.Member
+		for _, m := range members {
+			nm = append(nm, netrec.Member{PID: m.PID, Start: m.Start})
+		}
+		from := start
+		if from.IsZero() {
+			from = c.BaitAt.Add(-10 * time.Minute)
+		}
+		res, why := h.Network(netrec.Query{Members: nm, From: from, To: time.Now()})
+		if len(c.Own) > 0 {
+			// A genuine app frozen for something else: its traffic is the
+			// app at work, like its opens of its own data.
+			var keep []netrec.Send
+			for _, s := range res.Sends {
+				if _, own := c.Own[s.PID]; !own {
+					keep = append(keep, s)
+				}
+			}
+			res.Sends = keep
+		}
+		if why == "" && !res.Running {
+			why = res.Why
+		}
+		f.net, f.netOn, f.netWhy = res, why == "", why
+	} else {
+		f.netWhy = "only ABA's service keeps it"
 	}
 
 	realFiles := map[string]string{}

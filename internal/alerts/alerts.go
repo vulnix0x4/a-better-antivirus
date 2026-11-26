@@ -131,6 +131,14 @@ const (
 	AnswerUnknown = "cannot-tell" // ABA can't tell, and says why
 )
 
+// The three answers to "did anything leave this PC before it was frozen?",
+// from ABA's network record.
+const (
+	SentNothing = "nothing"     // the record proves nothing it ran sent anything once it had your data
+	SentSome    = "sent"        // it (or something it started) connected out after opening your data
+	SentUnknown = "cannot-tell" // ABA can't tell, and says why
+)
+
 // Autopsy is what ABA found out about a caught program while it was frozen.
 // Everything in it is something ABA saw; where it couldn't see, it says so.
 type Autopsy struct {
@@ -143,6 +151,13 @@ type Autopsy struct {
 	Steps    []string `json:"steps,omitempty"`   // what to do about what it read (or may have)
 	Unsure   []string `json:"unsure,omitempty"`  // why ABA can't tell, when it can't
 	Leads    []string `json:"leads,omitempty"`   // things that point to a theft without proving it
+	// Sent answers whether anything left this PC before the freeze (one of
+	// the Sent* constants; "" when it wasn't looked at), SentWhy why ABA
+	// can't tell when it can't, and Sends what the network record saw it
+	// send.
+	Sent    string    `json:"sent,omitempty"`
+	SentWhy []string  `json:"sentWhy,omitempty"`
+	Sends   []NetSend `json:"sends,omitempty"`
 
 	ProcessStart time.Time    `json:"processStart,omitempty"` // when the first of its processes started
 	BaitAt       time.Time    `json:"baitAt,omitempty"`
@@ -178,6 +193,25 @@ type StoreRead struct {
 	PID   uint32    `json:"pid,omitempty"`
 	Image string    `json:"image,omitempty"`
 	How   string    `json:"how"` // how ABA knows: "the flight recorder saw it open it", "it has it open"
+}
+
+// NetSend is what one of the program's processes sent to one address.
+type NetSend struct {
+	PID   uint32    `json:"pid"`
+	Image string    `json:"image,omitempty"`
+	Via   string    `json:"via,omitempty"` // "started by pid 812": a program it started
+	To    string    `json:"to"`            // address:port; "" for more addresses than ABA keeps apart
+	Name  string    `json:"name,omitempty"`
+	LAN   bool      `json:"lan,omitempty"` // on the local network
+	UDP   bool      `json:"udp,omitempty"`
+	First time.Time `json:"first"`
+	Last  time.Time `json:"last"`
+	Bytes int64     `json:"bytes"`
+	Conns int       `json:"conns,omitempty"`
+	// After: some of it was sent after it opened your data (or, when ABA
+	// doesn't know when that was, while it ran), roughly BytesAfter bytes.
+	After      bool  `json:"after"`
+	BytesAfter int64 `json:"bytesAfter,omitempty"`
 }
 
 // StoreWatch is how well one real store was watched while the program ran.
