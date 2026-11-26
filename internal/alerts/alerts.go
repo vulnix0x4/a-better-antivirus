@@ -34,6 +34,7 @@ const (
 	KindTamper        = "tamper"         // something tried to switch part of ABA off
 	KindTest          = "test"
 	KindClipper       = "clipper" // a program swapped the wallet address ABA put on the clipboard
+	KindMiner         = "miner"   // a program logged in to mine at the miner trap's fake pool
 )
 
 // StatusNoted is the status of an alert ABA noted quietly: a read by a program
@@ -46,7 +47,7 @@ type BaitHit struct {
 	ID     string    `json:"id"`
 	Name   string    `json:"name"`
 	Path   string    `json:"path"`
-	Access string    `json:"access"` // read | delete | swap
+	Access string    `json:"access"` // read | delete | write | swap | mine
 	Time   time.Time `json:"time"`
 }
 
@@ -130,6 +131,7 @@ type Autopsy struct {
 
 	MemoryScanned  int64    `json:"memoryScanned,omitempty"` // bytes of its memory looked through
 	AttackerWallet string   `json:"attackerWallet,omitempty"`
+	WalletNote     string   `json:"walletNote,omitempty"`  // what the wallet is ("" means a clipper's swapped-in one)
 	Evidence       string   `json:"evidence,omitempty"`    // the folder the evidence was saved to
 	MemoryImage    bool     `json:"memoryImage,omitempty"` // the evidence includes a copy of its memory
 	Notes          []string `json:"notes,omitempty"`       // what couldn't be looked at, and why
@@ -429,7 +431,18 @@ func Update(id string, fn func(*Alert)) (*Alert, error) {
 // Checklist is what to do after a critical detection.
 func Checklist(a *Alert) []string {
 	var steps []string
-	if a.Kind == KindClipper {
+	if a.Kind == KindMiner {
+		// A miner costs you electricity and speed, not data; but what
+		// brought it often brought a stealer too, and it comes back by
+		// itself if what starts it stays.
+		steps = []string{
+			"If you didn't start a miner yourself: kill it (Yes in the alert, or `aba kill` with the alert's number).",
+			"Miners come back by themselves. Look in Task Scheduler and in Settings > Apps > Startup for anything you don't recognise, and in the alert for where the program came from.",
+			"What brings a miner (a cracked game, a cheat, a \"free\" tool) often brings a stealer too. From another device, change your important passwords, email first.",
+			"You can report the wallet in the alert to the mining pool it wanted: pools block wallets that malware mines for.",
+			platform.CleanupStep,
+		}
+	} else if a.Kind == KindClipper {
 		// A clipper changes what you paste; it doesn't need to read files.
 		// What it costs you is a payment sent to the wrong wallet.
 		steps = []string{

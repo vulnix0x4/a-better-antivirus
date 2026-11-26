@@ -125,6 +125,28 @@ func ShowPopup(a *alerts.Alert, cli string) {
 				RunElevated(cli, no...)
 			}
 		}
+	case frozen && a.Kind == alerts.KindMiner:
+		// Someone who mines on purpose did start it: unfreezing it is one
+		// click, but it can't mine until the trap is off.
+		text := body + "\n" + a.ExeName() + " was frozen as it tried to mine cryptocurrency.\n" +
+			"Hidden miners come with cracked games, cheats and \"free\" tools.\n\n" +
+			"Kill it?\n" +
+			"Yes = Kill it (recommended)\n" +
+			"No = It's my own miner: unfreeze it (then turn the miner trap off with `aba miners off`, or it has nowhere to mine)\n" +
+			"Cancel = Decide later (it stays frozen)"
+		if isolated {
+			text += "\n\nYour " + platform.PC + " is isolated from the network. When it's safe, run `aba release` as admin."
+		}
+		switch messageBox(title, text, mbYesNoCancel|mbIconError) {
+		case idYes:
+			if cli != "" {
+				RunElevated(cli, "kill", a.ID)
+			}
+		case idNo:
+			if cli != "" {
+				RunElevated(cli, "resume", a.ID)
+			}
+		}
 	case frozen:
 		// "Is it yours?" is the wrong question here: people who ran a cracked
 		// game or a "free Nitro" tool did start it themselves. Ask whether it
@@ -257,6 +279,10 @@ func accessVerb(access string) string {
 		return "deleted"
 	case "write":
 		return "changed"
+	case "swap":
+		return "swapped the address on"
+	case "mine":
+		return "tried to mine at"
 	}
 	return "read"
 }
