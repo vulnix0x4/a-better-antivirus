@@ -115,7 +115,7 @@ func netCheck(f facts, reads []alerts.StoreRead, certain bool) netAnswer {
 		n.why = append(n.why, "ABA doesn't know when it started ("+why+"), so it can't tell how far back to look.")
 	}
 	if !f.frozen {
-		n.why = append(n.why, "It wasn't frozen (ABA's response to it was only an alert), so it could still send things after ABA looked.")
+		n.why = append(n.why, "It wasn't frozen, so it could still send things after ABA looked.")
 	}
 	if busy {
 		n.why = append(n.why, "Part of it ran inside a program that had been running normally (your browser), which was sending as usual: ABA can't tell what it sent from what that program sent.")
@@ -126,17 +126,21 @@ func netCheck(f facts, reads []alerts.StoreRead, certain bool) netAnswer {
 			since = "it opened your data"
 		}
 		if b := f.net.Began; b.IsZero() || b.After(n.from) {
-			n.why = append(n.why, "ABA's network record only began at "+clock(b)+" (when ABA's service started), after "+since+".")
+			n.why = append(n.why, "ABA's network record was only running from "+clock(b)+" on, after "+since+".")
 		}
-		for i, l := range f.net.Lapses {
-			if l.To.Before(n.from) {
-				continue
+		said, more := 0, 0
+		for _, l := range f.net.Lapses {
+			switch {
+			case l.To.Before(n.from):
+			case said == 3:
+				more++
+			default:
+				said++
+				n.why = append(n.why, fmt.Sprintf("Sends may have been missed around %s: %s.", clock(l.To), l.Why))
 			}
-			if i >= 3 {
-				n.why = append(n.why, fmt.Sprintf("… and %d more moments like that.", len(f.net.Lapses)-i))
-				break
-			}
-			n.why = append(n.why, fmt.Sprintf("Sends may have been missed around %s: %s.", clock(l.To), l.Why))
+		}
+		if more > 0 {
+			n.why = append(n.why, fmt.Sprintf("… and %d more moments like that.", more))
 		}
 		if !f.net.Forgot.IsZero() && f.net.Forgot.After(n.from) {
 			n.why = append(n.why, "ABA's network record of what happened before "+clock(f.net.Forgot)+" is gone (it keeps a few hours), and it was already running then.")
