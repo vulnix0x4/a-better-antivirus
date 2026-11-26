@@ -50,8 +50,8 @@ turns on something that touches the clipboard or name lookups. Options (all opti
 |---|---|
 | `/NTFYTOPIC=my-topic` | Send phone alerts to this [ntfy](https://ntfy.sh) topic. Letters, digits, `-` and `_`. |
 | `/AUTOUPDATE=0` | Don't update automatically (`1`, the default, does). |
-| `/CLIPPERS=1` | Catch clippers with the clipboard bait (`0` or not given: off). |
-| `/MINERS=1` | Catch hidden crypto miners with the miner trap (`0` or not given: off). |
+| `/CLIPPERS=1` | Detect clippers with the clipboard bait (`0` or not given: off). |
+| `/MINERS=1` | Detect hidden crypto miners with the miner trap (`0` or not given: off). |
 | `/PRESET=alert\|balanced\|strict` | What happens when something takes a bait. Default `balanced`. |
 | `/LEARNING=3` | Days of learning mode. Only changes something with `strict`. Default `0`. |
 | `/CANARYEMAIL=me@example.com` | Create canary tokens that email this address. |

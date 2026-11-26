@@ -48,7 +48,7 @@ irm https://raw.githubusercontent.com/vulnix0x4/a-better-antivirus/main/install.
 
 It downloads the latest release for your PC, checks that its checksum list carries a valid signature from ABA's release key, checks the download against it, and starts the guided setup ([read the script first](install.ps1) if you like). Setup takes about a minute:
 
-- **Recommended** asks just a few things (phone alerts, whether to catch [clippers](#clipboard-bait-windows) and [hidden crypto miners](#miner-trap-windows), automatic updates) and uses sensible defaults for the rest. **Customize** lets you pick every bait and response.
+- **Recommended** asks just a few things (phone alerts, whether to detect [clippers](#clipboard-bait-windows) and [hidden crypto miners](#miner-trap-windows), automatic updates) and uses sensible defaults for the rest. **Customize** lets you pick every bait and response.
 - If you set up phone alerts, it sends a test notification so you know they work.
 - It ends by offering a **safe test**: a harmless fake stealer reads a bait and you watch ABA freeze it.
 - Afterwards `aba` works in the same PowerShell window.
@@ -70,8 +70,8 @@ Optional flags (first install only; an existing install keeps its settings):
 |---|---|
 | `/NTFYTOPIC=my-topic` | Send phone alerts to this [ntfy](https://ntfy.sh) topic (letters, digits, `-`, `_`) |
 | `/AUTOUPDATE=0` | Don't update automatically (`1`, the default, does) |
-| `/CLIPPERS=1` | Catch clippers with the clipboard bait (`0` or not given: off) |
-| `/MINERS=1` | Catch hidden crypto miners with the miner trap (`0` or not given: off) |
+| `/CLIPPERS=1` | Detect clippers with the clipboard bait (`0` or not given: off) |
+| `/MINERS=1` | Detect hidden crypto miners with the miner trap (`0` or not given: off) |
 | `/PRESET=alert\|balanced\|strict` | Response preset (default `balanced`) |
 | `/LEARNING=3` | Days of learning mode; only changes something with `strict` (default `0`) |
 | `/CANARYEMAIL=me@example.com` | Create canary tokens that email this address |

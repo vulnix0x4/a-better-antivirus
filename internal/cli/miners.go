@@ -18,7 +18,7 @@ import (
 func minersCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "miners [on|off|test]",
-		Short: "Catch hidden crypto miners with a fake mining pool",
+		Short: "Detect hidden crypto miners with a fake mining pool",
 		Long: "Hidden crypto miners use your PC to make money for someone else. To be paid, a miner has to\n" +
 			"reach a mining pool, and nearly all of them use a few dozen public pools. With this on, those\n" +
 			"pools' names lead to a fake pool on this PC. A program that logs in there to mine is frozen,\n" +

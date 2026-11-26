@@ -28,9 +28,9 @@ var TrapsAvailable = func() (clipboard, miners bool) {
 // The two traps' questions, in the words of the setup program too
 // (installer/aba.iss).
 const (
-	clippersTitle = "Catch clippers?"
-	clippersWhy   = "Clippers swap a crypto wallet address you copy for the attacker's. While you're away, ABA puts a fake address on the clipboard and freezes any program that swaps it. Your clipboard is put back."
-	minersTitle   = "Catch hidden crypto miners?"
+	clippersTitle = "Detect clippers?"
+	clippersWhy   = "Clippers swap a crypto wallet address you copy for the attacker's. When you're away from your PC, ABA puts a fake address on the clipboard and freezes any program that swaps it. Your clipboard is put back."
+	minersTitle   = "Detect hidden crypto miners?"
 	minersWhy     = "Hidden crypto miners use your " + platform.PC + " to make money for someone else. ABA points the known mining pools at a fake one on this " + platform.PC + " and freezes any program that tries to mine there. Turn it off if you mine on purpose."
 )
 
@@ -235,12 +235,12 @@ func newWizard(in WizardInput) *wizard {
 	if clipOK {
 		trapFields = append(trapFields, huh.NewConfirm().Title(clippersTitle).
 			Description(Good.Render("Recommended.")+" "+clippersWhy).
-			Affirmative("Yes, catch them").Negative("No").Value(&catchClippers))
+			Affirmative("Yes, detect them").Negative("No").Value(&catchClippers))
 	}
 	if minerOK {
 		trapFields = append(trapFields, huh.NewConfirm().Title(minersTitle).
 			Description(Good.Render("Recommended, unless you mine crypto on this "+platform.PC+" yourself.")+" "+minersWhy).
-			Affirmative("Yes, catch them").Negative("No").Value(&catchMiners))
+			Affirmative("Yes, detect them").Negative("No").Value(&catchMiners))
 	}
 	trapsAsked := func() bool { return len(trapFields) > 0 && (mode != modeKeep || trapsUnasked) }
 	trapGroup := trapFields
@@ -500,14 +500,14 @@ func (t trapAnswers) rows() [][2]string {
 	var rows [][2]string
 	if t.clipOK {
 		if t.clippers {
-			rows = append(rows, [2]string{"Clippers", "caught" + Fainter.Render("  ·  a fake wallet address on the clipboard while you're away")})
+			rows = append(rows, [2]string{"Clippers", "detected" + Fainter.Render("  ·  a fake wallet address when you're away from your PC")})
 		} else {
 			rows = append(rows, [2]string{"Clippers", Fainter.Render("not watched  ·  turn on later with ") + Code.Render("aba clipboard on")})
 		}
 	}
 	if t.minerOK {
 		if t.miners {
-			rows = append(rows, [2]string{"Miners", "caught" + Fainter.Render("  ·  a fake mining pool on this "+platform.PC)})
+			rows = append(rows, [2]string{"Miners", "detected" + Fainter.Render("  ·  a fake mining pool on this "+platform.PC)})
 		} else {
 			rows = append(rows, [2]string{"Miners", Fainter.Render("not watched  ·  turn on later with ") + Code.Render("aba miners on")})
 		}

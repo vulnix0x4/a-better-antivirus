@@ -63,8 +63,8 @@ func installCmd() *cobra.Command {
 	c.Flags().StringVar(&f.ntfyTopic, "ntfy-topic", "", "send phone alerts to this ntfy.sh topic")
 	c.Flags().StringSliceVar(&f.baits, "baits", nil, "bait IDs to plant (default: recommended); see `aba bait catalog`")
 	c.Flags().BoolVar(&f.autoUpdate, "auto-update", true, "install new signed releases automatically (--auto-update=false to turn off)")
-	c.Flags().BoolVar(&f.clippers, "clippers", false, "catch clippers with the clipboard bait (--clippers=false to turn it off; not given: as it is, off on a first install)")
-	c.Flags().BoolVar(&f.miners, "miners", false, "catch hidden crypto miners with the miner trap (--miners=false to turn it off; not given: as it is, off on a first install)")
+	c.Flags().BoolVar(&f.clippers, "clippers", false, "detect clippers with the clipboard bait (--clippers=false to turn it off; not given: as it is, off on a first install)")
+	c.Flags().BoolVar(&f.miners, "miners", false, "detect hidden crypto miners with the miner trap (--miners=false to turn it off; not given: as it is, off on a first install)")
 	c.Flags().BoolVar(&f.keep, "keep-settings", false, "with --yes, when ABA is already installed: repair or upgrade it and keep every setting (the other flags then only count on a first install)")
 	return c
 }

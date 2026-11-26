@@ -477,10 +477,10 @@ begin
     Result := '/AUTOUPDATE must be 1 (on) or 0 (off).';
   P := Param('CLIPPERS', '');
   if (P <> '') and (P <> '0') and (P <> '1') then
-    Result := '/CLIPPERS must be 1 (catch clippers) or 0 (don''t).';
+    Result := '/CLIPPERS must be 1 (detect clippers) or 0 (don''t).';
   P := Param('MINERS', '');
   if (P <> '') and (P <> '0') and (P <> '1') then
-    Result := '/MINERS must be 1 (catch hidden miners) or 0 (don''t).';
+    Result := '/MINERS must be 1 (detect hidden miners) or 0 (don''t).';
   P := Param('NTFYTOPIC', '');
   if (P <> '') and not ValidTopic(P) then
     Result := '/NTFYTOPIC may only have letters, digits, - and _ in it (64 at most).';
@@ -562,7 +562,7 @@ begin
       '"{#AppName}" is added to the Start menu and to Windows'' list of installed apps. The program folder is added to PATH, so the aba command works in a terminal.') +
     RtfItem('Firewall',
       'Nothing is blocked now. Only when ABA stops a threat does it add a Windows firewall rule that cuts that one program off from the internet.') +
-    RtfItem('Mining pools, if you choose to catch miners',
+    RtfItem('Mining pools, if you choose to detect miners',
       'A Windows name rule points the names of known crypto-mining pools at a fake pool on this PC. No other name changes. Turning the miner trap off, or uninstalling, removes the rule.') +
     RtfItem('Internet',
       'ABA sends nothing about you anywhere. It uses the internet only for phone alerts and update checks, and only if you turn them on in the next steps.') +
@@ -650,7 +650,7 @@ begin
 
   // ---- clippers and miners (the terminal setup's words) ----
   TrapsPage := CreateCustomPage(PhonePage.ID,
-    'Clippers and miners', 'Catch two more kinds of malware?');
+    'Clippers and miners', 'Detect two more kinds of malware?');
   T := AddText(TrapsPage, 0, 0,
     'Two traps for malware that doesn''t go after your files. Both are recommended.');
   Y := T.Top + T.Height + ScaleY(12);
@@ -659,17 +659,17 @@ begin
   ClippersCheck.Top := Y;
   ClippersCheck.Width := TrapsPage.SurfaceWidth;
   ClippersCheck.Height := ScaleY(21);
-  ClippersCheck.Caption := 'Catch clippers (recommended)';
+  ClippersCheck.Caption := 'Detect clippers (recommended)';
   Y := Y + ClippersCheck.Height + ScaleY(2);
   T := AddText(TrapsPage, ScaleX(18), Y,
-    'Clippers swap a crypto wallet address you copy for the attacker''s. While you''re away, ABA puts a fake address on the clipboard and freezes any program that swaps it. Your clipboard is put back.');
+    'Clippers swap a crypto wallet address you copy for the attacker''s. When you''re away from your PC, ABA puts a fake address on the clipboard and freezes any program that swaps it. Your clipboard is put back.');
   Y := T.Top + T.Height + ScaleY(14);
   MinersCheck := TNewCheckBox.Create(TrapsPage);
   MinersCheck.Parent := TrapsPage.Surface;
   MinersCheck.Top := Y;
   MinersCheck.Width := TrapsPage.SurfaceWidth;
   MinersCheck.Height := ScaleY(21);
-  MinersCheck.Caption := 'Catch hidden crypto miners (recommended, unless you mine yourself)';
+  MinersCheck.Caption := 'Detect hidden crypto miners (recommended, unless you mine yourself)';
   Y := Y + MinersCheck.Height + ScaleY(2);
   T := AddText(TrapsPage, ScaleX(18), Y,
     'Hidden crypto miners use your PC to make money for someone else. ABA points the known mining pools at a fake one on this PC and freezes any program that tries to mine there. Turn it off if you mine crypto on this PC on purpose.');
@@ -754,12 +754,12 @@ begin
     Result := Result + Space + 'off (turn on later with: aba configure)' + NewLine;
   Result := Result + NewLine + 'Clippers:' + NewLine;
   if WantClippers then
-    Result := Result + Space + 'caught: a fake wallet address on the clipboard while you''re away' + NewLine
+    Result := Result + Space + 'detected: a fake wallet address when you''re away from your PC' + NewLine
   else
     Result := Result + Space + 'not watched (turn on later with: aba clipboard on)' + NewLine;
   Result := Result + NewLine + 'Hidden crypto miners:' + NewLine;
   if WantMiners then
-    Result := Result + Space + 'caught: a fake mining pool on this PC' + NewLine
+    Result := Result + Space + 'detected: a fake mining pool on this PC' + NewLine
   else
     Result := Result + Space + 'not watched (turn on later with: aba miners on)' + NewLine;
   Result := Result + NewLine + 'Updates:' + NewLine;
