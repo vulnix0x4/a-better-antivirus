@@ -32,25 +32,27 @@ jobs:
         shell: pwsh
         run: ./installer/get-inno.ps1
       # Code signing (Authenticode) of every Windows program, with Microsoft's
-      # Artifact Signing service, when the "release" environment has its
-      # settings. GoReleaser's build step then signs each aba.exe and
-      # ABA-Setup.exe before anything is zipped, hashed or published (see
-      # installer/build). Without the settings these steps are skipped and the
-      # release is built unsigned, exactly as before.
+      # Artifact Signing service, only when the repository variable
+      # ABA_CODE_SIGNING is "on" and the signing settings are there.
+      # GoReleaser's build step then signs each aba.exe and ABA-Setup.exe
+      # before anything is zipped, hashed or published (see installer/build).
+      # Otherwise these steps are skipped and the release is built unsigned.
+      # Signing is off: a certificate shows the signer's legal name and town
+      # in every file's properties (docs/windows-signing.md).
       - name: Sign in to Azure (code signing)
-        if: vars.ARTIFACT_SIGNING_ACCOUNT != ''
+        if: vars.ABA_CODE_SIGNING == 'on' && vars.ARTIFACT_SIGNING_ACCOUNT != ''
         uses: azure/login@v3
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           allow-no-subscriptions: true
       - name: Get .NET for the signing client (code signing)
-        if: vars.ARTIFACT_SIGNING_ACCOUNT != ''
+        if: vars.ABA_CODE_SIGNING == 'on' && vars.ARTIFACT_SIGNING_ACCOUNT != ''
         uses: actions/setup-dotnet@v6
         with:
           dotnet-version: "10.0.x"
       - name: Set up code signing
-        if: vars.ARTIFACT_SIGNING_ACCOUNT != ''
+        if: vars.ABA_CODE_SIGNING == 'on' && vars.ARTIFACT_SIGNING_ACCOUNT != ''
         shell: pwsh
         run: ./scripts/setup-windows-signing.ps1 -Mode artifact-signing
         env:
@@ -99,8 +101,9 @@ jobs:
 
   # The macOS files (scripts/release-macos.sh), added to the release the
   # job above made, with their own signed checksum list. Signed with ABA's
-  # Developer ID certificates and notarized by Apple when the "release"
-  # environment has them; unsigned (and without the .pkg) until then.
+  # Developer ID certificates and notarized by Apple only when the repository
+  # variable ABA_CODE_SIGNING is "on" (the certificates stay in the "release"
+  # environment); unsigned otherwise, the .pkg included.
   macos:
     needs: release
     runs-on: macos-latest
@@ -117,10 +120,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ABA_SIGNING_KEY: ${{ secrets.ABA_SIGNING_KEY }}
-          MACOS_APP_CERT: ${{ secrets.MACOS_APP_CERT }}
-          MACOS_APP_CERT_PASSWORD: ${{ secrets.MACOS_APP_CERT_PASSWORD }}
-          MACOS_INSTALLER_CERT: ${{ secrets.MACOS_INSTALLER_CERT }}
-          MACOS_INSTALLER_CERT_PASSWORD: ${{ secrets.MACOS_INSTALLER_CERT_PASSWORD }}
+          MACOS_APP_CERT: ${{ vars.ABA_CODE_SIGNING == 'on' && secrets.MACOS_APP_CERT || '' }}
+          MACOS_APP_CERT_PASSWORD: ${{ vars.ABA_CODE_SIGNING == 'on' && secrets.MACOS_APP_CERT_PASSWORD || '' }}
+          MACOS_INSTALLER_CERT: ${{ vars.ABA_CODE_SIGNING == 'on' && secrets.MACOS_INSTALLER_CERT || '' }}
+          MACOS_INSTALLER_CERT_PASSWORD: ${{ vars.ABA_CODE_SIGNING == 'on' && secrets.MACOS_INSTALLER_CERT_PASSWORD || '' }}
           NOTARY_KEY: ${{ secrets.NOTARY_KEY }}
           NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
           NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}

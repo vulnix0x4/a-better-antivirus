@@ -6,7 +6,16 @@ ABA's Windows programs (`aba_<version>_windows_amd64.exe`, `..._arm64.exe`, the 
 and that nobody changed it since. Windows Defender and SmartScreen trust signed files sooner, and Windows shows a
 real publisher name instead of "Unknown publisher".
 
-Until the steps below are done, releases are built exactly as before, unsigned. Nothing breaks either way.
+> [!NOTE]
+> **Signing is switched off** (from v0.10.2). v0.10.1 was signed this way, and its certificate showed the owner's
+> legal name, town, state and country to everyone; the Mac files' Developer ID showed the name and Apple Team ID.
+> The owner chose to stop. Everything below is still set up: releases are signed again only when the repository
+> variable `ABA_CODE_SIGNING` is `on` (`gh variable set ABA_CODE_SIGNING --body on`), for Windows and macOS both.
+> Before turning it back on, sign up as an organization (a company's name and address are shown instead), not as
+> an individual.
+
+Unless the steps below are done and `ABA_CODE_SIGNING` is `on`, releases are built unsigned. Nothing breaks either
+way.
 
 - [Part 1: what the owner does (sign-up)](#part-1-sign-up-owner)
 - [Part 2: what the maintainer does with the values](#part-2-turn-it-on-maintainer)
@@ -22,7 +31,8 @@ accounts can't use this service: it has to be "pay-as-you-go".
 government photo ID (passport, driver's license or ID card) and a phone with the **Microsoft Authenticator** app.
 
 > [!IMPORTANT]
-> The signature carries **your legal name**, exactly as on your ID. Everyone who installs ABA can see it: Windows
+> The signature carries **your legal name**, exactly as on your ID, and **your town, state and country**. Everyone
+> who installs ABA can see it: Windows
 > shows it as the publisher when ABA-Setup.exe asks for permission, and in the file's properties. That is how
 > individual signing works; there's no way to show a project name instead. If you don't want your name on it,
 > stop here and tell me.
@@ -161,14 +171,14 @@ To stop paying: delete the signing account (portal → the account → **Delete*
    signs it, checks every signature (`installer/verify.ps1 -Signed`) and keeps the files as the run's artifact.
    Nothing is published. Download `ABA-Setup.exe` from it and look at **Properties → Digital Signatures** on a
    Windows PC.
-3. Once it's green, the next `vX.Y.Z` tag is signed. After the first signed release ships, update the lines that
+3. Once it's green, set the repository variable `ABA_CODE_SIGNING` to `on`; the next `vX.Y.Z` tag is signed. After the first signed release ships, update the lines that
    say releases aren't code-signed: `README.md` (Installer section), and the SmartScreen step in `site/index.html`
    (the "UNSIGNED-INSTALLER BLOCK"). The release notes' footer in `.goreleaser.yaml` switches by itself.
 
 ## How it works
 
-- `scripts/setup-windows-signing.ps1` (release job, only when the `release` environment has
-  `ARTIFACT_SIGNING_ACCOUNT`) fetches pinned, SHA-256-checked copies of `signtool.exe`
+- `scripts/setup-windows-signing.ps1` (release job, only when `ABA_CODE_SIGNING` is `on` and the
+  `release` environment has `ARTIFACT_SIGNING_ACCOUNT`) fetches pinned, SHA-256-checked copies of `signtool.exe`
   (`Microsoft.Windows.SDK.BuildTools`) and the Artifact Signing client (`Microsoft.ArtifactSigning.Client`), writes
   the client's `metadata.json`, and sets `ABA_WINDOWS_SIGNING` for the GoReleaser step. Sign-in is `azure/login`
   with GitHub's OIDC token and a federated credential for `repo:vulnix0x4@187458047/a-better-antivirus@1460857444:environment:release`:

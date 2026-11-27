@@ -466,9 +466,9 @@
         </div>
         <a class="btn btn-solid btn-xl dl" href="https://github.com/vulnix0x4/a-better-antivirus/releases/latest/download/ABA-macOS.pkg">
           <span class="btn-ico" aria-hidden="true">↓</span>
-          <span class="dl-txt"><span class="dl-main">Download <span class="nw">ABA-macOS.pkg</span></span><span class="dl-sub">Apple silicon and Intel · signed and notarized by Apple</span></span>
+          <span class="dl-txt"><span class="dl-main">Download <span class="nw">ABA-macOS.pkg</span></span><span class="dl-sub">Apple silicon and Intel</span></span>
         </a>
-        <p class="os-fine">Opens with no warning. After installing, turn on Full Disk Access for “File Access Monitor” in System Settings → Privacy &amp; Security.</p>
+        <p class="os-fine">Not code-signed, so macOS blocks it the first time: in System Settings → Privacy &amp; Security, click Open Anyway, then open it again. After installing, turn on Full Disk Access for “File Access Monitor” there too.</p>
       </li>
       <li class="os is-ready" data-os="linux">
         <div class="os-head">
@@ -489,30 +489,28 @@
       </li>
 
       <!-- ═══ UNSIGNED-INSTALLER BLOCK: START ════════════════════════════════
-           The installer is code-signed from v0.10.1, but SmartScreen can still
-           warn until the signature has built up reputation. Delete everything
-           from here down to "UNSIGNED-INSTALLER BLOCK: END" once new releases
-           stop getting the warning. The steps renumber themselves.
+           Delete everything from here down to "UNSIGNED-INSTALLER BLOCK: END"
+           if the installer is ever code-signed. The steps renumber themselves.
            Its styles are under "Unsigned-installer block" in css/site.css. -->
       <li class="step step-warn" id="smartscreen">
-        <h4>Windows may warn you. That's expected, for now.</h4>
-        <p>ABA's Windows installer is code-signed (right-click it → <strong>Properties</strong> → <strong>Digital Signatures</strong> shows the signature). Windows still treats a new release as unfamiliar until enough people have run it, so for a while it may show its blue SmartScreen warning.</p>
+        <h4>Windows will warn you. That's expected, for now.</h4>
+        <p>ABA's Windows installer isn't code-signed, so Windows doesn't recognise the file and shows its blue SmartScreen warning.</p>
         <div class="ss-wrap">
           <ol class="ss-how">
             <li>Click <strong>More info</strong>.</li>
             <li>Check that the app is <code>ABA-Setup.exe</code>, then click <strong>Run anyway</strong>.</li>
           </ol>
           <figure class="ss-fig">
-            <div class="ss" role="img" aria-label="Drawing of the Windows SmartScreen warning after clicking More info: a blue box titled “Windows protected your PC”, showing App: ABA-Setup.exe, and two buttons, Run anyway and Don't run.">
+            <div class="ss" role="img" aria-label="Drawing of the Windows SmartScreen warning after clicking More info: a blue box titled “Windows protected your PC”, showing App: ABA-Setup.exe, Publisher: Unknown publisher, and two buttons, Run anyway and Don't run.">
               <p class="ss-t">Windows protected your PC</p>
               <p class="ss-p">Microsoft Defender SmartScreen prevented an unrecognized app from starting. Running this app might put your PC at risk.</p>
-              <p class="ss-p ss-meta">App: ABA-Setup.exe</p>
+              <p class="ss-p ss-meta">App: ABA-Setup.exe<br>Publisher: Unknown publisher</p>
               <p class="ss-btns"><span class="ss-b ss-hit">Run anyway</span><span class="ss-b">Don't run</span></p>
             </div>
             <figcaption>A drawing, not a screenshot: what you'll see after <strong>More info</strong>.</figcaption>
           </figure>
         </div>
-        <p class="ss-sac"><strong>Smart App Control.</strong> On Windows 11 PCs with Smart App Control turned on, Windows lets signed programs run, so it shouldn't block ABA's installer. If it ever does, don't turn off Smart App Control for ABA: wait a few days and try again.</p>
+        <p class="ss-sac"><strong>Smart App Control.</strong> On Windows 11 PCs with Smart App Control turned on, Windows may block an unsigned installer outright with no <em>Run anyway</em> button. If that happens, ABA can't be installed on that PC for now. Don't turn off Smart App Control for ABA.</p>
         <details class="hash">
           <summary>Want to verify first? Check the SHA-256</summary>
           <p>Every release publishes a SHA-256 fingerprint for each file. If yours matches, it's the exact same file, byte for byte.</p>

@@ -16,8 +16,10 @@
 # programs and the app are signed with "Developer ID Application" and the
 # hardened runtime, the package with "Developer ID Installer", and all of it
 # is notarized by Apple (the package's ticket stapled to it). Without them
-# everything is built unsigned, and the package isn't published: unsigned,
-# macOS would refuse to open it when downloaded with a browser.
+# everything is built unsigned and published the same way: downloaded with a
+# browser, the package then opens only after "Open Anyway" in System
+# Settings > Privacy & Security (README, macOS). The release workflow passes
+# the certificates only when ABA_CODE_SIGNING is "on".
 #
 # Environment (all optional; secrets of the release workflow's "release"
 # environment):
@@ -218,16 +220,13 @@ fi
 # The same package under a name that never changes, for a link that always
 # gets the newest one (releases/latest/download/ABA-macOS.pkg), like
 # ABA-Setup.exe on Windows. Copied after stapling, so it carries the ticket.
-if [ -n "$SIGNED" ]; then
-  cp "$PKG" "$OUT/ABA-macOS.pkg"
-fi
+cp "$PKG" "$OUT/ABA-macOS.pkg"
 
 # ---- the checksum list ----
 say "Checksums"
 (
   cd "$OUT"
-  files=(aba_${TAG}_darwin_arm64 aba_${TAG}_darwin_amd64)
-  [ -n "$SIGNED" ] && files+=("ABA-$TAG.pkg" "ABA-macOS.pkg")
+  files=(aba_${TAG}_darwin_arm64 aba_${TAG}_darwin_amd64 "ABA-$TAG.pkg" "ABA-macOS.pkg")
   shasum -a 256 "${files[@]}" > SHA256SUMS-macos.txt
   cat SHA256SUMS-macos.txt
 )
@@ -240,7 +239,6 @@ fi
 if [ "$UPLOAD" = --upload ]; then
   say "Uploading to the release $TAG"
   [ -n "${ABA_SIGNING_KEY:-}" ] || { echo "refusing to publish an unsigned checksum list"; exit 1; }
-  files=("$OUT"/aba_${TAG}_darwin_* "$OUT/SHA256SUMS-macos.txt" "$OUT/SHA256SUMS-macos.txt.sig")
-  [ -n "$SIGNED" ] && files+=("$PKG" "$OUT/ABA-macOS.pkg")
+  files=("$OUT"/aba_${TAG}_darwin_* "$PKG" "$OUT/ABA-macOS.pkg" "$OUT/SHA256SUMS-macos.txt" "$OUT/SHA256SUMS-macos.txt.sig")
   gh release upload "$TAG" "${files[@]}" --clobber
 fi

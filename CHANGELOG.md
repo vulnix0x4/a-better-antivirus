@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.10.2
+
+**Releases are no longer code-signed**
+
+- ABA's Windows and macOS files aren't code-signed any more, to keep the maintainer's personal details off them (a
+  code-signing certificate for a person shows their legal name and where they live). What protects ABA's downloads
+  and updates is unchanged: every release's checksum list is signed with ABA's own release key, and the
+  auto-updater refuses anything that doesn't match it.
+- **Windows:** SmartScreen warns about `ABA-Setup.exe` again ("Unknown publisher"). Check its SHA-256 against
+  `SHA256SUMS.txt`, then click **More info → Run anyway**. On a PC with Smart App Control on, Windows may block it.
+- **macOS:** the first time, macOS won't open `ABA-macOS.pkg`. Click **Open Anyway** in *System Settings → Privacy &
+  Security*, then open it again. After an update, macOS may stop File Access Monitor's Full Disk Access; ABA warns
+  you when it does, and `sudo aba doctor --fix` opens the setting (switch it off and on again).
+- Nothing else changed in ABA itself.
+
 ## v0.10.1
 
 **ABA no longer looks like malware to antivirus programs (Windows)**
