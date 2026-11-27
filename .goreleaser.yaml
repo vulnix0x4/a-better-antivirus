@@ -75,8 +75,10 @@ release:
     irm https://raw.githubusercontent.com/vulnix0x4/a-better-antivirus/main/install.ps1 | iex
     ```
 
-    **macOS 14 or newer** (early; Apple silicon and Intel): download `ABA-macOS.pkg` below. It's signed and
-    notarized by Apple. ABA needs Full Disk Access: switch it on for "File Access Monitor" in System Settings.
+    **macOS 14 or newer** (early; Apple silicon and Intel): download `ABA-macOS.pkg` below. It isn't
+    code-signed: if macOS won't open it, click "Open Anyway" in System Settings → Privacy & Security (check its
+    hash against `SHA256SUMS-macos.txt` first). ABA needs Full Disk Access: switch it on for "File Access Monitor"
+    in System Settings.
 
     **Linux** (early; needs systemd): checks the release's signature, then runs the setup:
     ```sh
