@@ -94,7 +94,7 @@ release:
     (Get-FileHash .\ABA-Setup.exe -Algorithm SHA256).Hash
     ```
     and compare with `SHA256SUMS.txt` (the same goes for `aba_{{ .Tag }}_windows_amd64.exe`; `ABA-Setup.exe` holds
-    exactly the two `aba_{{ .Tag }}_windows_*.exe` files and installs the one for your PC). `SHA256SUMS.txt.sig` is the ed25519 signature the auto-updater checks
+    exactly the two `aba_{{ .Tag }}_windows_*.exe` files, installs the one for your PC, and also holds `miner-pools.txt`, the miner trap's list of mining pools). `SHA256SUMS.txt.sig` is the ed25519 signature the auto-updater checks
     before installing anything.
     {{- if isEnvSet "ABA_WINDOWS_SIGNING" }} The Windows programs are also code-signed: Properties → Digital Signatures
     shows who signed them. SmartScreen may still warn about a new version for a while: check the hash, then click
