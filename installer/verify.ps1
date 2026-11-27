@@ -60,8 +60,15 @@ if ($Signed) {
     if (-not $env:ABA_SIGNTOOL -or -not (Test-Path $env:ABA_SIGNTOOL)) { throw '-Signed needs ABA_SIGNTOOL, the path of signtool.exe (scripts/setup-windows-signing.ps1 sets it).' }
     $unzipped = Join-Path ([IO.Path]::GetTempPath()) ('aba-verify-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
     $programs = @($setup) + @(Get-ChildItem (Join-Path $Dist 'installer\bin') -Filter 'aba-*.exe' | ForEach-Object FullName)
+    # A plain .exe download is GoReleaser's build output, renamed only on
+    # upload: its artifact list says where it is.
+    $artifacts = Get-Content (Join-Path $Dist 'artifacts.json') -Raw | ConvertFrom-Json
     foreach ($name in @($sums.Keys | Sort-Object)) {
-        if ($name -like '*.exe' -and $name -ne 'ABA-Setup.exe') { $programs += (Join-Path $Dist $name) }
+        if ($name -like '*.exe' -and $name -ne 'ABA-Setup.exe') {
+            $a = @($artifacts | Where-Object { $_.name -eq $name })
+            if ($a.Count -ne 1 -or -not (Test-Path $a[0].path)) { Bad "${name}: not found through $Dist\artifacts.json"; continue }
+            $programs += (Resolve-Path $a[0].path).Path
+        }
         if ($name -like '*.zip') {
             $to = Join-Path $unzipped ([IO.Path]::GetFileNameWithoutExtension($name))
             Expand-Archive -Path (Join-Path $Dist $name) -DestinationPath $to
