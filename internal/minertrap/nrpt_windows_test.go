@@ -65,6 +65,10 @@ func TestNRPTApplyRemove(t *testing.T) {
 	if !slices.Equal(all, Namespaces()) {
 		t.Errorf("namespaces differ: %v", all)
 	}
+	// The names read back are the list, in its order.
+	if got := installedAt(registry.CURRENT_USER, base); !slices.Equal(got, Pools()) {
+		t.Errorf("installed pools read back as %q", got)
+	}
 	// Idempotent: nothing to change the second time.
 	if changed, err := applyAt(registry.CURRENT_USER, base, rs, Addr); err != nil || changed {
 		t.Errorf("second apply: %v %v", changed, err)

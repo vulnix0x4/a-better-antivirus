@@ -40,6 +40,15 @@
   #endif
 #endif
 
+; The miner trap's list of mining pools: plain data, installed next to aba.exe
+; (internal/minertrap/pools.go says why it isn't inside the program).
+#define PoolsFile "..\internal\minertrap\miner-pools.txt"
+#ifndef Preview
+  #if !FileExists(AddBackslash(SourcePath) + PoolsFile)
+    #error internal\minertrap\miner-pools.txt is missing
+  #endif
+#endif
+
 #define AppName "A Better Antivirus"
 #define AppURL "https://github.com/vulnix0x4/a-better-antivirus"
 ; Where ABA puts itself (internal/paths). Low-profile names, on purpose.
@@ -119,6 +128,8 @@ ExitSetupMessage=Setup isn't finished. If you close it now, [name] won't be set 
 ; Byte for byte the aba_<version>_windows_<arch>.exe files of the same release.
 Source: "{#AddBackslash(BinDir)}aba-amd64.exe"; Flags: dontcopy
 Source: "{#AddBackslash(BinDir)}aba-arm64.exe"; Flags: dontcopy
+; aba install puts it in place, from next to the aba.exe it runs.
+Source: "{#PoolsFile}"; Flags: dontcopy
 
 [Run]
 ; Offered on the last page. --elevated-pause keeps the test's window open at
@@ -877,6 +888,7 @@ begin
     Name := 'aba-amd64.exe';
   try
     ExtractTemporaryFile(Name);
+    ExtractTemporaryFile('miner-pools.txt');
   except
     Problem := 'Setup couldn''t unpack its files: ' + GetExceptionMessage;
     Exit;

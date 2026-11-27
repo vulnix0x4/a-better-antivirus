@@ -39,9 +39,12 @@ archives:
 checksum:
   name_template: "SHA256SUMS.txt"
   algorithm: sha256
-  # The installer's hash goes in the same signed list as everything else.
+  # The installer's hash goes in the same signed list as everything else, and
+  # so does the miner trap's list of mining pools: plain data that installed
+  # copies (and `aba update`) check against this list like the program.
   extra_files:
     - glob: ./dist/installer/ABA-Setup.exe
+    - glob: ./internal/minertrap/miner-pools.txt
 
 # Sign the checksum list with the release key (ed25519). ABA's auto-updater
 # refuses any release whose SHA256SUMS.txt signature doesn't verify.
@@ -57,6 +60,7 @@ release:
   # releases/latest/download/ABA-Setup.exe, which must keep working.
   extra_files:
     - glob: ./dist/installer/ABA-Setup.exe
+    - glob: ./internal/minertrap/miner-pools.txt
   header: |
     ## A Better Antivirus {{ .Tag }}
 
@@ -90,7 +94,7 @@ release:
     (Get-FileHash .\ABA-Setup.exe -Algorithm SHA256).Hash
     ```
     and compare with `SHA256SUMS.txt` (the same goes for `aba_{{ .Tag }}_windows_amd64.exe`; `ABA-Setup.exe` holds
-    exactly the two `aba_{{ .Tag }}_windows_*.exe` files and installs the one for your PC). `SHA256SUMS.txt.sig` is the ed25519 signature the auto-updater checks
+    exactly the two `aba_{{ .Tag }}_windows_*.exe` files, installs the one for your PC, and also holds `miner-pools.txt`, the miner trap's list of mining pools). `SHA256SUMS.txt.sig` is the ed25519 signature the auto-updater checks
     before installing anything.
     {{- if isEnvSet "ABA_WINDOWS_SIGNING" }} The Windows programs are also code-signed: Properties → Digital Signatures
     shows who signed them. SmartScreen may still warn about a new version for a while: check the hash, then click

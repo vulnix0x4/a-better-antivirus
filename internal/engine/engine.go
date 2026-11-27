@@ -2044,7 +2044,7 @@ const MinerTrap = "miners"
 
 const MinerTrapName = "Mining pool (ABA's fake one on this " + platform.PC + ")"
 
-// MinePlace is the pool a miner wanted, for the alert: "pool.hashvault.pro:443".
+// MinePlace is the pool a miner wanted, for the alert: "pool.example.org:443".
 func MinePlace(m *detect.Mine) string {
 	if m == nil {
 		return "a mining pool"

@@ -55,6 +55,8 @@ jobs:
       - name: Build
         run: |
           go build -ldflags "-s -w -X main.version=ci-${{ github.sha }}" -o dist/aba.exe ./cmd/aba
+          # The miner trap's list of mining pools goes next to aba.exe, as in a release.
+          Copy-Item internal/minertrap/miner-pools.txt dist/
           go build -o dist/medium.exe ./scripts/medium
           go build -o dist/ghost.exe ./scripts/ghost
 

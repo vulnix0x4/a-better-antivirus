@@ -288,9 +288,46 @@ func powershell(script string) (string, error) {
 	return string(b), nil
 }
 
-// appIDFor returns WFP's application ID for an executable. WFP matches the
-// running program by its full long path, so 8.3 short names
-// (C:\Users\RUNNER~1\...) must be expanded first or the rule never applies.
+// volumeNameNT asks GetFinalPathNameByHandle for the kernel's name of the
+// volume (\device\harddiskvolume3) instead of a drive letter.
+const volumeNameNT = 0x2
+
+// appIDFor returns WFP's application ID for an executable: the program's
+// full path as the kernel names it (\device\harddiskvolume3\users\...),
+// in lower case. That is the name WFP gives a program when it connects, and
+// what a rule's app ID condition is compared with, byte for byte.
+//
+// Windows has a helper that makes this name, but ABA makes it itself, from
+// the file's final path (GetFinalPathNameByHandle). The helper is the call
+// EDR-blinding tools such as EDRSilencer are built around, and antivirus
+// heuristics flag a program that uses it next to the rest of WFP as one of
+// them (Kaspersky did, on ABA 0.10.0). The result is the same name: the
+// netguard tests compare the two on every Windows test run. The final path
+// also follows 8.3 short names (C:\Users\RUNNER~1\...), links and
+// junctions to the file itself, which is what the running program's name is.
 func appIDFor(exe string) (string, error) {
-	return wf.AppID(paths.Long(exe))
+	p, err := windows.UTF16PtrFromString(paths.Long(exe))
+	if err != nil {
+		return "", err
+	}
+	// Opened only to ask its name: no read, no write, and never in the way
+	// of anyone else's use of it.
+	h, err := windows.CreateFile(p, windows.FILE_READ_ATTRIBUTES,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil,
+		windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
+	if err != nil {
+		return "", err
+	}
+	defer windows.CloseHandle(h)
+	buf := make([]uint16, 512)
+	for {
+		n, err := windows.GetFinalPathNameByHandle(h, &buf[0], uint32(len(buf)), volumeNameNT)
+		if err != nil {
+			return "", err
+		}
+		if int(n) < len(buf) {
+			return strings.ToLower(windows.UTF16ToString(buf[:n])), nil
+		}
+		buf = make([]uint16, n+1)
+	}
 }

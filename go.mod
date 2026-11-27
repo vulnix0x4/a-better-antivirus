@@ -52,4 +52,6 @@ require (
 
 // A copy of tailscale/wf with one fix: its allocator returned unaligned
 // memory, which crashed the service while a GC ran (see third_party/wf/malloc.go).
+// And one thing taken out: AppID, Windows' FwpmGetAppIdFromFileName0 (ABA makes
+// the app ID itself; see appIDFor in internal/netguard/netguard_windows.go).
 replace github.com/tailscale/wf => ./third_party/wf

@@ -18,3 +18,5 @@ func Remove() (int, error) { return 0, nil }
 func Installed() (int, error) { return 0, nil }
 
 func Expected() int { return 0 }
+
+func InstalledPools() []string { return nil }
