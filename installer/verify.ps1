@@ -11,9 +11,16 @@
   - The files the auto-updater in installed copies looks for are all still
     there under their usual names.
 
+  With -Signed (when the release job code-signs, see
+  scripts/setup-windows-signing.ps1), also that every Windows program
+  published carries a valid, timestamped Authenticode signature, checked with
+  `signtool verify /pa` (ABA_SIGNTOOL) and Get-AuthenticodeSignature: both
+  aba_<tag>_windows_<arch>.exe files, the aba.exe in each zip, ABA-Setup.exe
+  and the two aba.exe files inside it.
+
   Exits with an error if any of them doesn't hold.
 #>
-param([string]$Dist = 'dist')
+param([string]$Dist = 'dist', [switch]$Signed)
 
 $ErrorActionPreference = 'Stop'
 $script:bad = 0
@@ -47,6 +54,31 @@ foreach ($arch in 'amd64', 'arm64') {
 
     if (@($sums.Keys | Where-Object { $_ -match "^aba_v?[^_]+_windows_$arch\.zip$" }).Count -eq 1) { Ok "aba_<tag>_windows_$arch.zip is still published" }
     else { Bad "aba_<tag>_windows_$arch.zip is missing from SHA256SUMS.txt" }
+}
+
+if ($Signed) {
+    if (-not $env:ABA_SIGNTOOL -or -not (Test-Path $env:ABA_SIGNTOOL)) { throw '-Signed needs ABA_SIGNTOOL, the path of signtool.exe (scripts/setup-windows-signing.ps1 sets it).' }
+    $unzipped = Join-Path ([IO.Path]::GetTempPath()) ('aba-verify-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+    $programs = @($setup) + @(Get-ChildItem (Join-Path $Dist 'installer\bin') -Filter 'aba-*.exe' | ForEach-Object FullName)
+    foreach ($name in @($sums.Keys | Sort-Object)) {
+        if ($name -like '*.exe' -and $name -ne 'ABA-Setup.exe') { $programs += (Join-Path $Dist $name) }
+        if ($name -like '*.zip') {
+            $to = Join-Path $unzipped ([IO.Path]::GetFileNameWithoutExtension($name))
+            Expand-Archive -Path (Join-Path $Dist $name) -DestinationPath $to
+            $programs += @(Get-ChildItem $to -Recurse -Filter '*.exe' | ForEach-Object FullName)
+        }
+    }
+    foreach ($p in $programs) {
+        $label = $p.Replace($unzipped, '<zip>')
+        & $env:ABA_SIGNTOOL verify /pa /q $p | Out-Null
+        $sig = Get-AuthenticodeSignature $p
+        if ($LASTEXITCODE -ne 0) { Bad "${label}: signtool verify /pa says the signature isn't valid ($($sig.Status))"; continue }
+        if ($sig.Status -ne 'Valid') { Bad "${label}: the signature is $($sig.Status): $($sig.StatusMessage)"; continue }
+        if (-not $sig.TimeStamperCertificate) { Bad "${label}: the signature has no timestamp, so it would stop being valid when the certificate expires"; continue }
+        Ok "$label is signed by '$($sig.SignerCertificate.Subject)', timestamped"
+    }
+    if ($programs.Count -ne 7) { Bad "expected 7 Windows programs to check (2 downloads, 2 in the zips, ABA-Setup.exe and the 2 inside it), found $($programs.Count)" }
+    Remove-Item -Recurse -Force $unzipped -ErrorAction SilentlyContinue
 }
 
 # Nothing else slipped in.

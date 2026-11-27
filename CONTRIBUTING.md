@@ -118,3 +118,7 @@ GOOS=darwin go vet ./...
 Push a `vX.Y.Z` tag. GitHub Actions runs the tests, builds with GoReleaser and signs `SHA256SUMS.txt` with the
 release key (secret `ABA_SIGNING_KEY`). Then a Linux runner adds the Linux files (`.goreleaser-linux.yaml`),
 with their own signed `SHA256SUMS-linux.txt`, and checks them (`scripts/packages-linux.sh`). Installed copies with automatic updates on pick it up within a day.
+
+Windows programs are code-signed (Authenticode, Microsoft's Artifact Signing) when the `release` environment has
+the signing settings, and built unsigned until then: see [docs/windows-signing.md](docs/windows-signing.md). To
+check the settings without releasing, run the **Windows signing (dry run)** workflow by hand.
