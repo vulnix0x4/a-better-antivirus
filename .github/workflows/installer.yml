@@ -96,3 +96,49 @@ jobs:
           -OldSetup artifacts/installer-older/ABA-Setup.exe
           -Sums artifacts/SHA256SUMS.txt
           -Arch ${{ matrix.arch }}
+
+  # The code-signing steps of a release, with a throwaway certificate in place
+  # of the real one (scripts/setup-windows-signing.ps1 -Mode test), so they are
+  # proven before a release depends on them: every aba.exe is signed before it
+  # goes into ABA-Setup.exe, the zips and SHA256SUMS.txt, ABA-Setup.exe is
+  # signed too, and the signed installer still installs and uninstalls.
+  signed:
+    name: Code-signed build (test certificate), install and uninstall
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Get the Inno Setup compiler
+        shell: pwsh
+        run: ./installer/get-inno.ps1
+      - name: Set up test signing
+        shell: pwsh
+        run: ./scripts/setup-windows-signing.ps1 -Mode test
+      - name: Build and sign everything a release publishes
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          version: "~> v2"
+          args: release --snapshot --clean --skip=sign
+      - name: Check the installer and every signature
+        shell: pwsh
+        run: ./installer/verify.ps1 -Signed
+      - name: Build an installer that claims to be older
+        shell: pwsh
+        run: |
+          foreach ($arch in 'amd64', 'arm64') {
+            go run ./installer/build -arch $arch -bin "dist/installer/bin/aba-$arch.exe" -version v0.0.0 -out dist/installer-older
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          }
+      - name: Install with the signed ABA-Setup.exe, check, uninstall
+        shell: pwsh
+        run: >
+          ./installer/test.ps1
+          -Setup dist/installer/ABA-Setup.exe
+          -OldSetup dist/installer-older/ABA-Setup.exe
+          -Sums dist/SHA256SUMS.txt
+          -Arch amd64

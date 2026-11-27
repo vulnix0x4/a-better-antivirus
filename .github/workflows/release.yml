@@ -10,6 +10,13 @@ permissions:
 jobs:
   release:
     runs-on: windows-latest
+    # The "release" environment holds what Windows code signing needs (see
+    # docs/windows-signing.md). Only jobs in it can sign: that is what Azure
+    # checks GitHub's sign-in token for.
+    environment: release
+    permissions:
+      contents: write
+      id-token: write # the sign-in token for Azure; no password is stored
     steps:
       - uses: actions/checkout@v7
         with:
@@ -24,6 +31,32 @@ jobs:
       - name: Get the Inno Setup compiler
         shell: pwsh
         run: ./installer/get-inno.ps1
+      # Code signing (Authenticode) of every Windows program, with Microsoft's
+      # Artifact Signing service, when the "release" environment has its
+      # settings. GoReleaser's build step then signs each aba.exe and
+      # ABA-Setup.exe before anything is zipped, hashed or published (see
+      # installer/build). Without the settings these steps are skipped and the
+      # release is built unsigned, exactly as before.
+      - name: Sign in to Azure (code signing)
+        if: vars.ARTIFACT_SIGNING_ACCOUNT != ''
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+      - name: Get .NET for the signing client (code signing)
+        if: vars.ARTIFACT_SIGNING_ACCOUNT != ''
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+      - name: Set up code signing
+        if: vars.ARTIFACT_SIGNING_ACCOUNT != ''
+        shell: pwsh
+        run: ./scripts/setup-windows-signing.ps1 -Mode artifact-signing
+        env:
+          ARTIFACT_SIGNING_ENDPOINT: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
+          ARTIFACT_SIGNING_ACCOUNT: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
+          ARTIFACT_SIGNING_PROFILE: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
       - uses: goreleaser/goreleaser-action@v7
         with:
           version: "~> v2"
@@ -33,10 +66,12 @@ jobs:
           ABA_SIGNING_KEY: ${{ secrets.ABA_SIGNING_KEY }}
       # The same checks the Installer workflow makes on every pull request, on
       # the files that were just published: ABA-Setup.exe is in the signed
-      # SHA256SUMS.txt and holds the published aba.exe files.
+      # SHA256SUMS.txt and holds the published aba.exe files. When signing is
+      # on, also that every Windows program published has a valid signature.
       - name: Check the installer against the release
         shell: pwsh
-        run: ./installer/verify.ps1
+        run: |
+          if ($env:ABA_WINDOWS_SIGNING) { ./installer/verify.ps1 -Signed } else { ./installer/verify.ps1 }
 
   # The Linux files (.goreleaser-linux.yaml), added to the release the job
   # above made, with their own signed checksum list. Then the same checks the

@@ -1,0 +1,74 @@
+name: Windows signing (dry run)
+
+# Run by hand (Actions > Windows signing > Run workflow, on main): builds the
+# Windows release files the way a release does, code-signed with Microsoft's
+# Artifact Signing service, without publishing anything. The files are kept as
+# the run's artifact. For checking the signing settings in the "release"
+# environment (docs/windows-signing.md) before a real release depends on them.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sign:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    environment: release
+    permissions:
+      contents: read
+      id-token: write # the sign-in token for Azure; no password is stored
+    steps:
+      - name: Is signing set up?
+        if: vars.ARTIFACT_SIGNING_ACCOUNT == ''
+        run: |
+          echo "::error::The release environment has no ARTIFACT_SIGNING_ACCOUNT variable: Windows signing isn't set up (see docs/windows-signing.md)."
+          exit 1
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Get the Inno Setup compiler
+        shell: pwsh
+        run: ./installer/get-inno.ps1
+      - name: Sign in to Azure
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+      - name: Get .NET for the signing client
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+      - name: Set up code signing
+        shell: pwsh
+        run: ./scripts/setup-windows-signing.ps1 -Mode artifact-signing
+        env:
+          ARTIFACT_SIGNING_ENDPOINT: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
+          ARTIFACT_SIGNING_ACCOUNT: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
+          ARTIFACT_SIGNING_PROFILE: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
+      # --skip=sign skips only the release key's signature of SHA256SUMS.txt
+      # (that key is for real releases); the code signing runs in the build.
+      - name: Build and sign (nothing is published)
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          version: "~> v2"
+          args: release --snapshot --clean --skip=sign
+      - name: Check the installer and every signature
+        shell: pwsh
+        run: ./installer/verify.ps1 -Signed
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-signed
+          path: |
+            dist/aba_windows_*/aba.exe
+            dist/*.zip
+            dist/installer/ABA-Setup.exe
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 7
