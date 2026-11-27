@@ -116,6 +116,9 @@ func Steps(o Options) []Step {
 					return "", fmt.Errorf("%s: %w", dst, err)
 				}
 			}
+			if err := installPools(self); err != nil {
+				return "", err
+			}
 			return paths.InstallDir(), nil
 		}},
 		{Name: "Locking down the data folder", Run: func() (string, error) {
@@ -533,6 +536,28 @@ func plantBaits(cfg *config.Config, sec *config.Secrets) (string, error) {
 		out += fmt.Sprintf(", %d removed", removed)
 	}
 	return out, nil
+}
+
+// installPools installs the miner trap's list of mining pools that came with
+// the program (next to it: ABA-Setup.exe and a release's download put it
+// there). Without one an install keeps the list it has, or the service
+// fetches its own release's (see minertrap.PoolsFileName).
+func installPools(self string) error {
+	if !minertrap.Supported() {
+		return nil
+	}
+	src := filepath.Join(filepath.Dir(self), minertrap.PoolsFileName)
+	b, err := os.ReadFile(src)
+	if errors.Is(err, os.ErrNotExist) || paths.Same(src, minertrap.PoolsFile()) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := minertrap.ParsePools(b); err != nil {
+		return fmt.Errorf("%s: %w", src, err)
+	}
+	return CopyFile(src, minertrap.PoolsFile())
 }
 
 // CopyFile installs src at dst, moving a running dst out of the way first.

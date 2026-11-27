@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+**ABA no longer looks like malware to antivirus programs (Windows)**
+
+- Windows Defender and 13 of about 70 antivirus engines took version 0.10.0 for malware, and Defender could remove
+  ABA from your PC. We tested which parts of ABA they reacted to and changed those parts, without changing what ABA
+  catches or does. Measured on VirusTotal, ABA's Windows program went from 14 engines flagging it to 1, and Defender
+  no longer flags it.
+- **The miner trap's list of mining pools is now a file of its own** (`miner-pools.txt`, next to `aba.exe`) instead
+  of being built into the program. Antivirus engines look for those pool names inside a program to spot crypto
+  miners, so ABA looked like one. The list comes with ABA-Setup.exe and with every update, and it's checked against
+  the release's signed checksum list just like the program. If it's ever missing (for example right after updating
+  from 0.10.0), the trap keeps working with the pool names it already had, and ABA fetches the list for its own
+  version from the release by itself.
+- **Cutting a program off the internet no longer uses the Windows call that a tool for blinding antivirus programs
+  is built around**, so Kaspersky no longer takes ABA for that tool. ABA works out the same firewall name for the
+  program in another way; the result is exactly the same.
+- **The popup notification no longer starts PowerShell with a scrambled (Base64) command**, which security tools
+  rightly find suspicious. It's now a short, readable command that's the same every time, and the alert's text is
+  passed to it separately, as plain text.
+
 ## v0.10.0
 
 **The full report, one click from the popup, and every report in the Start menu**

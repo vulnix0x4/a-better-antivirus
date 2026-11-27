@@ -8,26 +8,44 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"math/rand/v2"
 	"net"
 	"net/netip"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 )
 
+// The tests use the list the release ships.
+func TestMain(m *testing.M) {
+	list, err := ParsePools(mustRead(PoolsFileName))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	SetPools(list)
+	os.Exit(m.Run())
+}
+
+func mustRead(name string) []byte {
+	b, err := os.ReadFile(name)
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
+
 func TestPoolList(t *testing.T) {
+	pools := Pools()
 	seen := map[string]bool{}
-	for _, p := range Pools {
-		if p != strings.ToLower(strings.TrimSpace(p)) || strings.HasPrefix(p, ".") || strings.HasSuffix(p, ".") || !strings.Contains(p, ".") {
-			t.Errorf("pool %q: write it lower case, with no dots at either end", p)
-		}
-		if seen[p] {
-			t.Errorf("pool %q listed twice", p)
-		}
+	for _, p := range pools {
 		seen[p] = true
-		for _, q := range Pools {
+		for _, q := range pools {
 			if q != p && strings.HasSuffix(p, "."+q) {
 				t.Errorf("pool %q is already covered by %q", p, q)
 			}
@@ -39,8 +57,73 @@ func TestPoolList(t *testing.T) {
 			t.Errorf("%s is missing", must)
 		}
 	}
-	if len(Namespaces()) != 2*len(Pools) {
-		t.Errorf("namespaces: %d for %d pools", len(Namespaces()), len(Pools))
+	if len(Namespaces()) != 2*len(pools) {
+		t.Errorf("namespaces: %d for %d pools", len(Namespaces()), len(pools))
+	}
+	if TestPool() != "pool.hashvault.pro" {
+		t.Errorf("the test looks up %q", TestPool())
+	}
+}
+
+func TestParsePools(t *testing.T) {
+	got, err := ParsePools([]byte("# comment\r\n\n  Pool.Example.ORG  # trailing\r\nxmr.example.net\n"))
+	if err != nil || !slices.Equal(got, []string{"pool.example.org", "xmr.example.net"}) {
+		t.Errorf("got %q, %v", got, err)
+	}
+	for _, bad := range []string{
+		"", "# only comments\n", "com\n", "example.com\nexample.com\n", "exa mple.com\n", "-x.example.com\n",
+		"example..com\n", ".example.com\n", "example.com.\n", "127.0.0.1\n", "*.example.com\n", "ex_ample.com\n",
+		strings.Repeat("a", 64) + ".com\n", "bücher.de\n",
+	} {
+		if got, err := ParsePools([]byte(bad)); err == nil {
+			t.Errorf("ParsePools(%q) = %q, want an error", bad, got)
+		}
+	}
+	var many strings.Builder
+	for i := 0; i <= MaxPools; i++ {
+		fmt.Fprintf(&many, "p%d.example.com\n", i)
+	}
+	if _, err := ParsePools([]byte(many.String())); err == nil {
+		t.Error("a list of more than MaxPools names was taken")
+	}
+}
+
+// The pools' names stay out of the program: in it, they're what antivirus
+// engines look for in a crypto miner. No Go file that goes into aba.exe may
+// spell one out (test files and the screen previews don't go in).
+func TestPoolNamesNotCompiledIn(t *testing.T) {
+	root := filepath.Join("..", "..")
+	pools := Pools()
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() && (d.Name() == ".git" || d.Name() == "third_party" || d.Name() == "site" || d.Name() == "node_modules") {
+			return filepath.SkipDir
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		src := string(b)
+		if strings.Contains(src, "//go:build preview") || strings.HasPrefix(filepath.ToSlash(path), "../../scripts/") {
+			return nil // never part of aba.exe
+		}
+		if strings.Contains(src, "go:embed") && strings.Contains(src, PoolsFileName) {
+			t.Errorf("%s embeds %s", path, PoolsFileName)
+		}
+		for _, p := range pools {
+			if strings.Contains(strings.ToLower(src), p) {
+				t.Errorf("%s spells out the pool name %s", path, p)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

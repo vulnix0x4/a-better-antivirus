@@ -25,6 +25,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/vulnix0x4/a-better-antivirus/internal/minertrap"
 )
 
 const (
@@ -38,8 +40,12 @@ const (
 // signs SHA256SUMS.txt in the release workflow.
 var PublicKey = "VLEZ7MWwcu4LFSYPzA71J9M0WWbqQryOGki0GSvuihU="
 
-// API is the releases endpoint (overridable in tests).
-var API = "https://api.github.com/repos/" + Repo + "/releases/latest"
+// ReleasesAPI is where GitHub lists the releases, and API the newest
+// published one (both overridable in tests).
+var (
+	ReleasesAPI = "https://api.github.com/repos/" + Repo + "/releases"
+	API         = ReleasesAPI + "/latest"
+)
 
 var client = &http.Client{Timeout: 5 * time.Minute}
 
@@ -129,57 +135,131 @@ func parse(v string) ([3]int, bool) {
 }
 
 // Download fetches the release exe for this PC into dir, after verifying the
-// signed checksum list. It returns the path of the verified file.
+// signed checksum list. It returns the path of the verified file. The
+// release's list of mining pools (minertrap.PoolsFileName), where this
+// system's checksum list has one, comes with it, as checked as the exe, to
+// PoolsBeside(the exe's path): Apply installs the two together.
 func Download(ctx context.Context, r *Release, dir string) (string, error) {
 	if r.Draft || r.Prerelease {
 		return "", errors.New("refusing a draft or pre-release")
 	}
 	name := AssetName(r.Tag)
-	exe, ok := r.asset(name)
-	if !ok {
+	if _, ok := r.asset(name); !ok {
 		return "", fmt.Errorf("release %s has no %s", r.Tag, name)
 	}
-	sumsA, ok1 := r.asset(sumsName)
-	sigA, ok2 := r.asset(sumsName + ".sig")
-	if !ok1 || !ok2 {
-		return "", fmt.Errorf("release %s is not signed (no %s.sig)", r.Tag, sumsName)
-	}
-	sums, err := get(ctx, sumsA.URL, maxSmall)
+	sums, err := signedSums(ctx, r)
 	if err != nil {
 		return "", err
 	}
-	sig, err := get(ctx, sigA.URL, maxSmall)
+	body, err := fetchListed(ctx, r, sums, name, maxExe)
 	if err != nil {
 		return "", err
 	}
-	if err := VerifySignature(sums, sig); err != nil {
-		return "", err
-	}
-	want, err := lookup(sums, name)
-	if err != nil {
-		return "", err
-	}
-	body, err := get(ctx, exe.URL, maxExe)
-	if err != nil {
-		return "", err
-	}
-	got := sha256.Sum256(body)
-	if !strings.EqualFold(hex.EncodeToString(got[:]), want) {
-		return "", fmt.Errorf("%s: checksum mismatch, not installing", name)
+	var pools []byte
+	if _, err := lookup(sums, minertrap.PoolsFileName); err == nil { // a release with the list
+		if pools, err = fetchListed(ctx, r, sums, minertrap.PoolsFileName, maxSmall); err != nil {
+			return "", err
+		}
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
 	out := filepath.Join(dir, "aba-"+r.Tag+".exe")
-	tmp := out + ".part"
-	if err := os.WriteFile(tmp, body, 0o755); err != nil {
+	if err := writeFile(out, body, 0o755); err != nil {
 		return "", err
 	}
-	os.Remove(out)
-	if err := os.Rename(tmp, out); err != nil {
-		return "", err
+	os.Remove(PoolsBeside(out))
+	if pools != nil {
+		if err := writeFile(PoolsBeside(out), pools, 0o644); err != nil {
+			return "", err
+		}
 	}
 	return out, nil
+}
+
+// PoolsBeside is where Download puts the list of mining pools that goes with
+// the downloaded exe.
+func PoolsBeside(exe string) string { return strings.TrimSuffix(exe, ".exe") + ".pools.txt" }
+
+// Pools fetches the list of mining pools of release tag (the one this
+// program came with), checked against the release's signed checksum list. It
+// is how an install that doesn't have the file gets it: one updated by a
+// version that had the list built in, or set up from the bare exe.
+func Pools(ctx context.Context, tag string) ([]byte, error) {
+	if !Updatable(tag) {
+		return nil, fmt.Errorf("%s is not a published version", tag)
+	}
+	b, err := get(ctx, ReleasesAPI+"/tags/"+url.PathEscape(tag), maxSmall)
+	if err != nil {
+		return nil, err
+	}
+	var r Release
+	if err := json.Unmarshal(b, &r); err != nil {
+		return nil, err
+	}
+	if r.Tag != tag || r.Draft || r.Prerelease {
+		return nil, fmt.Errorf("no published release %s", tag)
+	}
+	sums, err := signedSums(ctx, &r)
+	if err != nil {
+		return nil, err
+	}
+	return fetchListed(ctx, &r, sums, minertrap.PoolsFileName, maxSmall)
+}
+
+// signedSums fetches the release's checksum list for this system, and
+// returns it only if its signature is the release key's.
+func signedSums(ctx context.Context, r *Release) ([]byte, error) {
+	sumsA, ok1 := r.asset(sumsName)
+	sigA, ok2 := r.asset(sumsName + ".sig")
+	if !ok1 || !ok2 {
+		return nil, fmt.Errorf("release %s is not signed (no %s.sig)", r.Tag, sumsName)
+	}
+	sums, err := get(ctx, sumsA.URL, maxSmall)
+	if err != nil {
+		return nil, err
+	}
+	sig, err := get(ctx, sigA.URL, maxSmall)
+	if err != nil {
+		return nil, err
+	}
+	if err := VerifySignature(sums, sig); err != nil {
+		return nil, err
+	}
+	return sums, nil
+}
+
+// fetchListed downloads one of the release's files and returns it only if
+// its hash is the one in the signed list.
+func fetchListed(ctx context.Context, r *Release, sums []byte, name string, limit int64) ([]byte, error) {
+	want, err := lookup(sums, name)
+	if err != nil {
+		return nil, err
+	}
+	a, ok := r.asset(name)
+	if !ok {
+		return nil, fmt.Errorf("release %s has no %s", r.Tag, name)
+	}
+	body, err := get(ctx, a.URL, limit)
+	if err != nil {
+		return nil, err
+	}
+	got := sha256.Sum256(body)
+	if !strings.EqualFold(hex.EncodeToString(got[:]), want) {
+		return nil, fmt.Errorf("%s: checksum mismatch, not installing", name)
+	}
+	return body, nil
+}
+
+// writeFile writes b to path all at once: a reader sees the old file or the
+// new one, never half of it.
+func writeFile(path string, b []byte, mode os.FileMode) error {
+	tmp := path + ".part"
+	if err := os.WriteFile(tmp, b, mode); err != nil {
+		return err
+	}
+	os.Remove(path)
+	return os.Rename(tmp, path)
 }
 
 // VerifySignature checks sig (base64 ed25519, optional trailing newline) over msg.

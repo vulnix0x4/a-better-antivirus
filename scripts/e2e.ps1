@@ -960,6 +960,13 @@ Check ((Get-Content (Join-Path $data 'config.json') -Raw | ConvertFrom-Json).min
 # freeze off each for a moment, and no fake stealer follows from here on.)
 $doc = (& $Aba doctor 2>&1 | Out-String)
 Check ($doc -match 'Miner trap\s+on: \d+ mining pools') "aba doctor shows the miner trap on: $(($doc -split "`n" | Select-String 'Miner trap') -join '')"
+# The pools' names are data next to the program, never inside it: compiled
+# in, they made antivirus engines take ABA for a crypto miner.
+$poolsFile = Join-Path $env:ProgramFiles 'File Access Monitor\miner-pools.txt'
+Check (Test-Path $poolsFile) 'the list of mining pools is installed next to aba.exe'
+$exeText = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes((Join-Path $env:ProgramFiles 'File Access Monitor\aba.exe')))
+$inside = @(Get-Content $poolsFile | ForEach-Object { ($_ -replace '#.*', '').Trim() } | Where-Object { $_ -and $exeText.Contains($_) })
+Check (-not $inside.Count) "no pool's name is inside aba.exe ($($inside -join ', '))"
 
 Step 'What the flight recorder cost'
 # Informational, for deciding between audit rules and other ways of watching:
