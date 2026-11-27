@@ -1,8 +1,11 @@
 # Changelog
 
-## Unreleased
+## v0.10.1
 
 **ABA no longer looks like malware to antivirus programs (Windows)**
+
+- **ABA's Windows programs are now code-signed** (ABA-Setup.exe and aba.exe): Windows shows who published them,
+  and can tell nobody changed them since. Right-click → Properties → Digital Signatures shows the signature.
 
 - Windows Defender and 13 of about 70 antivirus engines took version 0.10.0 for malware, and Defender could remove
   ABA from your PC. We tested which parts of ABA they reacted to and changed those parts, without changing what ABA
