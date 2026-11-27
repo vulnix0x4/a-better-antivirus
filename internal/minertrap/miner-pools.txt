@@ -1,0 +1,59 @@
+# The miner trap's list of mining pools (A Better Antivirus).
+#
+# With the miner trap on, each name below, and every name under it, leads to
+# ABA's fake mining pool on this PC instead of the real one (see
+# internal/minertrap/pools.go). Nothing else is redirected.
+#
+# One name per line; "#" starts a comment. It holds the public pools hidden
+# miners are configured with (most of them mine Monero, whose RandomX
+# algorithm runs well on ordinary processors), from public analyses of miner
+# malware and the pools' own connection guides. The pools' websites don't open
+# while the trap is on, so a name is listed only where the whole domain is a
+# pool's; where a big company's domain has a mining part, only that part is.
+#
+# This file is a release file of its own, next to aba.exe, and it is in the
+# signed SHA256SUMS.txt like the program. It is plain data on purpose: compiled
+# into the program, these names made antivirus engines take ABA for a miner.
+# The first name is the one `aba miners test` looks up (as pool.<name>).
+
+# Monero (RandomX) pools.
+hashvault.pro         # pool.hashvault.pro: SilentCryptoMiner's default
+hashvault.sh          # its backup name
+supportxmr.com
+moneroocean.stream
+nanopool.org
+c3pool.com
+c3pool.org
+2miners.com
+herominers.com
+unmineable.com
+xmrpool.eu
+xmrpool.net
+monerohash.com
+minexmr.com           # closed in 2022; old miners still ask for it
+xmr.f2pool.com
+xmr.kryptex.network
+xmr-eu.kryptex.network
+xmr-us.kryptex.network
+xmr-sg.kryptex.network
+minergate.com
+solopool.org
+rplant.xyz
+crypto-pool.fr
+dwarfpool.com
+skypool.org
+xmrfast.com
+moneropool.com
+
+# Pools for other coins that miners hide on processors and graphics cards.
+ethermine.org
+woolypooly.com
+k1pool.com
+miningpoolhub.com
+mine.zpool.ca
+auto.nicehash.com
+
+# XMRig's own donation pool (on by default in XMRig, so a miner that leaves it
+# on asks for it now and then).
+donate.v2.xmrig.com
+donate.ssl.xmrig.com

@@ -9,7 +9,8 @@
   - The two aba.exe files compiled into ABA-Setup.exe are byte for byte the
     aba_<tag>_windows_<arch>.exe downloads of the same release.
   - The files the auto-updater in installed copies looks for are all still
-    there under their usual names.
+    there under their usual names, the miner trap's list of mining pools
+    (miner-pools.txt) among them.
 
   With -Signed (when the release job code-signs, see
   scripts/setup-windows-signing.ps1), also that every Windows program
@@ -88,9 +89,15 @@ if ($Signed) {
     Remove-Item -Recurse -Force $unzipped -ErrorAction SilentlyContinue
 }
 
+# The miner trap's list of mining pools: the one in the source, which the
+# installer carries too.
+$pools = Join-Path $PSScriptRoot '..\internal\minertrap\miner-pools.txt'
+if ($sums['miner-pools.txt'] -and $sums['miner-pools.txt'] -eq (Sha $pools)) { Ok 'miner-pools.txt is in SHA256SUMS.txt, the same as internal\minertrap\miner-pools.txt' }
+else { Bad "miner-pools.txt: SHA256SUMS.txt says '$($sums['miner-pools.txt'])', the source file is $(Sha $pools)" }
+
 # Nothing else slipped in.
-if ($sums.Count -eq 5) { Ok 'five files in all: the four there always were, and ABA-Setup.exe' }
-else { Bad "expected 5 files in SHA256SUMS.txt, found $($sums.Count)" }
+if ($sums.Count -eq 6) { Ok 'six files in all: the four there always were, ABA-Setup.exe and miner-pools.txt' }
+else { Bad "expected 6 files in SHA256SUMS.txt, found $($sums.Count)" }
 
 if ($script:bad) { Write-Host "`n$($script:bad) check(s) failed." -ForegroundColor Red; exit 1 }
 Write-Host "`nThe installer matches the release." -ForegroundColor Green

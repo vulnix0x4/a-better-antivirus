@@ -197,12 +197,15 @@ func checkTraps(cfg *config.Config, add func(l Level, name, detail, fix string))
 		return
 	}
 	n, err := minertrap.Installed()
+	_, listErr := minertrap.LoadPools()
 	want := minertrap.Expected()
 	switch {
 	case err != nil:
 		add(Warning, "Miner trap", "can't read the redirect: "+err.Error(), "")
+	case cfg.MinerTrap && listErr != nil:
+		add(Warning, "Miner trap", fmt.Sprintf("on, but %v. The service fetches it again every hour; ABA-Setup.exe brings it too", listErr), "")
 	case cfg.MinerTrap && n == want:
-		add(OK, "Miner trap", fmt.Sprintf("on: %d mining pools' names lead to ABA's fake pool", len(minertrap.Pools)), "")
+		add(OK, "Miner trap", fmt.Sprintf("on: %d mining pools' names lead to ABA's fake pool", len(minertrap.Pools())), "")
 	case cfg.MinerTrap:
 		add(Warning, "Miner trap", fmt.Sprintf("on, but the redirect isn't fully in place (%d of %d rules): the service puts it back within a minute", n, want), "aba doctor --fix")
 	case n > 0:
@@ -235,7 +238,9 @@ func Fix() []string {
 		}
 	}
 	if minertrap.Supported() {
-		if cfg.MinerTrap {
+		if _, err := minertrap.LoadPools(); cfg.MinerTrap && err != nil {
+			did = append(did, "could not check the miner trap's redirect: "+err.Error())
+		} else if cfg.MinerTrap {
 			if changed, err := minertrap.Apply(); err != nil {
 				did = append(did, "could not put the miner trap's redirect back: "+err.Error())
 			} else if changed {

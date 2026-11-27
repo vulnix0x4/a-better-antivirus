@@ -39,12 +39,12 @@ func minerCmds() []*cobra.Command {
 
 // trapLookup looks up the test pool's name the way any program does, and
 // says whether it leads to the trap (and where it leads otherwise).
-func trapLookup(wait time.Duration) (bool, string) {
+func trapLookup(pool string, wait time.Duration) (bool, string) {
 	deadline := time.Now().Add(wait)
 	last := ""
 	for {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip4", minertrap.TestPool)
+		ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip4", pool)
 		cancel()
 		switch {
 		case err != nil:
@@ -72,8 +72,12 @@ func fakeMiner(stay time.Duration) error {
 	// once this one is running. Logging in before that lands would be taken
 	// for a real miner (and the test would wait in vain), so wait for it.
 	waitToldIsTest(10 * time.Second)
-	if ok, why := trapLookup(10 * time.Second); !ok {
-		return fmt.Errorf("%s doesn't lead to the trap (%s): not connecting", minertrap.TestPool, why)
+	pool, err := testPool()
+	if err != nil {
+		return err
+	}
+	if ok, why := trapLookup(pool, 10*time.Second); !ok {
+		return fmt.Errorf("%s doesn't lead to the trap (%s): not connecting", pool, why)
 	}
 	c, err := net.DialTimeout("tcp4", netip.AddrPortFrom(minertrap.AddrIP, minertrap.TestPort).String(), 10*time.Second)
 	if err != nil {
@@ -88,6 +92,20 @@ func fakeMiner(stay time.Duration) error {
 	c.SetReadDeadline(time.Now().Add(stay))
 	c.Read(make([]byte, 1))
 	return nil
+}
+
+// testPool is the real pool name the test looks up, from the installed list
+// (or, while that's missing, the names the redirect in place sends to the
+// trap, as the service does).
+func testPool() (string, error) {
+	if _, err := minertrap.LoadPools(); err != nil {
+		old := minertrap.InstalledPools()
+		if len(old) == 0 {
+			return "", err
+		}
+		minertrap.SetPools(old)
+	}
+	return minertrap.TestPool(), nil
 }
 
 // waitToldIsTest waits until the pending test request names this process
@@ -115,14 +133,18 @@ func runMinerTest() error {
 	if !cfg.MinerTrap {
 		return exitf("the miner trap is off: switch it on with `aba miners on`")
 	}
+	pool, err := testPool()
+	if err != nil {
+		return exitf("%v; `aba doctor` says more", err)
+	}
 	fmt.Println()
 	fmt.Println(ui.Banner("safe test"))
 	fmt.Println()
 	fmt.Println(" " + ui.Plain.Render("A harmless fake miner in your Temp folder is about to look up a real mining pool,"))
-	fmt.Println(" " + ui.Plain.Render(minertrap.TestPool+", and log in to mine there. The trap sends it to ABA's fake pool."))
+	fmt.Println(" " + ui.Plain.Render(pool+", and log in to mine there. The trap sends it to ABA's fake pool."))
 	fmt.Println()
-	if ok, why := trapLookup(20 * time.Second); !ok {
-		fmt.Println(" " + ui.Bad.Bold(true).Render(ui.IconBad) + " " + ui.Plain.Render(minertrap.TestPool+" doesn't lead to the trap: "+why+"."))
+	if ok, why := trapLookup(pool, 20*time.Second); !ok {
+		fmt.Println(" " + ui.Bad.Bold(true).Render(ui.IconBad) + " " + ui.Plain.Render(pool+" doesn't lead to the trap: "+why+"."))
 		fmt.Println("   " + ui.Dim.Render("The fake miner wasn't started. `aba doctor` says what's wrong; the log says more: "+paths.LogFile()))
 		return exitf("test failed")
 	}

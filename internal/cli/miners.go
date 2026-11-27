@@ -44,7 +44,11 @@ func minersCmd() *cobra.Command {
 				}
 				fmt.Println("The miner trap is " + state + ".  " + ui.Hint("Change:", "aba miners on|off"))
 				if cfg.MinerTrap {
-					fmt.Println(ui.Dim.Render(fmt.Sprintf("%d mining pools' names lead to ABA's fake pool on this %s.", len(minertrap.Pools), platform.PC)))
+					if list, err := minertrap.LoadPools(); err != nil {
+						fmt.Println(ui.Warn.Render(fmt.Sprintf("%v.", err)) + ui.Dim.Render(" See `aba doctor`."))
+					} else {
+						fmt.Println(ui.Dim.Render(fmt.Sprintf("%d mining pools' names lead to ABA's fake pool on this %s.", len(list), platform.PC)))
+					}
 				}
 				return nil
 			}

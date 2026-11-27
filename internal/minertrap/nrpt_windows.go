@@ -62,6 +62,10 @@ func Supported() bool { return true }
 // Apply puts the redirect in place (or repairs it): it's idempotent, and
 // tells Windows only when something changed.
 func Apply() (changed bool, err error) {
+	if len(Pools()) == 0 {
+		// Never "the redirect for no pools": that would take it away.
+		return false, errors.New("no list of mining pools is loaded")
+	}
 	rs := rules()
 	changed, err = applyAt(registry.LOCAL_MACHINE, nrptLocal, rs, Addr)
 	if err != nil {
@@ -101,6 +105,44 @@ func Installed() (int, error) {
 	}
 	m, _ := countAt(registry.LOCAL_MACHINE, nrptPolicy)
 	return n + m, nil
+}
+
+// InstalledPools is the pool names the rules in place send to the trap,
+// read back from them. While the list file is missing (an update from a
+// version that had the list built in, before the service has fetched the
+// file), these are what the trap answers for: the rules an earlier ABA wrote,
+// in a part of the registry only administrators can change.
+func InstalledPools() []string { return installedAt(registry.LOCAL_MACHINE, nrptLocal) }
+
+func installedAt(root registry.Key, base string) []string {
+	k, err := registry.OpenKey(root, base, registry.ENUMERATE_SUB_KEYS)
+	if err != nil {
+		return nil
+	}
+	defer k.Close()
+	subs, _ := k.ReadSubKeyNames(-1)
+	slices.Sort(subs) // rule 01, 02...: the list's order
+	var out []string
+	seen := map[string]bool{}
+	for _, s := range subs {
+		if !isOurs(s) {
+			continue
+		}
+		r, err := registry.OpenKey(k, s, registry.QUERY_VALUE)
+		if err != nil {
+			continue
+		}
+		names, _, _ := r.GetStringsValue("Name")
+		r.Close()
+		for _, n := range names {
+			n = strings.ToLower(strings.TrimPrefix(n, "."))
+			if validPool(n) && !seen[n] {
+				seen[n] = true
+				out = append(out, n)
+			}
+		}
+	}
+	return out
 }
 
 // Expected is how many rules Apply puts in place.
