@@ -364,6 +364,10 @@ go build -o dist/aba.exe ./cmd/aba
 
 Admin-only integration tests (real audit rules, Security log, WFP) run in CI, or locally from an elevated shell with `ABA_INTEGRATION=1 go test ./internal/integration/`. CI also runs full end-to-end suites (install → fake stealers → freeze/kill/isolate → uninstall) on real Windows, Linux and macOS machines for every push. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## Support ABA
+
+ABA is free and open source, built in spare time. If it's useful to you, you can support it through [GitHub Sponsors](https://github.com/sponsors/vulnix0x4). Thank you!
+
 ## Security
 
 Found a way to bypass or abuse ABA? Please report it privately: see [SECURITY.md](SECURITY.md).
