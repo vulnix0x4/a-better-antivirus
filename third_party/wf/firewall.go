@@ -144,19 +144,6 @@ const (
 	IPProtoUDP    IPProto = 17
 )
 
-// AppID returns the application ID associated with the provided file.
-func AppID(file string) (string, error) {
-	var a arena
-	defer a.Dispose()
-	fileBytes, _ := toBytesFromString(&a, file)
-	var appID *fwpByteBlob
-	if err := fwpmGetAppIdFromFileName0(fileBytes, &appID); err != nil {
-		return "", err
-	}
-	defer fwpmFreeMemory0((*struct{})(unsafe.Pointer(&appID)))
-	return fromByteBlobToString(appID)
-}
-
 // Layer is a point in the packet processing path where filter rules
 // can be applied.
 type Layer struct {

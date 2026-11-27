@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/install"
+	"github.com/vulnix0x4/a-better-antivirus/internal/minertrap"
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
 	"github.com/vulnix0x4/a-better-antivirus/internal/svcctl"
 )
@@ -48,6 +49,13 @@ func Apply(src string, logf func(string, ...any)) error {
 		svcctl.Start()
 		return err
 	}
+	// The list of mining pools that came with it (Download checked it like
+	// the exe). Without one the service fetches its own (see minertrap).
+	if pools := PoolsBeside(src); fileExists(pools) {
+		if err := install.CopyFile(pools, minertrap.PoolsFile()); err != nil {
+			logf("update: the list of mining pools wasn't installed: %v", err)
+		}
+	}
 	if err := svcctl.Start(); err != nil {
 		logf("update: new version did not start (%v); rolling back", err)
 		if e := swap(backup); e != nil {
@@ -61,12 +69,15 @@ func Apply(src string, logf func(string, ...any)) error {
 	return nil
 }
 
+func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
+
 // Cleanup removes old downloads, keeping keep (the file in use, if any) and
 // the rollback copy.
 func Cleanup(keep string) {
 	files, _ := filepath.Glob(filepath.Join(Dir(), "aba-*.exe*"))
-	for _, f := range files {
-		if keep != "" && paths.Same(f, keep) {
+	lists, _ := filepath.Glob(filepath.Join(Dir(), "aba-*.pools.txt*"))
+	for _, f := range append(files, lists...) {
+		if keep != "" && (paths.Same(f, keep) || paths.Same(f, PoolsBeside(keep))) {
 			continue
 		}
 		if strings.HasSuffix(strings.ToLower(f), "rollback.exe") {

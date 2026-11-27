@@ -56,3 +56,22 @@ func TestSentence(t *testing.T) {
 		}
 	}
 }
+
+// The notification's PowerShell command is the same plain text every time:
+// no encoded command, and what the alert says only in the environment.
+func TestToastCommandIsPlain(t *testing.T) {
+	title, body := `ABA: "x" & <y> '; Remove-Item C:\ -Recurse`, "line one\nline two $(whoami)"
+	cmd := toastCmd(title, body)
+	for _, a := range cmd.Args {
+		if strings.Contains(strings.ToLower(a), "encodedcommand") || strings.Contains(a, "whoami") || strings.Contains(a, "Remove-Item") {
+			t.Errorf("alert text or an encoded command on the command line: %q", cmd.Args)
+		}
+	}
+	if strings.Contains(toastScript, `"`) {
+		t.Error("the script has a double quote: Windows' command-line quoting would mangle it")
+	}
+	env := strings.Join(cmd.Env, "\x00")
+	if !strings.Contains(env, "ABA_TOAST_TITLE="+title) || !strings.Contains(env, "ABA_TOAST_BODY=line one line two $(whoami)") {
+		t.Errorf("title or body not passed as data: %q", cmd.Env[len(cmd.Env)-2:])
+	}
+}

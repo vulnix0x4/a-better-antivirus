@@ -147,6 +147,8 @@ Check ($cfg.minerTrap -eq $true) 'the miner trap is on, as asked'
 Check (-not $cfg.clipboardBait) 'the clipboard bait is off: a silent install never switches a trap on by itself'
 Check (WaitFor { @(TrapRules).Count -gt 0 } 60) "the miner trap's name rules are in place ($(@(TrapRules).Count))"
 Check (WaitFor { PoolLeadsToTrap } 60) 'a mining pool''s name leads to the trap'
+$poolsFile = Join-Path $installDir 'miner-pools.txt'
+Check ((Test-Path $poolsFile) -and (Get-FileHash $poolsFile).Hash -eq (Get-FileHash (Join-Path $PSScriptRoot '..\internal\minertrap\miner-pools.txt')).Hash) 'the list of mining pools is installed next to aba.exe, as published'
 Check ((MachinePath) -contains $installDir) 'the program folder is on PATH'
 
 Step 'Installed apps and the Start menu'
