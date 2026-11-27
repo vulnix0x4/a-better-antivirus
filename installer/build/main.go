@@ -9,6 +9,12 @@
 // files inside ABA-Setup.exe are the very files GoReleaser publishes as
 // aba_<version>_windows_<arch>.exe, not a second build of the same source.
 //
+// When the release job has set up code signing (ABA_WINDOWS_SIGNING, see
+// scripts/setup-windows-signing.ps1), each aba.exe is signed in place first,
+// and ABA-Setup.exe once it is compiled. That is before GoReleaser zips them
+// or lists their hashes in SHA256SUMS.txt, so everything published is signed
+// and the checksums are of the signed files. Without it, nothing is signed.
+//
 // To look at the wizard without being able to install anything:
 //
 //	go run ./installer/build -preview
@@ -43,8 +49,10 @@ func main() {
 	out := flag.String("out", filepath.Join("dist", "installer"), "folder for ABA-Setup.exe (the binaries are kept in its bin subfolder)")
 	script := flag.String("script", filepath.Join("installer", "aba.iss"), "the Inno Setup script")
 	preview := flag.Bool("preview", false, "build ABA-Setup-preview.exe: the wizard only, with no aba.exe inside")
+	signScript := flag.String("sign-script", filepath.Join("scripts", "sign-windows.ps1"), "signs a file in place, when ABA_WINDOWS_SIGNING is set")
 	flag.Parse()
 
+	signer = *signScript
 	if err := run(*arch, *bin, *version, *out, *script, *preview); err != nil {
 		fmt.Fprintln(os.Stderr, "installer:", err)
 		os.Exit(1)
@@ -81,6 +89,10 @@ func run(arch, bin, version, out, script string, preview bool) error {
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		return err
 	}
+	// In place: this is the very file GoReleaser goes on to publish.
+	if err := sign(bin); err != nil {
+		return err
+	}
 	if err := stage(bin, staged(binDir, arch), arch); err != nil {
 		return err
 	}
@@ -91,6 +103,9 @@ func run(arch, bin, version, out, script string, preview bool) error {
 		}
 	}
 	if err := compile(script, out, binDir, version, false); err != nil {
+		return err
+	}
+	if err := sign(filepath.Join(out, "ABA-Setup.exe")); err != nil {
 		return err
 	}
 	// For the build log: what went in, and what came out.
@@ -176,6 +191,28 @@ func compile(script, out, binDir, version string, preview bool) error {
 		return fmt.Errorf("the Inno Setup compiler reported success but %s is missing", target)
 	}
 	fmt.Println("installer: built", target)
+	return nil
+}
+
+// signer is the script that code-signs a file (-sign-script).
+var signer string
+
+// sign code-signs a Windows program in place with scripts/sign-windows.ps1,
+// if the release job set signing up, and does nothing otherwise.
+func sign(file string) error {
+	mode := os.Getenv("ABA_WINDOWS_SIGNING")
+	if mode == "" {
+		return nil
+	}
+	shell, err := exec.LookPath("pwsh")
+	if err != nil {
+		return fmt.Errorf("ABA_WINDOWS_SIGNING is %q but PowerShell 7 (pwsh) wasn't found to sign with", mode)
+	}
+	cmd := exec.Command(shell, "-NoProfile", "-NonInteractive", "-File", signer, file)
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("signing %s failed: %w", file, err)
+	}
 	return nil
 }
 

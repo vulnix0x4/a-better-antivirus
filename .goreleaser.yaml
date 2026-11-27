@@ -16,6 +16,9 @@ builds:
     # to arrive compiles the installer (Inno Setup) into dist/installer. So the
     # installer holds the same bytes as the aba_<tag>_windows_<arch>.exe
     # downloads, and it exists before the checksums are made and signed.
+    # When the release job sets up code signing (ABA_WINDOWS_SIGNING), the
+    # same hook signs each aba.exe in place and then ABA-Setup.exe, so the
+    # zips and checksums are of signed files (docs/windows-signing.md).
     hooks:
       post:
         - cmd: go run ./installer/build -arch {{ .Arch }} -bin "{{ .Path }}" -version {{ .Tag }}
@@ -88,8 +91,13 @@ release:
     ```
     and compare with `SHA256SUMS.txt` (the same goes for `aba_{{ .Tag }}_windows_amd64.exe`; `ABA-Setup.exe` holds
     exactly the two `aba_{{ .Tag }}_windows_*.exe` files and installs the one for your PC). `SHA256SUMS.txt.sig` is the ed25519 signature the auto-updater checks
-    before installing anything. Releases aren't code-signed yet, so Windows SmartScreen may warn: click
+    before installing anything.
+    {{- if isEnvSet "ABA_WINDOWS_SIGNING" }} The Windows programs are also code-signed: Properties → Digital Signatures
+    shows who signed them. SmartScreen may still warn about a new version for a while: check the hash, then click
+    "More info" → "Run anyway".
+    {{- else }} Releases aren't code-signed yet, so Windows SmartScreen may warn: click
     "More info" → "Run anyway" only if the hash matches.
+    {{- end }}
 
 changelog:
   use: github
