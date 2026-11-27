@@ -366,7 +366,7 @@ Admin-only integration tests (real audit rules, Security log, WFP) run in CI, or
 
 ## Support ABA
 
-ABA is free and open source, built in spare time. If it's useful to you, you can support it through [GitHub Sponsors](https://github.com/sponsors/vulnix0x4). Thank you!
+ABA is free and open source, built in spare time. If it's useful to you, you can support it on [Ko-fi](https://ko-fi.com/vulnix) (card or PayPal, no account needed) or through [GitHub Sponsors](https://github.com/sponsors/vulnix0x4). Thank you!
 
 ## Security
 
