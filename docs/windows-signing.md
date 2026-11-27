@@ -109,7 +109,7 @@ RG=aba-signing
 SCOPE=$(az resource show -g "$RG" -n "$ACCOUNT" --resource-type Microsoft.CodeSigning/codeSigningAccounts --query id -o tsv)
 APP=$(az ad app create --display-name "ABA GitHub release signing" --query appId -o tsv)
 SP=$(az ad sp create --id "$APP" --query id -o tsv)
-az ad app federated-credential create --id "$APP" --parameters '{"name":"github-aba-release","issuer":"https://token.actions.githubusercontent.com","subject":"repo:vulnix0x4/a-better-antivirus:environment:release","audiences":["api://AzureADTokenExchange"]}' >/dev/null
+az ad app federated-credential create --id "$APP" --parameters '{"name":"github-aba-release","issuer":"https://token.actions.githubusercontent.com","subject":"repo:vulnix0x4@187458047/a-better-antivirus@1460857444:environment:release","audiences":["api://AzureADTokenExchange"]}' >/dev/null
 sleep 30
 az role assignment create --assignee-object-id "$SP" --assignee-principal-type ServicePrincipal --scope "$SCOPE" --role "Artifact Signing Certificate Profile Signer" >/dev/null \
   || az role assignment create --assignee-object-id "$SP" --assignee-principal-type ServicePrincipal --scope "$SCOPE" --role "Trusted Signing Certificate Profile Signer" >/dev/null
@@ -171,8 +171,10 @@ To stop paying: delete the signing account (portal → the account → **Delete*
   `ARTIFACT_SIGNING_ACCOUNT`) fetches pinned, SHA-256-checked copies of `signtool.exe`
   (`Microsoft.Windows.SDK.BuildTools`) and the Artifact Signing client (`Microsoft.ArtifactSigning.Client`), writes
   the client's `metadata.json`, and sets `ABA_WINDOWS_SIGNING` for the GoReleaser step. Sign-in is `azure/login`
-  with GitHub's OIDC token and a federated credential for `repo:vulnix0x4/a-better-antivirus:environment:release`:
-  no client secret exists anywhere.
+  with GitHub's OIDC token and a federated credential for `repo:vulnix0x4@187458047/a-better-antivirus@1460857444:environment:release`:
+  no client secret exists anywhere. That subject is GitHub's immutable form, which names the owner and repository
+  by their numeric IDs as well (`gh api repos/vulnix0x4/a-better-antivirus/actions/oidc/customization/sub` shows
+  it). A credential made for the plain `repo:vulnix0x4/a-better-antivirus:...` form fails with AADSTS700213.
 - GoReleaser runs `installer/build` after each `aba.exe` is built. With `ABA_WINDOWS_SIGNING` set, it signs that
   `aba.exe` in place (`scripts/sign-windows.ps1`), then copies it into the installer, and signs `ABA-Setup.exe`
   after Inno Setup compiles it. All of that happens before GoReleaser makes the zips and `SHA256SUMS.txt`, so the
