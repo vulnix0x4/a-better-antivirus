@@ -32,7 +32,7 @@ On a Mac or Linux? See [Linux and macOS](#linux-and-macos-early).
 
 Download **[ABA-Setup.exe](https://github.com/vulnix0x4/a-better-antivirus/releases/latest/download/ABA-Setup.exe)** and double-click it. It carries both the x64 and Arm64 builds of `aba.exe`, asks a few questions (phone alerts, whether to catch clippers and hidden crypto miners, automatic updates), sets up the recommended baits with Balanced protection, and offers a **safe test** at the end. Running it again on an existing install updates or repairs ABA without changing your settings.
 
-> Releases aren't code-signed yet, so Windows SmartScreen may warn you. Check the file's SHA-256 against `SHA256SUMS.txt` on [Releases](https://github.com/vulnix0x4/a-better-antivirus/releases/latest) first:
+> From v0.10.1 the Windows files are code-signed (right-click → Properties → Digital Signatures shows the signature). Windows SmartScreen may still warn about a new release for a while, until enough people have run it. Check the file's SHA-256 against `SHA256SUMS.txt` on [Releases](https://github.com/vulnix0x4/a-better-antivirus/releases/latest) first:
 > ```powershell
 > (Get-FileHash .\ABA-Setup.exe -Algorithm SHA256).Hash
 > ```
