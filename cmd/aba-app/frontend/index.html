@@ -7,67 +7,50 @@
 <script type="importmap">{"imports":{"three":"./vendor/three/build/three.module.js","three/addons/":"./vendor/three/addons/"}}</script>
 <link rel="stylesheet" href="style.css">
 </head>
-<body data-mode="loading">
-<div class="window">
+<body data-mode="loading" data-screen="">
+<div class="window" id="window">
+
   <header class="titlebar">
-    <div class="brand"><span class="mark"></span>ABA <span class="tb-state" id="tbState">Starting</span></div>
-    <div class="wc">
-      <button id="wMin" aria-label="Minimise"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button>
-      <button id="wMax" aria-label="Maximise"><svg viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="1"/></svg></button>
-      <button id="wClose" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
-    </div>
+    <div class="brand"><span class="mark"></span><b>ABA</b><span class="tb-state" id="tbState">Starting</span></div>
   </header>
 
-  <nav class="rail full-only">
-    <a class="on"><svg viewBox="0 0 24 24"><path d="M4 11.5 12 4l8 7.5V20h-5v-5H9v5H4z"/></svg><em>Home</em></a>
-    <a><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg><em>History</em></a>
-    <a><svg viewBox="0 0 24 24"><circle cx="13" cy="4.6" r="1.8"/><path d="M13 6.4V15a4.5 4.5 0 0 1-9 0v-2.5L6.8 15"/></svg><em>Baits</em></a>
-    <a><svg viewBox="0 0 24 24"><path d="M4 7h8M18 7h2M4 17h2M12 17h8"/><circle cx="15" cy="7" r="2.6"/><circle cx="9" cy="17" r="2.6"/></svg><em>Settings</em></a>
-    <div class="rail-foot"><span class="live"></span><em id="ver"></em></div>
+  <nav class="rail full-only" id="rail" aria-label="Screens">
+    <button type="button" data-nav="home"><i class="ri"></i><em>Home</em></button>
+    <button type="button" data-nav="history"><i class="ri"></i><em>History</em></button>
+    <button type="button" data-nav="baits"><i class="ri"></i><em>Baits</em></button>
+    <button type="button" data-nav="settings"><i class="ri"></i><em>Settings</em></button>
+    <div class="rail-foot"><span class="live" id="railLive"></span><em id="ver"></em></div>
   </nav>
 
   <main class="stage full-only" id="stage">
-    <canvas id="gl"></canvas>
+    <canvas id="gl" aria-hidden="true"></canvas>
     <div class="atmo"></div>
-    <div id="tags"></div>
-    <section class="hero">
-      <h1><span class="live big"></span><span id="hState">Protected</span></h1>
-      <p class="sub" id="hSub">Loading…</p>
-      <p class="alert" id="alertLine" hidden>Opened for alert <b id="alertId"></b></p>
-    </section>
-    <aside class="panel caught" id="caught" hidden>
-      <h3 id="cTitle"></h3>
-      <p class="cprog"><b id="cProg"></b> <span id="cSig"></span></p>
-      <p class="chead" id="cHead"></p>
-      <div class="cbtns" id="cBtns"></div>
-      <p class="cres" id="cRes"></p>
-    </aside>
-    <aside class="panel diag">
-      <h3>Phase 0 check</h3>
-      <dl>
-        <dt>Mode</dt><dd id="dMode">-</dd>
-        <dt>WebGL</dt><dd id="dGL">-</dd>
-        <dt>Engine</dt><dd id="dRT">-</dd>
-        <dt>Guard</dt><dd id="dGuard">-</dd>
-        <dt>Frames</dt><dd id="dFPS">-</dd>
-      </dl>
-      <div class="probe" id="probe" hidden>
-        <button class="btn" id="probeBtn">Probe button</button>
-        <button class="btn" id="probeConfirm">Native confirm</button>
-        <p>clicks <b id="pClicks">0</b> · keys <b id="pKeys">0</b></p>
-      </div>
-    </aside>
+    <div id="tags"><div class="btag lone" id="loneTag"><span class="tile"></span><span class="bt-l"></span><u></u></div></div>
+
+    <section class="screen" id="home" aria-label="Home"></section>
+    <section class="screen" id="caught" aria-label="Caught"></section>
+    <section class="screen" id="report" aria-label="Full report"></section>
+    <section class="screen" id="history" aria-label="History"></section>
+    <section class="screen" id="baits" aria-label="Baits"></section>
+    <section class="screen" id="settings" aria-label="Settings"></section>
+
+    <div id="intruder" aria-hidden="true"><i class="in-i"></i><span class="in-l"></span></div>
+    <div class="held" id="held"><i class="held-i"></i>Held in ice for <b id="heldT">0:00</b></div>
+    <div class="testcard panel" id="testCard" hidden></div>
+    <p class="notice" id="notice" hidden></p>
   </main>
 
-  <main class="locked locked-only">
-    <div class="lk-card">
-      <span class="mark big"></span>
-      <h1>ABA is protecting this PC</h1>
-      <p id="lkText">Only an administrator can see the details and decide what happens.</p>
-      <button class="btn primary" id="openAba">Open ABA</button>
-      <p class="hint" id="lkErr"></p>
-    </div>
-  </main>
+  <main class="locked locked-only" id="locked"></main>
+
+  <aside class="panel diag" id="diag" hidden></aside>
+  <div class="wc" id="wc">
+    <button type="button" id="wMin" aria-label="Minimise"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12"/></svg></button>
+    <button type="button" id="wMax" aria-label="Maximise"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6.5" y="6.5" width="11" height="11" rx="1"/></svg></button>
+    <button type="button" id="wClose" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+  </div>
+  <div class="flash" id="flash"></div>
+  <div id="toasts"></div>
+  <div id="overlay"></div>
 </div>
 <script type="module" src="app.js"></script>
 </body>
