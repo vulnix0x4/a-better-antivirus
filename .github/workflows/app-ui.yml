@@ -9,7 +9,7 @@ name: App UI
 
 on:
   push:
-    branches: [main, 'app-phase1*']
+    branches: [main]
     paths:
       - 'cmd/aba-app/frontend/**'
       - 'cmd/aba-app/uitest/**'

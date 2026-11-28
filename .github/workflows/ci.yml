@@ -2,8 +2,7 @@ name: CI
 
 on:
   push:
-    # app-*: the desktop app's branches (PRs run it anyway).
-    branches: [main, 'app-*']
+    branches: [main]
   pull_request:
 
 permissions:

@@ -5,9 +5,7 @@ name: Installer
 
 on:
   push:
-    # app-*: the desktop app's branches, which change the installer (PRs
-    # run it anyway).
-    branches: [main, 'app-*']
+    branches: [main]
   pull_request:
 
 permissions:

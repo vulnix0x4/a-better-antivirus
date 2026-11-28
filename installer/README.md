@@ -13,8 +13,9 @@ aba.exe install --yes --keep-settings --preset balanced --learning 0 --auto-upda
 
 from the copy for this PC. ABA does the rest itself, exactly as it does when installed from PowerShell or by
 hand: it copies itself to `C:\Program Files\File Access Monitor`, creates the service, plants the baits, and
-adds its own entry to Windows' "Installed apps" list and a Start menu shortcut. It also puts the app that Setup
-unpacked next to it (`aba-app.exe`) into the program folder, with a Start menu entry "ABA". `aba uninstall`
+adds its own entry to Windows' "Installed apps" list. It also puts the app that Setup unpacked next to it
+(`aba-app.exe`) into the program folder, and the Start menu gets one entry, "ABA", which opens the app (without the
+app: "A Better Antivirus" and "ABA reports" instead). `aba uninstall`
 takes all of it away again, and the app's WebView2 profile (`%LocalAppData%\ABA\webview`) too. So Setup puts
 no files on the PC and registers no uninstaller of its own.
 
