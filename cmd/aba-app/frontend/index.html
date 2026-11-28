@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ABA</title>
+<script type="importmap">{"imports":{"three":"./vendor/three/build/three.module.js","three/addons/":"./vendor/three/addons/"}}</script>
+<link rel="stylesheet" href="style.css">
+</head>
+<body data-mode="loading">
+<div class="window">
+  <header class="titlebar">
+    <div class="brand"><span class="mark"></span>ABA <span class="tb-state" id="tbState">Starting</span></div>
+    <div class="wc">
+      <button id="wMin" aria-label="Minimise"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button>
+      <button id="wMax" aria-label="Maximise"><svg viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="1"/></svg></button>
+      <button id="wClose" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+    </div>
+  </header>
+
+  <nav class="rail full-only">
+    <a class="on"><svg viewBox="0 0 24 24"><path d="M4 11.5 12 4l8 7.5V20h-5v-5H9v5H4z"/></svg><em>Home</em></a>
+    <a><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg><em>History</em></a>
+    <a><svg viewBox="0 0 24 24"><circle cx="13" cy="4.6" r="1.8"/><path d="M13 6.4V15a4.5 4.5 0 0 1-9 0v-2.5L6.8 15"/></svg><em>Baits</em></a>
+    <a><svg viewBox="0 0 24 24"><path d="M4 7h8M18 7h2M4 17h2M12 17h8"/><circle cx="15" cy="7" r="2.6"/><circle cx="9" cy="17" r="2.6"/></svg><em>Settings</em></a>
+    <div class="rail-foot"><span class="live"></span><em id="ver"></em></div>
+  </nav>
+
+  <main class="stage full-only" id="stage">
+    <canvas id="gl"></canvas>
+    <div class="atmo"></div>
+    <div id="tags"></div>
+    <section class="hero">
+      <h1><span class="live big"></span>Protected</h1>
+      <p class="sub"><b>14</b> baits armed. Quiet for <b>8</b> days.</p>
+      <p class="alert" id="alertLine" hidden>Opened for alert <b id="alertId"></b></p>
+    </section>
+    <aside class="panel diag">
+      <h3>Phase 0 check</h3>
+      <dl>
+        <dt>Mode</dt><dd id="dMode">-</dd>
+        <dt>WebGL</dt><dd id="dGL">-</dd>
+        <dt>Engine</dt><dd id="dRT">-</dd>
+        <dt>Guard</dt><dd id="dGuard">-</dd>
+        <dt>Frames</dt><dd id="dFPS">-</dd>
+      </dl>
+      <div class="probe" id="probe" hidden>
+        <button class="btn" id="probeBtn">Probe button</button>
+        <p>clicks <b id="pClicks">0</b> · keys <b id="pKeys">0</b></p>
+      </div>
+    </aside>
+  </main>
+
+  <main class="locked locked-only">
+    <div class="lk-card">
+      <span class="mark big"></span>
+      <h1>ABA is protecting this PC</h1>
+      <p id="lkText">Only an administrator can see the details and decide what happens.</p>
+      <button class="btn primary" id="openAba">Open ABA</button>
+      <p class="hint" id="lkErr"></p>
+    </div>
+  </main>
+</div>
+<script type="module" src="app.js"></script>
+</body>
+</html>

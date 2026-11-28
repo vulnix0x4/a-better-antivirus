@@ -1,0 +1,31 @@
+# Third-party files the app embeds, unmodified, with their SHA-256.
+# Checked by TestVendorManifest (cmd/aba-app/app_test.go): a changed,
+# missing or unlisted file fails the build's tests.
+#
+# Sources (npm tarballs, each checked against the registry's sha512 integrity):
+#   three@0.187.0                                   (MIT, three/LICENSE)
+#     sha512-Qiu7R+Cmh8CstZsY1uJOSWnVlfo7ZtNLV7mF8Jltk3LB3AtDu9cRZlcnRKkAk8Y4z6KKw35z7Y7Urd7jWY8etA==
+#     build/three.module.js, build/three.core.js; examples/jsm/* -> three/addons/*
+#   @fontsource-variable/geist@5.3.0                (OFL-1.1, fonts/LICENSE-geist)
+#     sha512-j0m+vLQuG5XAYoHtGCVu0spvlGreR3EzpECUVzkFmI1mTVnAO38l/NEPDCFgZ177JxzYJCLSmTQibIiYPilGrA==
+#   @fontsource-variable/bricolage-grotesque@5.3.0  (OFL-1.1, fonts/LICENSE-bricolage)
+#     sha512-TLi9Q4hJjS2UvoTMRSS2nHu6c4R56lAw60NR9QYtVRCHn0XtsFpiEhNffZ8Glsoxu6wEEwLKBP8lb94J52PNBA==
+#
+923f4ddf0fd39f9b7794ab0df7332f3d95dc43e8ad7ec2289d6d9e8491177f51  fonts/LICENSE-bricolage
+71609cbb5c78b5870d712eab73a31d76622635c6ed034ab5cee3b9ecbda8685f  fonts/LICENSE-geist
+a97804dc9fbe5fc972a08018c5eda4dab7ef2346f64c57e61419d05e6de4ea1c  fonts/bricolage-grotesque-latin-wght-normal.woff2
+19f9c92546aa300c312235e3125af1b81394d8db9a4bc4a425cd5b641d2d54e1  fonts/geist-latin-wght-normal.woff2
+8b378ebe60e2fe500158cb0ac71cb5e8b7d92953c2abcc63a0eb90499653b5bc  three/LICENSE
+55f466192cc84298755a424c5e040345006b2ee1455589b3b54126c2ea4123f4  three/addons/environments/RoomEnvironment.js
+4e079a5886152d7e529a59aef644e968ab4d32c6a33ce016b36bf29b2eac26f7  three/addons/postprocessing/EffectComposer.js
+7cd08eee9d5d6f5578beaddbdcbe9c384f6873810af27f22ab7db3ceeb127aa3  three/addons/postprocessing/MaskPass.js
+02e4a261af34de71338185e9e87f0cbe5cba9115608d984363e1269dec1d2272  three/addons/postprocessing/OutputPass.js
+444b409c235ead986893c472e720da1b779a56985c7d10b279c7944b52bd61c5  three/addons/postprocessing/Pass.js
+817f6c3cdcd0fd41515d112359ea0532568eefb5aabd3b33903957ebca1b8a6a  three/addons/postprocessing/RenderPass.js
+e2500a5913b26bbf5148ceaae644c6edcff06a18b01494ee37bf856353d2ab9d  three/addons/postprocessing/ShaderPass.js
+ba8f2fcadfa6588384c9473498f974d81d120f02f0e63a0e59c265202a006b5a  three/addons/postprocessing/UnrealBloomPass.js
+a33057d5ac91c43304c186ac0e8816e62bb2ed471d3a00ff3018dfd5c0389718  three/addons/shaders/CopyShader.js
+5044f780b6e6cf863947f64c36fe1587132f7fbe395ada863cd1e5f0388dcf1e  three/addons/shaders/LuminosityHighPassShader.js
+353479f77a8d7e2629d49ccac9fc2f5dbfdda5442e0adf867b00377a2fcb0cb2  three/addons/shaders/OutputShader.js
+613e370f76638fdef83926642bf256dc9615684922de1ce1f63a8583e5d78578  three/build/three.core.js
+104f56145899722094556490d787aae0617cc2fc3382f31df02d724ea1aee341  three/build/three.module.js
