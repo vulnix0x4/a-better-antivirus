@@ -71,12 +71,12 @@
   ],
   "trustForGood": true,
   "checklist": [
-    "Keep this Mac offline. Don't log in to anything from it until it's cleaned.",
-    "From another device (your phone), change your passwords: email first (it resets everything else), then banking, then anything saved in this Mac's browsers.",
+    "Keep this PC offline. Don't log in to anything from it until it's cleaned.",
+    "From another device (your phone), change your passwords: email first (it resets everything else), then banking, then anything saved in this PC's browsers.",
     "Log out everywhere: stolen browser cookies keep sessions alive after a password change. Use 'Sign out of all devices' for Google, Microsoft, Discord, Steam, Telegram (Settings \u003e Devices \u003e Terminate all), social media.",
-    "Crypto: move funds to a NEW wallet created on a clean device. Treat every seed phrase this Mac has ever seen as burned.",
+    "Crypto: move funds to a NEW wallet created on a clean device. Treat every seed phrase this PC has ever seen as burned.",
     "Turn on 2FA with an authenticator app (not SMS) for important accounts.",
-    "Strongly consider erasing the Mac and reinstalling macOS (back up your documents, not your apps): stealers often drop more malware. At the least, remove anything you don't recognise from System Settings \u003e General \u003e Login Items.",
+    "Run a Microsoft Defender Offline scan, then strongly consider resetting Windows: stealers often drop more malware.",
     "Look the file up on VirusTotal from another device: https://www.virustotal.com/gui/file/9f2c41d077ab03e5c1b6f28e4d9a0c73b5e18d2f6a4c90b7e3d1f5a8c2b6e41b"
   ],
   "report": {
@@ -377,7 +377,7 @@
         "key": "program",
         "title": "The program",
         "lines": [
-          "Name: C:\\Users\\sam\\Downloads\\NitroGen-Free.exe (pid 9120)",
+          "Name: NitroGen-Free.exe (pid 9120)",
           "File: C:\\Users\\sam\\Downloads\\NitroGen-Free.exe",
           "Signature: unsigned",
           "Fingerprint (SHA-256): 9f2c41d077ab03e5c1b6f28e4d9a0c73b5e18d2f6a4c90b7e3d1f5a8c2b6e41b",
@@ -394,7 +394,7 @@
           "Caught on Fri Nov 27 2026 at 14:02:07, the moment it opened the bait (stopped 120 ms after).",
           "Done: Froze it and 1 process(es) it started",
           "Done: Cut its internet",
-          "To answer it, type one of these in Terminal, with sudo in front (or answer ABA's first popup about it):",
+          "To answer it, type one of these in a command window opened as administrator (or answer ABA's first popup about it):",
           "aba kill 7f3a  it's malware: end it (it stays cut off)",
           "aba trust 7f3a  it's yours: undo everything and stop alerting about it",
           "aba resume 7f3a  not sure: let it run again, without trusting it"
