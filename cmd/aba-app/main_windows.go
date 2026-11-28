@@ -1,5 +1,6 @@
-// Command aba-app is ABA's desktop app (phase 0 spike): the Home screen's
-// 3D scene in a WebView2 window, hosted by Wails v2 used as a library.
+// Command aba-app is ABA's desktop app: a WebView2 window hosted by Wails v2
+// used as a library, its page built in, and a small bridge (bridge_windows.go)
+// to ABA's data and actions (package appapi).
 //
 // Elevated (the normal case: started from the Start menu with a UAC prompt,
 // or by the service on a catch with the person's elevated token), it shows
@@ -116,6 +117,11 @@ func (a *App) run() int {
 		inst, err := appsec.SingleInstance()
 		trace("single instance: %v", err)
 		if errors.Is(err, appsec.ErrAlreadyRunning) {
+			if a.alert != "" && !a.selftest {
+				// The open app shows it (it asks for it every few seconds).
+				err := leaveOpenRequest(a.alert)
+				trace("open request for %s: %v", a.alert, err)
+			}
 			if hwnd := findWindowInSession(windowClass); hwnd != 0 {
 				procShowWindow.Call(hwnd, 9 /* SW_RESTORE */)
 				procSetForegroundWindow.Call(hwnd)

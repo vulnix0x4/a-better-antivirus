@@ -6,15 +6,55 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/alerts"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
-	"github.com/vulnix0x4/a-better-antivirus/internal/minertrap"
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
 	"github.com/vulnix0x4/a-better-antivirus/internal/svcctl"
-	"github.com/vulnix0x4/a-better-antivirus/internal/update"
 )
+
+// The app stays clear of the packages that freeze, cut off and update
+// (package update brings install, respond and the firewall code with it):
+// what does those things is the CLI. So the two version checks are here,
+// the same as update.Newer and update.Updatable (a test keeps them so).
+
+// Newer reports whether release tag is newer than version current (only
+// plain vX.Y.Z versions compare).
+func Newer(current, tag string) bool {
+	c, ok1 := parseVersion(current)
+	t, ok2 := parseVersion(tag)
+	if !ok1 || !ok2 {
+		return false
+	}
+	for i := 0; i < 3; i++ {
+		if t[i] != c[i] {
+			return t[i] > c[i]
+		}
+	}
+	return false
+}
+
+// Updatable reports whether a build of version v updates itself.
+func Updatable(v string) bool { _, ok := parseVersion(v); return ok }
+
+func parseVersion(v string) ([3]int, bool) {
+	var out [3]int
+	parts := strings.Split(strings.TrimPrefix(strings.TrimSpace(v), "v"), ".")
+	if len(parts) != 3 {
+		return out, false
+	}
+	for i, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil || n < 0 {
+			return out, false
+		}
+		out[i] = n
+	}
+	return out, true
+}
 
 // maxAlerts is how many alerts the app reads (newest first): History's
 // twelve weeks, many times over.
@@ -36,8 +76,8 @@ func Load(version string) (*Source, error) {
 		return nil, err
 	}
 	s := &Source{Version: version, Now: time.Now(), Config: cfg, State: st, Alerts: list,
-		ClipboardSupported: runtime.GOOS == "windows", MinersSupported: minertrap.Supported(),
-		Updatable: update.Updatable(version), Newer: update.Newer}
+		ClipboardSupported: runtime.GOOS == "windows", MinersSupported: runtime.GOOS == "windows",
+		Updatable: Updatable(version), Newer: Newer}
 	if svc, err := svcctl.Status(); err == nil && svc == svcctl.Running {
 		s.ServiceRunning = true
 	}

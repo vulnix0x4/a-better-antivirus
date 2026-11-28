@@ -31,10 +31,17 @@
     <div class="atmo"></div>
     <div id="tags"></div>
     <section class="hero">
-      <h1><span class="live big"></span>Protected</h1>
-      <p class="sub"><b>14</b> baits armed. Quiet for <b>8</b> days.</p>
+      <h1><span class="live big"></span><span id="hState">Protected</span></h1>
+      <p class="sub" id="hSub">Loading…</p>
       <p class="alert" id="alertLine" hidden>Opened for alert <b id="alertId"></b></p>
     </section>
+    <aside class="panel caught" id="caught" hidden>
+      <h3 id="cTitle"></h3>
+      <p class="cprog"><b id="cProg"></b> <span id="cSig"></span></p>
+      <p class="chead" id="cHead"></p>
+      <div class="cbtns" id="cBtns"></div>
+      <p class="cres" id="cRes"></p>
+    </aside>
     <aside class="panel diag">
       <h3>Phase 0 check</h3>
       <dl>

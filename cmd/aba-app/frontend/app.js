@@ -219,6 +219,58 @@ async function attacks() {
   return r;
 }
 
+/* ---------------- Phase 1 core: real data through the bridge ---------------- */
+// Text only (textContent): every string here may come from a caught program.
+const WORDS = { kill: 'Kill it', resume: 'Unfreeze once', trust: "It's mine", release: 'Reconnect this PC' };
+async function core(info) {
+  let shown = info.alert || '';
+  const home = async () => {
+    const s = await API.Snapshot();
+    $('#hState').textContent = s.protection.headline;
+    $('#tbState').textContent = s.protection.headline;
+    $('#hSub').textContent = `${s.baits.total} baits armed. Quiet for ${s.quietDays} days.`;
+    if (!shown && s.waiting.length) shown = s.waiting[0].id;
+  };
+  const caught = async () => {
+    if (!shown) { $('#caught').hidden = true; return; }
+    const a = await API.Alert(shown);
+    $('#caught').hidden = false;
+    $('#caught').dataset.alert = a.id;
+    $('#caught').dataset.outcome = a.outcome;
+    $('#cTitle').textContent = a.title;
+    $('#cProg').textContent = a.program ? a.program.name : '';
+    $('#cSig').textContent = a.program ? a.program.signature : '';
+    $('#cHead').textContent = a.report ? (a.report.pending ? 'Still looking at what it did…' : a.report.headline) : `Outcome: ${a.outcome}`;
+    const box = $('#cBtns');
+    if (box.dataset.for !== a.id + '|' + a.buttons.join(',')) {
+      box.dataset.for = a.id + '|' + a.buttons.join(',');
+      box.replaceChildren(...a.buttons.map(b => {
+        const el = document.createElement('button');
+        el.className = 'btn' + (b === 'kill' ? ' primary' : '');
+        el.id = 'act-' + b;
+        el.textContent = WORDS[b] || b;
+        el.onclick = async () => {
+          box.querySelectorAll('button').forEach(x => { x.disabled = true; });
+          $('#cRes').textContent = 'Working…';
+          const r = await API.Act(b, a.id, '');
+          $('#cRes').textContent = (r.ok ? '' : 'Failed: ') + r.message;
+          box.dataset.for = '';
+          await tick();
+        };
+        return el;
+      }));
+    }
+  };
+  const tick = async () => {
+    const p = await API.Pending();
+    if (p) shown = p;
+    await home();
+    await caught();
+  };
+  await tick();
+  setInterval(() => { tick().catch(e => { $('#cRes').textContent = String(e); }); }, 3000);
+}
+
 /* ---------------- start ---------------- */
 (async () => {
   window.__abaStarted = true;
@@ -230,6 +282,8 @@ async function attacks() {
     if (info.alert) $('#lkText').textContent = 'Something was caught. An administrator needs to decide what happens to it.';
     $('#openAba').onclick = async () => { $('#lkErr').textContent = await API.OpenElevated(); };
   } else if (info.alert) { $('#alertId').textContent = info.alert; $('#alertLine').hidden = false; }
+
+  if (info.mode === 'full') core(info).catch(e => { $('#hSub').textContent = String(e); });
 
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const gi = glInfo();

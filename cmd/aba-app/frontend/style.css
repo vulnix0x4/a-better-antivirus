@@ -72,3 +72,10 @@ h1{font:600 104px/1 var(--disp);letter-spacing:-.025em;display:flex;align-items:
 .lk-card h1{font-size:44px}
 .lk-card p{color:var(--ink2);font-size:17px}
 .hint{color:var(--ink3);font-size:14px;min-height:1em}
+
+/* Phase 1 core: a plain panel for the bridge (the real screens replace it) */
+.caught{left:28px;bottom:40px;width:560px}
+.caught h3{font:600 18px var(--ui);color:var(--ink);margin-bottom:8px;overflow-wrap:anywhere}
+.caught p{font-size:14px;color:var(--ink2);margin:6px 0;overflow-wrap:anywhere}
+.cbtns{display:flex;gap:10px;margin:14px 0 6px}
+.cres{white-space:pre-wrap}
