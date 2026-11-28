@@ -154,7 +154,7 @@ func closeApp() {
 	}
 	n := 0
 	for pid := range snap {
-		if img, err := procinfo.ImagePath(pid); err == nil && paths.Same(img, paths.InstalledApp()) {
+		if img, err := procinfo.ImagePath(pid); err == nil && isApp(img) {
 			procinfo.Kill(pid)
 			n++
 		}
@@ -258,6 +258,14 @@ func localAppDataDirs() []string {
 		add(filepath.Join(dir, "AppData", "Local"))
 	}
 	return out
+}
+
+// isApp: img is the installed app, or a copy an update moved aside while it
+// was open (aba-app.exe.old-<n>, see CopyFile), which is still running.
+func isApp(img string) bool {
+	base := strings.ToLower(filepath.Base(img))
+	return paths.Same(filepath.Dir(img), paths.InstallDir()) &&
+		(base == strings.ToLower(paths.AppExe) || strings.HasPrefix(base, strings.ToLower(paths.AppExe)+".old"))
 }
 
 func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }

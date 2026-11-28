@@ -180,3 +180,19 @@ func TestRemoveWebViewProfileStaysInside(t *testing.T) {
 		t.Fatal("deleted a file through a junction as the profile folder")
 	}
 }
+
+func TestIsApp(t *testing.T) {
+	dir := paths.InstallDir()
+	for img, want := range map[string]bool{
+		filepath.Join(dir, "aba-app.exe"):                 true,
+		filepath.Join(dir, "ABA-APP.EXE"):                 true,
+		filepath.Join(dir, "aba-app.exe.old-17958626938"): true, // moved aside by an update while open
+		filepath.Join(dir, "aba.exe"):                     false,
+		filepath.Join(dir, "updates", "aba-app.exe"):      false,
+		`C:\Users\x\Downloads\aba-app.exe`:                false,
+	} {
+		if got := isApp(img); got != want {
+			t.Errorf("isApp(%s) = %v, want %v", img, got, want)
+		}
+	}
+}
