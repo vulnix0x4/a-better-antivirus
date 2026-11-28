@@ -16,6 +16,10 @@ import (
 // updateLoop checks for a new signed release a few minutes after start, then
 // about once a day, when the user turned automatic updates on.
 func (s *server) updateLoop(ctx context.Context) {
+	// The desktop app of this version, on a PC that doesn't have it yet
+	// (updated by a version from before the app): whether or not automatic
+	// updates are on, like the list of mining pools.
+	go s.safe("desktop app", func() { update.KeepApp(ctx, Version, s.log.Printf) })
 	wait := 5*time.Minute + rand.N(15*time.Minute)
 	for {
 		select {

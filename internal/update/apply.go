@@ -17,8 +17,9 @@ import (
 func Dir() string { return updatesDir() }
 
 // Apply installs the verified exe at src as the CLI and the service binary,
-// then restarts the service. If the new service doesn't come up, the
-// previous binaries are put back and restarted.
+// with the list of mining pools and the desktop app that came with it, then
+// restarts the service. If the new service doesn't come up, the previous
+// binaries (the app's too) are put back and restarted.
 func Apply(src string, logf func(string, ...any)) error {
 	if logf == nil {
 		logf = func(string, ...any) {}
@@ -30,6 +31,18 @@ func Apply(src string, logf func(string, ...any)) error {
 	if _, err := os.Stat(paths.InstalledService()); err == nil {
 		if err := install.CopyFile(paths.InstalledService(), backup); err != nil {
 			return fmt.Errorf("back up the current version: %w", err)
+		}
+	}
+	// The app that came with it (Download checked it like the exe). Without
+	// one, the new service fetches its own (KeepApp).
+	appSrc := AppBeside(src)
+	withApp := fileExists(appSrc)
+	appBackup := filepath.Join(Dir(), "rollback-app.exe")
+	hadApp := false
+	if withApp {
+		var err error
+		if hadApp, err = backupApp(appBackup); err != nil {
+			return fmt.Errorf("back up the current app: %w", err)
 		}
 	}
 	swap := func(from string) error {
@@ -56,10 +69,21 @@ func Apply(src string, logf func(string, ...any)) error {
 			logf("update: the list of mining pools wasn't installed: %v", err)
 		}
 	}
+	// Not worth failing the update over: protection doesn't depend on it.
+	if withApp {
+		if err := appInstall(appSrc); err != nil {
+			logf("update: the ABA app wasn't installed: %v", err)
+		}
+	}
 	if err := svcctl.Start(); err != nil {
 		logf("update: new version did not start (%v); rolling back", err)
 		if e := swap(backup); e != nil {
 			logf("update: rollback copy failed: %v", e)
+		}
+		if withApp {
+			if e := restoreApp(appBackup, hadApp); e != nil {
+				logf("update: putting back the previous app failed: %v", e)
+			}
 		}
 		if e := svcctl.Start(); e != nil {
 			logf("update: previous version did not start either: %v", e)
@@ -71,13 +95,13 @@ func Apply(src string, logf func(string, ...any)) error {
 
 func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
 
-// Cleanup removes old downloads, keeping keep (the file in use, if any) and
-// the rollback copy.
+// Cleanup removes old downloads, keeping keep (the file in use, if any, with
+// what came with it) and the rollback copies.
 func Cleanup(keep string) {
 	files, _ := filepath.Glob(filepath.Join(Dir(), "aba-*.exe*"))
 	lists, _ := filepath.Glob(filepath.Join(Dir(), "aba-*.pools.txt*"))
 	for _, f := range append(files, lists...) {
-		if keep != "" && (paths.Same(f, keep) || paths.Same(f, PoolsBeside(keep))) {
+		if keep != "" && (paths.Same(f, keep) || paths.Same(f, PoolsBeside(keep)) || paths.Same(f, AppBeside(keep))) {
 			continue
 		}
 		if strings.HasSuffix(strings.ToLower(f), "rollback.exe") {

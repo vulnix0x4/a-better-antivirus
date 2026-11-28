@@ -82,6 +82,19 @@ func AssetName(tag string) string {
 	return name
 }
 
+// AppAssetName is the desktop app's release file for this PC
+// (aba-app_v1.2.3_windows_amd64.exe), or "" where there is no app.
+func AppAssetName(tag string) string {
+	if !hasApp {
+		return ""
+	}
+	return fmt.Sprintf("aba-app_%s_%s_%s.exe", tag, runtime.GOOS, runtime.GOARCH)
+}
+
+// AppBeside is where Download puts the desktop app that goes with the
+// downloaded exe: Apply installs them together.
+func AppBeside(exe string) string { return strings.TrimSuffix(exe, ".exe") + ".app.exe" }
+
 // Latest asks GitHub for the newest published release.
 func Latest(ctx context.Context) (*Release, error) {
 	b, err := get(ctx, API, maxSmall)
@@ -138,7 +151,9 @@ func parse(v string) ([3]int, bool) {
 // signed checksum list. It returns the path of the verified file. The
 // release's list of mining pools (minertrap.PoolsFileName), where this
 // system's checksum list has one, comes with it, as checked as the exe, to
-// PoolsBeside(the exe's path): Apply installs the two together.
+// PoolsBeside(the exe's path), and so does the desktop app (AppAssetName),
+// to AppBeside, unless it was left out of this install on purpose: Apply
+// installs them together.
 func Download(ctx context.Context, r *Release, dir string) (string, error) {
 	if r.Draft || r.Prerelease {
 		return "", errors.New("refusing a draft or pre-release")
@@ -155,10 +170,17 @@ func Download(ctx context.Context, r *Release, dir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	var pools []byte
+	var pools, app []byte
 	if _, err := lookup(sums, minertrap.PoolsFileName); err == nil { // a release with the list
 		if pools, err = fetchListed(ctx, r, sums, minertrap.PoolsFileName, maxSmall); err != nil {
 			return "", err
+		}
+	}
+	if appName := AppAssetName(r.Tag); appName != "" && appWanted() {
+		if _, err := lookup(sums, appName); err == nil { // a release with the app
+			if app, err = fetchListed(ctx, r, sums, appName, maxExe); err != nil {
+				return "", err
+			}
 		}
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -174,6 +196,12 @@ func Download(ctx context.Context, r *Release, dir string) (string, error) {
 			return "", err
 		}
 	}
+	os.Remove(AppBeside(out))
+	if app != nil {
+		if err := writeFile(AppBeside(out), app, 0o755); err != nil {
+			return "", err
+		}
+	}
 	return out, nil
 }
 
@@ -186,25 +214,34 @@ func PoolsBeside(exe string) string { return strings.TrimSuffix(exe, ".exe") + "
 // is how an install that doesn't have the file gets it: one updated by a
 // version that had the list built in, or set up from the bare exe.
 func Pools(ctx context.Context, tag string) ([]byte, error) {
+	r, sums, err := published(ctx, tag)
+	if err != nil {
+		return nil, err
+	}
+	return fetchListed(ctx, r, sums, minertrap.PoolsFileName, maxSmall)
+}
+
+// published fetches release tag and its signed checksum list.
+func published(ctx context.Context, tag string) (*Release, []byte, error) {
 	if !Updatable(tag) {
-		return nil, fmt.Errorf("%s is not a published version", tag)
+		return nil, nil, fmt.Errorf("%s is not a published version", tag)
 	}
 	b, err := get(ctx, ReleasesAPI+"/tags/"+url.PathEscape(tag), maxSmall)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var r Release
 	if err := json.Unmarshal(b, &r); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if r.Tag != tag || r.Draft || r.Prerelease {
-		return nil, fmt.Errorf("no published release %s", tag)
+		return nil, nil, fmt.Errorf("no published release %s", tag)
 	}
 	sums, err := signedSums(ctx, &r)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return fetchListed(ctx, &r, sums, minertrap.PoolsFileName, maxSmall)
+	return &r, sums, nil
 }
 
 // signedSums fetches the release's checksum list for this system, and
