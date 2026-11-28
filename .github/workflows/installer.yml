@@ -5,7 +5,9 @@ name: Installer
 
 on:
   push:
-    branches: [main]
+    # app-*: the desktop app's branches, which change the installer (PRs
+    # run it anyway).
+    branches: [main, 'app-*']
   pull_request:
 
 permissions:
@@ -50,6 +52,8 @@ jobs:
         run: |
           foreach ($arch in 'amd64', 'arm64') {
             go run ./installer/build -arch $arch -bin "dist/installer/bin/aba-$arch.exe" -version v0.0.0 -out dist/installer-older
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            go run ./installer/build -app -arch $arch -bin "dist/installer/bin/aba-app-$arch.exe" -version v0.0.0 -out dist/installer-older
             if ($LASTEXITCODE) { exit $LASTEXITCODE }
           }
 
@@ -132,6 +136,8 @@ jobs:
         run: |
           foreach ($arch in 'amd64', 'arm64') {
             go run ./installer/build -arch $arch -bin "dist/installer/bin/aba-$arch.exe" -version v0.0.0 -out dist/installer-older
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            go run ./installer/build -app -arch $arch -bin "dist/installer/bin/aba-app-$arch.exe" -version v0.0.0 -out dist/installer-older
             if ($LASTEXITCODE) { exit $LASTEXITCODE }
           }
       - name: Install with the signed ABA-Setup.exe, check, uninstall
