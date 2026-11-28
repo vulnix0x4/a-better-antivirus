@@ -42,7 +42,7 @@ $('#wClose').addEventListener('click', () => win.quit());
 addEventListener('dragover', e => e.preventDefault()); addEventListener('drop', e => e.preventDefault());
 
 /* ---------------- state ---------------- */
-const S = { info: null, snap: null, screen: '', alert: null, alertId: '', testing: false, presented: new Set(), keepCatch: '', sceneCatch: '' };
+const S = { info: null, snap: null, screen: '', alert: null, alertId: '', testing: false, presented: new Set(), sceneCatch: '' };
 const screens = {};
 const app = {
   bridge, go, openAlert, runTest, setPreset, answer, reload, watchProgress,
@@ -109,9 +109,8 @@ const rowInfo = r => { const t = S.snap && S.snap.baits.tags.find(x => x.label =
 function syncCatch() {
   const onAlert = (S.screen === 'caught' || S.screen === 'report') && S.alert;
   let want = '', info = null;
-  if (onAlert) { if (S.alert.frozenNow || S.keepCatch === S.alert.id) { want = S.alert.id; info = catchInfo(S.alert); } }
+  if (onAlert) { if (S.alert.frozenNow) { want = S.alert.id; info = catchInfo(S.alert); } }
   else {
-    S.keepCatch = '';
     // (a catch not shown yet is left for present(), which shows it happen)
     const w = S.snap && S.snap.waiting.find(x => x.outcome === 'frozen' && S.presented.has(x.id)); if (w) { want = w.id; info = rowInfo(w); }
   }
@@ -166,7 +165,7 @@ function reveal(name) {
 /* ---------------- actions ---------------- */
 async function answer(a, kind) {
   const r = await bridge.act(kind, a.id);
-  if (r.ok) { S.keepCatch = ''; if (scene && S.sceneCatch === a.id) { S.sceneCatch = ''; scene.melt(); } }
+  if (r.ok && scene && S.sceneCatch === a.id) { S.sceneCatch = ''; scene.melt(); }
   await loadAlert(a.id); await loadSnap();
   return r;
 }
@@ -215,7 +214,8 @@ async function runTest() {
     S.presented.add(id);
     const a = await bridge.alert(id).catch(() => null);
     testCard.dataset.state = 'ok'; msg.textContent = 'Caught. ABA works.';
-    if (scene && a) { S.sceneCatch = id; S.keepCatch = id; await Promise.race([scene.strike(catchInfo(a)), sleep(6000)]); }
+    // (the fake stealer is let go once caught, so the ice lets go as the result comes up)
+    if (scene && a) { S.sceneCatch = id; await Promise.race([scene.strike(catchInfo(a)), sleep(6000)]); }
     S.testing = false; testCard.hidden = true; document.body.classList.remove('testing');
     await loadSnap(); await go('caught', { id, d: 1.7 });
   } else {

@@ -99,7 +99,7 @@ export function knob({ onChange, big = false, live = true } = {}) {
 export function dialog(title, body, { wide = false } = {}) {
   const host = $('#overlay'); const prev = document.activeElement;
   const close = () => { wrap.remove(); document.removeEventListener('keydown', onKey, true); if (prev && prev.isConnected) prev.focus(); };
-  const x = h('button.dlg-x', { type: 'button', 'aria-label': 'Close', on: { click: close } }, line('x'));
+  const x = h('button.dlg-x', { type: 'button', 'aria-label': 'Close this', on: { click: close } }, line('x')); // (not "Close": that's the window's)
   const box = h('div.dlg.panel', { class: wide ? 'wide' : '', role: 'dialog', 'aria-modal': 'true', 'aria-label': title }, h('div.dlg-h', h('h2', title), x), h('div.dlg-b', body));
   const wrap = h('div.dlg-wrap', { on: { mousedown: e => { if (e.target === wrap) close(); } } }, box);
   const onKey = e => {

@@ -79,7 +79,7 @@ vec4 mv=modelViewMatrix*vec4(p,1.);gl_Position=projectionMatrix*mv;gl_PointSize=
   const core = new THREE.Group(); core.position.set(0, 1.15, 0); scene.add(core);
   const fresVS = `varying vec3 vN,vV;void main(){vN=normalize(normalMatrix*normal);vec4 mv=modelViewMatrix*vec4(position,1.);vV=normalize(-mv.xyz);gl_Position=projectionMatrix*mv;}`;
   const fresFS = `uniform vec3 uC;uniform float uI,uP,uB;varying vec3 vN,vV;void main(){float f=pow(1.-abs(dot(normalize(vN),normalize(vV))),uP);gl_FragColor=vec4(uC*(uB+f*uI),1.);}`;
-  const coreMat = new THREE.ShaderMaterial({ uniforms: { uC: { value: GREEN.clone() }, uI: { value: 1.5 }, uP: { value: 2.4 }, uB: { value: .04 } }, vertexShader: fresVS, fragmentShader: fresFS });
+  const coreMat = new THREE.ShaderMaterial({ uniforms: { uC: { value: GREEN.clone() }, uI: { value: light ? 2.4 : 1.5 }, uP: { value: light ? 1.9 : 2.4 }, uB: { value: light ? .1 : .04 } }, vertexShader: fresVS, fragmentShader: fresFS }); // (without bloom the orb carries its own glow)
   core.add(new THREE.Mesh(new THREE.IcosahedronGeometry(.62, light ? 3 : 5), coreMat));
   const ringMat = new THREE.MeshBasicMaterial({ color: GREEN.clone(), transparent: true, opacity: .8, blending: THREE.AdditiveBlending, depthWrite: false });
   const rings = [1.0, 1.28, 1.5].map((r, i) => { const m = new THREE.Mesh(new THREE.TorusGeometry(r, i === 2 ? .006 : .012, 8, light ? 72 : 120, i === 2 ? Math.PI * 1.4 : Math.PI * 2), ringMat); core.add(m); return m; });
