@@ -1,0 +1,92 @@
+name: App spike
+
+# Phase 0 of the desktop app (cmd/aba-app): build it, then run its self-test
+# on throwaway Windows machines: as administrator (GitHub's runners have UAC
+# off, so that's a full admin token) and as an ordinary program (medium
+# integrity, no admin rights: the locked view). The self-test draws the 3D
+# scene, reports the WebGL renderer, and checks that the WebView2 guard
+# stops navigation, new windows, downloads, permissions and unused IPC.
+
+on:
+  push:
+    branches: [app-phase0]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  selftest:
+    name: selftest (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, windows-2022, windows-11-arm]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Unit tests
+        shell: pwsh
+        run: |
+          go vet ./internal/appsec/ ./internal/session/ ./scripts/applaunch/
+          go test -count=1 ./internal/appsec/ ./internal/session/ ./internal/paths/
+          Push-Location cmd/aba-app
+          go vet -tags desktop,production .
+          go test -count=1 .
+          Pop-Location
+
+      - name: Build
+        shell: pwsh
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          Push-Location cmd/aba-app
+          go build -trimpath -tags desktop,production -ldflags "-s -w -H=windowsgui -X main.version=ci-${{ github.sha }}" -o ../../dist/aba-app.exe .
+          Pop-Location
+          go build -o dist/medium.exe ./scripts/medium
+          go build -o dist/applaunch.exe ./scripts/applaunch
+          Get-ChildItem dist | Format-Table Name, Length
+          $rt = Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}' -ErrorAction SilentlyContinue
+          "WebView2 runtime: $($rt.pv) at $($rt.location)"
+          [Environment]::OSVersion.VersionString
+          (Get-CimInstance Win32_OperatingSystem).Caption
+
+      - name: Self-test, as administrator
+        shell: pwsh
+        run: |
+          $out = "$env:RUNNER_TEMP\st-admin.json"
+          $p = Start-Process dist\aba-app.exe -ArgumentList '--selftest', '--selftest-out', $out -PassThru
+          if (!$p.WaitForExit(150000)) { $p.Kill(); throw 'self-test hung' }
+          Get-Content $out
+          if ($p.ExitCode -ne 0) { throw "self-test failed (exit $($p.ExitCode))" }
+
+      # medium.exe -lua: the program's token loses its administrator rights,
+      # like anything an ordinary user starts.
+      - name: Self-test, as an ordinary program (locked view)
+        shell: pwsh
+        run: |
+          $out = 'C:\Users\Public\st-locked.json'
+          Remove-Item $out -ErrorAction SilentlyContinue
+          dist\medium.exe -lua "$pwd\dist\aba-app.exe" --selftest --selftest-out $out
+          $deadline = (Get-Date).AddSeconds(150)
+          while (!(Test-Path $out) -and (Get-Date) -lt $deadline) { Start-Sleep 2 }
+          if (!(Test-Path $out)) { throw 'no report from the locked self-test' }
+          Start-Sleep 2
+          Get-Content $out
+          $r = Get-Content $out -Raw | ConvertFrom-Json
+          if (!$r.ok -or $r.mode -ne 'locked') { throw 'locked self-test failed' }
+
+      - name: Keep the reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: app-selftest-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/st-admin.json
+            C:/Users/Public/st-locked.json
+          if-no-files-found: ignore

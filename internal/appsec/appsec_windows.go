@@ -23,7 +23,9 @@ import (
 // overrides, so empty beats absent. (go-webview2 does the same on its own;
 // this doesn't rely on it.) Call it first thing, before anything starts
 // WebView2. It returns the names that had a value other than the neutral
-// one: what someone planted.
+// one: what someone planted. (go-webview2's package init already blanks
+// the five documented variables before main runs, so in the app this
+// reports only the others; all are gone either way.)
 func ScrubProcessEnv() []string {
 	var planted []string
 	_, removed := ScrubWebView2Env(os.Environ())
