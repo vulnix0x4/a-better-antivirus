@@ -76,7 +76,6 @@ func Steps(o Options) []Step {
 	var cfg *config.Config
 	var sec *config.Secrets
 	self, _ := os.Executable()
-	warnings := []string{}
 	// What phone alerts were set to before, to only send a test when they change.
 	var prevPhone config.PhoneConfig
 	if old, err := config.LoadSecrets(); err == nil {
@@ -216,41 +215,10 @@ func Steps(o Options) []Step {
 	steps = append(steps, detectionSteps()...)
 	if o.CanaryEmail != "" {
 		steps = append(steps, Step{Name: "Creating canary tokens", Soft: true, Run: func() (string, error) {
-			cfg.CanaryEnabled = true
-			sec.Canary.Email = o.CanaryEmail
-			have := map[string]bool{}
-			for _, t := range sec.Canary.Tokens {
-				have[t.Kind] = true
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-			defer cancel()
-			made := 0
-			want := []struct{ kind, memo, bait string }{
-				{"aws_keys", "A Better Antivirus: someone used the AWS keys from a decoy ~/.aws/credentials file. Treat that " + platform.PC + " as compromised.", "aws"},
-				{"web", "A Better Antivirus: someone opened the link from a decoy passwords.txt. Treat that " + platform.PC + " as compromised.", "passwords"},
-			}
-			for _, w := range want {
-				if have[w.kind] {
-					continue
-				}
-				t, err := canary.Create(ctx, w.kind, o.CanaryEmail, w.memo, w.bait)
-				if err != nil {
-					warnings = append(warnings, err.Error())
-					continue
-				}
-				sec.Canary.Tokens = append(sec.Canary.Tokens, t)
-				made++
-			}
-			if err := config.SaveSecrets(sec); err != nil {
+			if _, err := MakeCanaryTokens(cfg, sec, o.CanaryEmail); err != nil {
 				return "", err
 			}
-			if err := config.SaveConfig(cfg); err != nil {
-				return "", err
-			}
-			if len(warnings) > 0 {
-				return "", errors.New(strings.Join(warnings, "; "))
-			}
-			return fmt.Sprintf("%d token(s), alerts go to %s", made+len(have), o.CanaryEmail), nil
+			return fmt.Sprintf("%d token(s), alerts go to %s", len(sec.Canary.Tokens), o.CanaryEmail), nil
 		}})
 	}
 	steps = append(steps,
@@ -276,6 +244,48 @@ func Steps(o Options) []Step {
 		}})
 	}
 	return steps
+}
+
+// MakeCanaryTokens makes the canary tokens sec doesn't have yet, emailing
+// email, and saves them (and cfg, marked as using them). It returns how many
+// it made; err says what failed (some may have been made all the same).
+func MakeCanaryTokens(cfg *config.Config, sec *config.Secrets, email string) (int, error) {
+	cfg.CanaryEnabled = true
+	sec.Canary.Email = email
+	have := map[string]bool{}
+	for _, t := range sec.Canary.Tokens {
+		have[t.Kind] = true
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	made := 0
+	var warnings []string
+	want := []struct{ kind, memo, bait string }{
+		{"aws_keys", "A Better Antivirus: someone used the AWS keys from a decoy ~/.aws/credentials file. Treat that " + platform.PC + " as compromised.", "aws"},
+		{"web", "A Better Antivirus: someone opened the link from a decoy passwords.txt. Treat that " + platform.PC + " as compromised.", "passwords"},
+	}
+	for _, w := range want {
+		if have[w.kind] {
+			continue
+		}
+		t, err := canary.Create(ctx, w.kind, email, w.memo, w.bait)
+		if err != nil {
+			warnings = append(warnings, err.Error())
+			continue
+		}
+		sec.Canary.Tokens = append(sec.Canary.Tokens, t)
+		made++
+	}
+	if err := config.SaveSecrets(sec); err != nil {
+		return made, err
+	}
+	if err := config.SaveConfig(cfg); err != nil {
+		return made, err
+	}
+	if len(warnings) > 0 {
+		return made, errors.New(strings.Join(warnings, "; "))
+	}
+	return made, nil
 }
 
 // ClipboardBaitSupported reports whether the clipboard bait works here

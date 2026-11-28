@@ -5,6 +5,8 @@ package cli
 // that makes the first possible (`aba recorder`).
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -128,6 +130,7 @@ func indentWrap(s string, w int) string {
 
 func exportIOCCmd() *cobra.Command {
 	var out string
+	var downloads bool
 	c := &cobra.Command{
 		Use:   "export-ioc <alert-id>",
 		Short: "Write a file of what's safe to share about a caught program",
@@ -149,20 +152,33 @@ func exportIOCCmd() *cobra.Command {
 				return exitf("this alert isn't about a program: there's nothing to share")
 			}
 			home := ""
+			var u config.UserInfo
 			if cfg, err := config.LoadConfig(); err == nil {
-				home = cfg.User.Profile
+				home, u = cfg.User.Profile, cfg.User
 			}
-			b, err := autopsy.MarshalIOC(autopsy.MakeIOC(a, home))
+			ioc := autopsy.MakeIOC(a, home)
+			b, err := autopsy.MarshalIOC(ioc)
 			if err != nil {
 				return err
 			}
-			if out == "" {
-				out = "aba-ioc-" + a.ID + ".json"
+			var abs string
+			if downloads {
+				if out != "" {
+					return exitf("--downloads and --output: one or the other")
+				}
+				if abs, err = writeNew(downloadsDir(u), "aba-ioc-"+a.ID, ".json", b); err != nil {
+					return err
+				}
+			} else {
+				if out == "" {
+					out = "aba-ioc-" + a.ID + ".json"
+				}
+				if err := os.WriteFile(out, b, 0o644); err != nil {
+					return err
+				}
+				abs, _ = filepath.Abs(out)
 			}
-			if err := os.WriteFile(out, b, 0o644); err != nil {
-				return err
-			}
-			abs, _ := filepath.Abs(out)
+			setDetails(map[string]any{"path": abs, "ioc": json.RawMessage(b)})
 			fmt.Println(ui.Good.Render(ui.IconOK) + " Wrote " + abs)
 			fmt.Println(ui.Dim.Render("It holds the program's fingerprint and where it was sending, nothing of yours. Nothing was uploaded: share it only if you choose to."))
 			if a.Autopsy == nil {
@@ -172,6 +188,7 @@ func exportIOCCmd() *cobra.Command {
 		},
 	}
 	c.Flags().StringVarP(&out, "output", "o", "", "where to write it (default: aba-ioc-<alert id>.json here)")
+	c.Flags().BoolVar(&downloads, "downloads", false, "write it to the protected person's Downloads folder, under a new name (never over a file)")
 	return c
 }
 
@@ -214,4 +231,51 @@ func recorderCmd() *cobra.Command {
 			return install.Reload()
 		},
 	}
+}
+
+// downloadsDir is the protected person's Downloads folder.
+func downloadsDir(u config.UserInfo) string {
+	if u.Downloads != "" {
+		return u.Downloads
+	}
+	if u.Profile != "" {
+		return filepath.Join(u.Profile, "Downloads")
+	}
+	return ""
+}
+
+// writeNew writes b to a new file name+ext in dir (name (2)+ext and so on
+// when it's taken): it never opens a file that's already there, whatever it
+// is (a link someone left there included).
+func writeNew(dir, name, ext string, b []byte) (string, error) {
+	if dir == "" || !filepath.IsAbs(dir) {
+		return "", exitf("ABA doesn't know your Downloads folder")
+	}
+	fi, err := os.Lstat(dir)
+	if err != nil || !fi.IsDir() {
+		return "", exitf("your Downloads folder isn't there (%s)", dir)
+	}
+	for i := 1; i <= 50; i++ {
+		p := filepath.Join(dir, name+ext)
+		if i > 1 {
+			p = filepath.Join(dir, fmt.Sprintf("%s (%d)%s", name, i, ext))
+		}
+		f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if errors.Is(err, os.ErrExist) {
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		_, werr := f.Write(b)
+		if cerr := f.Close(); werr == nil {
+			werr = cerr
+		}
+		if werr != nil {
+			os.Remove(p)
+			return "", werr
+		}
+		return p, nil
+	}
+	return "", exitf("too many files named %s in %s", name+ext, dir)
 }

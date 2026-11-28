@@ -8,7 +8,7 @@ import (
 )
 
 // RunCLI runs the CLI and feeds line its output.
-func RunCLI(ctx context.Context, exe string, args []string, line func(string)) error {
+func RunCLI(ctx context.Context, exe string, args []string, stdin []byte, line func(string)) error {
 	cmd := exec.CommandContext(ctx, exe, args...)
-	return runCmd(cmd, line)
+	return runCmd(cmd, stdin, line)
 }

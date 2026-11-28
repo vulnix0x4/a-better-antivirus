@@ -128,8 +128,31 @@ func BaitExists(id string) bool {
 	return b != nil && b.Status != "retired"
 }
 
+// InCatalog reports whether id is a bait of this system's catalog.
+func InCatalog(id string) bool {
+	_, ok := baits.ByID(id)
+	return ok && ValidBaitID(id)
+}
+
+// RuleExists reports whether an ignore rule has ID id.
+func RuleExists(id string) bool {
+	if !ValidRuleID(id) {
+		return false
+	}
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return false
+	}
+	for _, r := range cfg.Ignore {
+		if r.ID() == id {
+			return true
+		}
+	}
+	return false
+}
+
 // DiskExists checks IDs against the files on disk.
-var DiskExists = Exists{Alert: AlertExists, Bait: BaitExists}
+var DiskExists = Exists{Alert: AlertExists, Bait: BaitExists, Catalog: InCatalog, Rule: RuleExists}
 
 // LoadLocked builds the locked view from the status file anyone may read.
 func LoadLocked(version, alertID string) *Locked {

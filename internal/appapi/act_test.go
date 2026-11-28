@@ -46,7 +46,7 @@ func TestCommand(t *testing.T) {
 	}
 	bad := []struct{ kind, id, arg string }{
 		{"", "", ""},
-		{"uninstall", "", ""},
+		{"uninstall", "x", ""},
 		{"KILL", id, ""},
 		{"kill", "", ""},
 		{"kill", "20261127-140207-0000", ""}, // well formed, not on disk
@@ -111,7 +111,7 @@ func TestValidIDs(t *testing.T) {
 // fakeRunner answers like the CLI would.
 func fakeRunner(lines ...string) (Runner, *[][]string) {
 	var calls [][]string
-	return func(ctx context.Context, exe string, args []string, line func(string)) error {
+	return func(ctx context.Context, exe string, args []string, stdin []byte, line func(string)) error {
 		calls = append(calls, append([]string{exe}, args...))
 		for _, l := range lines {
 			line(l)
@@ -163,7 +163,7 @@ func TestActBadOutput(t *testing.T) {
 			t.Errorf("%q: got %+v", lines, res)
 		}
 	}
-	a := &Actor{CLI: `C:\aba.exe`, Exists: testExists, Run: func(context.Context, string, []string, func(string)) error {
+	a := &Actor{CLI: `C:\aba.exe`, Exists: testExists, Run: func(context.Context, string, []string, []byte, func(string)) error {
 		return errors.New("exit status 1")
 	}}
 	if res := a.Act("phone-test", "", ""); res.OK || !strings.Contains(res.Message, "exit status 1") {
@@ -173,7 +173,7 @@ func TestActBadOutput(t *testing.T) {
 
 func TestActOneAtATime(t *testing.T) {
 	started, release := make(chan struct{}), make(chan struct{})
-	a := &Actor{CLI: `C:\aba.exe`, Exists: testExists, Run: func(ctx context.Context, exe string, args []string, line func(string)) error {
+	a := &Actor{CLI: `C:\aba.exe`, Exists: testExists, Run: func(ctx context.Context, exe string, args []string, stdin []byte, line func(string)) error {
 		close(started)
 		<-release
 		line(`{"ok":true,"message":"done"}`)

@@ -96,6 +96,7 @@ func alertsCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			setDetails(a)
 			b, _ := json.MarshalIndent(a, "", "  ")
 			fmt.Println(string(b))
 			return nil
@@ -503,8 +504,10 @@ func doctorCmd() *cobra.Command {
 			if err := requireAdmin(); err != nil {
 				return err
 			}
+			fixed := []string{}
 			if fix {
 				for _, d := range doctor.Fix() {
+					fixed = append(fixed, d)
 					fmt.Println(ui.Good.Render(ui.IconOK) + " " + d)
 				}
 				svcctl.Send(svcctl.CheckNow)
@@ -513,7 +516,9 @@ func doctorCmd() *cobra.Command {
 			fmt.Println(ui.Banner("doctor"))
 			fmt.Println()
 			fixes := 0
-			for _, r := range doctor.Run() {
+			results := doctor.Run()
+			setDetails(doctorDetails(fix, fixed, results))
+			for _, r := range results {
 				var icon string
 				switch r.Level {
 				case doctor.OK:
@@ -549,7 +554,8 @@ type suggestion struct {
 
 func learnCmd() *cobra.Command {
 	var stop bool
-	var extend int
+	var extend, days int
+	var pick string
 	c := &cobra.Command{
 		Use:   "learn",
 		Short: "Trust several of your apps at once",
@@ -561,17 +567,28 @@ func learnCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if stop || extend > 0 {
-				if stop {
+			daysSet := cmd.Flags().Changed("days")
+			if daysSet && (days < 0 || days > 365) {
+				return exitf("--days is 0 (end learning mode) to 365")
+			}
+			if stop || extend > 0 || daysSet {
+				switch {
+				case stop || (daysSet && days == 0):
 					cfg.LearningUntil = time.Time{}
 					fmt.Println(ui.Good.Render(ui.IconOK) + " Learning mode ended. ABA now responds as configured (" + cfg.PresetName() + ").")
-				} else {
+				case daysSet:
+					cfg.LearningUntil = time.Now().Add(time.Duration(days) * 24 * time.Hour)
+					fmt.Println(ui.Good.Render(ui.IconOK) + " Learning mode until " + cfg.LearningUntil.Format("Mon Jan 2 15:04"))
+				default:
 					base := time.Now()
 					if cfg.Learning(base) {
 						base = cfg.LearningUntil
 					}
 					cfg.LearningUntil = base.Add(time.Duration(extend) * 24 * time.Hour)
 					fmt.Println(ui.Good.Render(ui.IconOK) + " Learning mode until " + cfg.LearningUntil.Format("Mon Jan 2 15:04"))
+				}
+				if !cfg.LearningUntil.IsZero() && !cfg.LearningMatters() {
+					fmt.Println(ui.Dim.Render("(With " + cfg.PresetName() + " it changes nothing: suspicious programs only raise an alert anyway.)"))
 				}
 				if err := config.SaveConfig(cfg); err != nil {
 					return err
@@ -580,55 +597,34 @@ func learnCmd() *cobra.Command {
 			}
 
 			list, _ := alerts.List(0)
-			byPath := map[string]*suggestion{}
-			for _, a := range list {
-				if a.Test || a.Process == nil || a.Process.Image == "" || a.Kind != alerts.KindRead {
-					continue
+			sugg := trust.Suggest(list, cfg.Ignore)
+			names := baitNames()
+			setDetails(map[string]any{"suggestions": suggestionDetails(sugg, names)})
+
+			if pick != "" {
+				byID := map[string]trust.Suggestion{}
+				for _, s := range sugg {
+					byID[s.ID] = s
 				}
-				r, why := trust.Rule(a)
-				if why != "" {
-					continue // can't be trusted permanently (script host without a command line, a sweep…)
-				}
-				key := strings.ToLower(r.Path + "|" + r.Signer + "|" + r.SHA256 + "|" + r.CommandLine)
-				s := byPath[key]
-				if s == nil {
-					s = &suggestion{rule: r, tier: a.Tier}
-					byPath[key] = s
-				} else {
-					for _, b := range r.Baits {
-						if !s.rule.CoversBait(b) {
-							s.rule.Baits = append(s.rule.Baits, b)
-						}
+				var rules []config.IgnoreRule
+				seen := map[string]bool{}
+				for _, id := range strings.Split(pick, ",") {
+					id = strings.TrimSpace(strings.ToLower(id))
+					if id == "" || seen[id] {
+						continue
 					}
-				}
-				if a.Tier.Rank() > s.tier.Rank() {
-					s.tier = a.Tier
-				}
-				s.count++
-				if a.Time.After(s.last) {
-					s.last = a.Time
-				}
-			}
-			var sugg []*suggestion
-			for _, s := range byPath {
-				ignored := false
-				for _, x := range cfg.Ignore {
-					if x.SameProgram(s.rule) {
-						covered := len(x.Baits) == 0
-						if !covered {
-							covered = len(s.rule.Baits) > 0
-							for _, b := range s.rule.Baits {
-								covered = covered && x.CoversBait(b)
-							}
-						}
-						ignored = ignored || covered
+					seen[id] = true
+					s, ok := byID[id]
+					if !ok {
+						return exitf("no program %q to trust (see `aba learn`: it may be trusted already)", id)
 					}
+					rules = append(rules, s.Rule)
 				}
-				if !ignored {
-					sugg = append(sugg, s)
+				if len(rules) == 0 {
+					return exitf("--trust takes the IDs `aba learn --json` lists")
 				}
+				return addIgnore(rules...)
 			}
-			sort.Slice(sugg, func(i, j int) bool { return sugg[i].count > sugg[j].count })
 
 			fmt.Println(ui.Banner("learn"))
 			fmt.Println()
@@ -642,28 +638,28 @@ func learnCmd() *cobra.Command {
 				fmt.Println(ui.Dim.Render("No programs to review: nothing new has touched your baits."))
 				return nil
 			}
-			names := baitNames()
 			var opts []huh.Option[int]
 			for i, s := range sugg {
-				label := fmt.Sprintf("%-9s %3d× %s", s.tier, s.count, ui.TruncateMiddle(s.rule.Path, 70))
-				if s.rule.Signer != "" {
-					label += ui.Dim.Render(words.signed + s.rule.Signer)
+				label := fmt.Sprintf("%-9s %3d× %s", s.Tier, s.Count, ui.TruncateMiddle(s.Rule.Path, 70))
+				if s.Rule.Signer != "" {
+					label += ui.Dim.Render(words.signed + s.Rule.Signer)
 				} else {
 					label += ui.Bad.Render(words.unsigned)
 				}
-				label += ui.Fainter.Render("  (" + trust.Describe(s.rule, names) + ")")
-				opts = append(opts, huh.NewOption(label, i).Selected(s.tier == config.TierInfo && s.rule.Signer != ""))
+				label += ui.Fainter.Render("  (" + trust.Describe(s.Rule, names) + ")")
+				opts = append(opts, huh.NewOption(label, i).Selected(s.Recommended()))
 			}
-			if !ui.IsTTY() {
-				for _, o := range opts {
-					fmt.Println("  " + o.Key)
+			if !ui.IsTTY() || yesMode {
+				for i, o := range opts {
+					fmt.Println("  " + o.Key + ui.Fainter.Render("  ["+sugg[i].ID+"]"))
 				}
+				fmt.Println("\n" + ui.Hint("Trust some without the list:", "aba learn --trust <id>,<id>"))
 				return nil
 			}
-			var pick []int
+			var chosen []int
 			if err := huh.NewMultiSelect[int]().Title("Ignore which programs from now on?").
 				Description(words.learnWarning).
-				Options(opts...).Value(&pick).WithTheme(theme()).Run(); err != nil || len(pick) == 0 {
+				Options(opts...).Value(&chosen).WithTheme(theme()).Run(); err != nil || len(chosen) == 0 {
 				fmt.Println(ui.Dim.Render("No changes."))
 				return nil
 			}
@@ -671,14 +667,16 @@ func learnCmd() *cobra.Command {
 				return err
 			}
 			var rules []config.IgnoreRule
-			for _, i := range pick {
-				rules = append(rules, sugg[i].rule)
+			for _, i := range chosen {
+				rules = append(rules, sugg[i].Rule)
 			}
 			return addIgnore(rules...)
 		},
 	}
 	c.Flags().BoolVar(&stop, "stop", false, "end learning mode now")
 	c.Flags().IntVar(&extend, "extend", 0, "extend (or restart) learning mode by N days")
+	c.Flags().IntVar(&days, "days", 0, "learning mode for N days from now (0 ends it), as setup asks")
+	c.Flags().StringVar(&pick, "trust", "", "trust these programs (IDs from `aba learn --json`, comma-separated) without the list")
 	return c
 }
 
@@ -696,13 +694,14 @@ func ignoreCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			names := baitNames()
+			setDetails(map[string]any{"rules": ruleDetails(cfg.Ignore, names)})
 			if len(cfg.Ignore) == 0 {
 				fmt.Println(ui.Dim.Render(words.noRules))
 				return nil
 			}
-			names := baitNames()
 			for i, r := range cfg.Ignore {
-				fmt.Printf(" %2d  %s %s %s\n", i+1, r.Path, ui.Dim.Render("("+trust.Describe(r, names)+")"), ui.Fainter.Render(r.Note))
+				fmt.Printf(" %2d  %s %s %s %s\n", i+1, r.Path, ui.Dim.Render("("+trust.Describe(r, names)+")"), ui.Fainter.Render(r.Note), ui.Fainter.Render("["+r.ID()+"]"))
 			}
 			return nil
 		},
@@ -728,7 +727,7 @@ func ignoreCmd() *cobra.Command {
 	add.Flags().BoolVar(&tricks, "allow-tricks", false, "also when it reads baits in ways that look like evasion (some backup and security tools do)")
 	c.AddCommand(add)
 	c.AddCommand(&cobra.Command{
-		Use: "remove <number>", Short: "Remove an ignore rule (number from `ignore list`)", Args: cobra.ExactArgs(1),
+		Use: "remove <number | id>", Short: "Remove an ignore rule (its number or [id] from `ignore list`)", Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireAdmin(); err != nil {
 				return err
@@ -738,7 +737,15 @@ func ignoreCmd() *cobra.Command {
 				return err
 			}
 			n, err := strconv.Atoi(args[0])
-			if err != nil || n < 1 || n > len(cfg.Ignore) {
+			if err != nil || len(args[0]) == 12 {
+				n = 0
+				for i, r := range cfg.Ignore {
+					if r.ID() == strings.ToLower(args[0]) {
+						n = i + 1
+					}
+				}
+			}
+			if n < 1 || n > len(cfg.Ignore) {
 				return exitf("no rule %s", args[0])
 			}
 			r := cfg.Ignore[n-1]
@@ -884,7 +891,8 @@ func baitCmd() *cobra.Command {
 			return nil
 		},
 	})
-	c.AddCommand(&cobra.Command{
+	var asFile bool
+	addBait := &cobra.Command{
 		Use: "add <path | catalog id>", Short: "Turn any file into a bait, or switch on one from the catalog",
 		Long: "With a path: that file becomes a bait (created with fake passwords if it doesn't exist).\n" +
 			"With an ID from `aba bait catalog` (e.g. chrome-profile): that bait is planted.",
@@ -897,7 +905,7 @@ func baitCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if spec, ok := baits.ByID(args[0]); ok {
+			if spec, ok := baits.ByID(args[0]); ok && !asFile {
 				if err := install.AddCatalogBait(cfg, spec.ID); err != nil {
 					return err
 				}
@@ -924,9 +932,12 @@ func baitCmd() *cobra.Command {
 				return err
 			}
 			fmt.Println(ui.Good.Render(ui.IconOK) + " " + p + " is now a bait (" + id + "). " + ui.Dim.Render(d))
+			setDetails(map[string]any{"id": id, "path": p})
 			return install.Reload()
 		},
-	})
+	}
+	addBait.Flags().BoolVar(&asFile, "file", false, "the argument is a file's path, even if it looks like a catalog ID")
+	c.AddCommand(addBait)
 	c.AddCommand(&cobra.Command{
 		Use: "rename", Short: words.renameShort,
 		Long: "ABA is open source, so the names it gives baits are no secret: every install picks its own from what file\n" +
@@ -1018,7 +1029,8 @@ func baitCmd() *cobra.Command {
 // ---- phone ----
 
 func phoneCmd() *cobra.Command {
-	c := &cobra.Command{Use: "phone", Short: "Test your phone alerts"}
+	c := &cobra.Command{Use: "phone", Short: "Phone alerts: test, set up, switch off"}
+	c.AddCommand(phoneSetCmd(), phoneOffCmd(), phoneTierCmd())
 	c.AddCommand(&cobra.Command{
 		Use: "test", Short: "Send a test alert to your phone",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -1146,10 +1158,15 @@ func demoAlert() *alerts.Alert {
 // presetCmd sets the protection level (what `aba configure` asks first),
 // without questions.
 func presetCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "preset [alert|balanced|strict]",
+	var warnActs, critActs string
+	c := &cobra.Command{
+		Use:   "preset [alert|balanced|strict|custom]",
 		Short: "How ABA responds when something takes a bait",
-		Args:  cobra.MaximumNArgs(1),
+		Long: "alert, balanced or strict; or custom with your own actions for suspicious (--warn) and critical\n" +
+			"(--critical) readers, comma-separated, from: freeze, block-program, kill, isolate, disable-adapters.\n" +
+			"Every reader is alerted on either way; an empty list means only that.",
+		Example: "  aba preset balanced\n  aba preset custom --warn block-program --critical freeze,block-program,kill",
+		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireAdmin(); err != nil {
 				return err
@@ -1167,16 +1184,42 @@ func presetCmd() *cobra.Command {
 				return nil
 			}
 			id := strings.ToLower(args[0])
-			if err := cfg.ApplyPreset(id); err != nil {
-				return exitf("use `aba preset alert`, `balanced` or `strict`")
+			custom := cmd.Flags().Changed("warn") || cmd.Flags().Changed("critical")
+			if id == "custom" {
+				if !custom {
+					return exitf("say what happens: `aba preset custom --warn <actions> --critical <actions>`")
+				}
+				warn, err := parseActions(warnActs)
+				if err != nil {
+					return exitf("--warn: %v", err)
+				}
+				crit, err := parseActions(critActs)
+				if err != nil {
+					return exitf("--critical: %v", err)
+				}
+				cfg.Preset = "custom"
+				cfg.Responses = map[config.Tier][]config.Action{}
+				if len(warn) > 0 {
+					cfg.Responses[config.TierWarn] = warn
+				}
+				if len(crit) > 0 {
+					cfg.Responses[config.TierCritical] = crit
+				}
+			} else if custom {
+				return exitf("--warn and --critical go with `aba preset custom`")
+			} else if err := cfg.ApplyPreset(id); err != nil {
+				return exitf("use `aba preset alert`, `balanced`, `strict` or `custom`")
 			}
 			if err := config.SaveConfig(cfg); err != nil {
 				return err
 			}
-			fmt.Println(ui.Good.Render(ui.IconOK) + " Protection level: " + cfg.PresetName())
+			fmt.Println(ui.Good.Render(ui.IconOK) + " Protection level: " + cfg.PresetName() + ui.Dim.Render(" ("+responseLine(cfg)+")"))
 			return install.Reload()
 		},
 	}
+	c.Flags().StringVar(&warnActs, "warn", "", "custom: actions for suspicious readers, comma-separated")
+	c.Flags().StringVar(&critActs, "critical", "", "custom: actions for critical readers, comma-separated")
+	return c
 }
 
 func instantCmd() *cobra.Command {
@@ -1317,6 +1360,7 @@ func clipboardKey(address string) error {
 		clipbait.Ethereum:      "an Ethereum wallet (MetaMask and the like): import it as a private key",
 		clipbait.Tron:          "a Tron wallet (TronLink and the like): import it as a private key",
 	}[c]
+	setDetails(map[string]any{"address": address, "coin": string(c), "key": k.PrivateText(c, i), "how": "Use it in " + how + ".", "putOut": at})
 	fmt.Println()
 	fmt.Println(" " + ui.Plain.Render("Bait address ") + ui.Bold.Render(address) + ui.Dim.Render(" ("+string(c)+", put out "+at.Local().Format("2 Jan 2006 15:04")+")"))
 	fmt.Println(" " + ui.Plain.Render("Private key  ") + ui.Code.Render(k.PrivateText(c, i)))

@@ -817,6 +817,15 @@ type Result struct {
 	// Details are the action's own (see CONTRACT.md): the bait's contents
 	// for bait-show, the version for update-check, the alert for test.
 	Details any `json:"details,omitempty"`
+	// Private is what only the app's own window may show, never the page
+	// (a bait wallet's private key, the ntfy topic): see PARITY.md.
+	Private *Private `json:"-"`
+}
+
+// Private is a secret the app shows in a native window of its own.
+type Private struct {
+	Title string
+	Text  string
 }
 
 // Event is a progress line of a long action (test, update).

@@ -88,7 +88,7 @@ func newRoot() *cobra.Command {
 	}
 	add("main", statusCmd(), alertsCmd(), testCmd(), doctorCmd(), learnCmd())
 	add("respond", trustCmd(), killCmd(), resumeCmd(), releaseCmd(), reportCmd(), reportsCmd(), autopsyCmd(), exportIOCCmd())
-	add("setup", installCmd(), configureCmd(), updateCmd(), baitCmd(), ignoreCmd(), presetCmd(), instantCmd(), recorderCmd(), clipboardCmd(), minersCmd(), phoneCmd(), uninstallCmd())
+	add("setup", installCmd(), configureCmd(), updateCmd(), baitCmd(), ignoreCmd(), presetCmd(), instantCmd(), recorderCmd(), clipboardCmd(), minersCmd(), phoneCmd(), canaryCmd(), recentCmd(), uninstallCmd())
 	root.AddCommand(serviceCmd(), notifyCmd(), testReaderCmd())
 	root.AddCommand(clipGuardCmds()...)
 	root.AddCommand(minerCmds()...)

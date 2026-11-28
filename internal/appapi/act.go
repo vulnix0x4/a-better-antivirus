@@ -11,14 +11,19 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 )
 
 // The actions the page may ask for. Each runs the installed CLI (aba.exe)
 // as a child of the (elevated) app, with --json --yes: what freezes, kills
 // and cuts off stays in the CLI, and the app only reads its one-line result.
 // Nothing the page sends reaches a command line unless it is one of a few
-// fixed words, or an ID that matches a strict pattern and names an alert or
-// a bait that exists.
+// fixed words, an ID that matches a strict pattern and names something that
+// exists, or (for the settings of PARITY.md) a path, pattern or address that
+// passed the checks in check.go; always after "--" or as a flag's own value
+// ("--signer=…"), never where it could be taken for a flag. Secrets go to
+// the CLI on its standard input, never on its command line.
 
 // Kinds of action.
 const (
@@ -37,6 +42,32 @@ const (
 	ActUpdateCheck = "update-check"
 	ActUpdate      = "update"
 	ActPhoneTest   = "phone-test"
+
+	// The rest of the CLI (PARITY.md).
+	ActAlertJSON     = "alert-json"
+	ActAutopsyNow    = "autopsy-now"
+	ActExportIOC     = "export-ioc"
+	ActDoctor        = "doctor"
+	ActDoctorFix     = "doctor-fix"
+	ActLearnDays     = "learn-days"
+	ActLearnTrust    = "learn-trust"
+	ActIgnoreAdd     = "ignore-add"
+	ActIgnoreRemove  = "ignore-remove"
+	ActBaitAdd       = "bait-add"
+	ActBaitAddFile   = "bait-add-file"
+	ActBaitRemove    = "bait-remove"
+	ActBaitRename    = "bait-rename"
+	ActResponses     = "responses"
+	ActRecent        = "recent"
+	ActPhoneSet      = "phone-set"
+	ActPhoneOff      = "phone-off"
+	ActPhoneTier     = "phone-tier"
+	ActPhoneReveal   = "phone-reveal"
+	ActCanaryOn      = "canary-on"
+	ActClipboardTest = "clipboard-test"
+	ActClipboardKey  = "clipboard-key"
+	ActMinersTest    = "miners-test"
+	ActUninstall     = "uninstall"
 )
 
 var (
@@ -54,14 +85,30 @@ func ValidAlertID(id string) bool { return alertIDRe.MatchString(id) }
 // ValidBaitID reports whether id looks like a bait ID.
 func ValidBaitID(id string) bool { return baitIDRe.MatchString(id) }
 
-// Exists tells Command whether an alert or bait is on disk.
+// Exists tells Command whether an alert, a bait, a catalog bait or an
+// ignore rule is there.
 type Exists struct {
 	Alert func(id string) bool
 	Bait  func(id string) bool
+	// Catalog: id is in the bait catalog. Rule: an ignore rule has that ID.
+	Catalog func(id string) bool
+	Rule    func(id string) bool
+}
+
+// Invocation is how the CLI is run for an action.
+type Invocation struct {
+	Args  []string
+	Stdin []byte // nil: nothing
 }
 
 // Command is the CLI's arguments for an action, or why the action is refused.
 func Command(kind, id, arg string, ex Exists) ([]string, error) {
+	inv, err := Prepare(kind, id, arg, ex)
+	return inv.Args, err
+}
+
+// Prepare is how the CLI is run for an action, or why the action is refused.
+func Prepare(kind, id, arg string, ex Exists) (Invocation, error) {
 	alert := func() error {
 		if !ValidAlertID(id) {
 			return fmt.Errorf("not an alert: %q", id)
@@ -84,7 +131,11 @@ func Command(kind, id, arg string, ex Exists) ([]string, error) {
 		return nil
 	}
 	var args []string
+	var stdin []byte
 	var err error
+	if len(arg) > maxArg || len(id) > maxArg {
+		return Invocation{}, fmt.Errorf("%s: too long", kind)
+	}
 	switch kind {
 	case ActKill, ActResume, ActTrust:
 		if err = alert(); err == nil && arg != "" {
@@ -142,20 +193,20 @@ func Command(kind, id, arg string, ex Exists) ([]string, error) {
 		err = none()
 		args = []string{"phone", "test"}
 	default:
-		return nil, fmt.Errorf("unknown action %q", kind)
+		args, stdin, err = prepareMore(kind, id, arg, ex)
 	}
 	if err != nil {
-		return nil, err
+		return Invocation{}, err
 	}
 	// The flags go before "--": everything after it is an ID, never a flag.
 	for i, a := range args {
 		if a == "--" {
 			out := append([]string{}, args[:i]...)
 			out = append(out, "--json", "--yes")
-			return append(out, args[i:]...), nil
+			return Invocation{Args: append(out, args[i:]...), Stdin: stdin}, nil
 		}
 	}
-	return append(args, "--json", "--yes"), nil
+	return Invocation{Args: append(args, "--json", "--yes"), Stdin: stdin}, nil
 }
 
 // timeout is how long an action may take.
@@ -165,8 +216,10 @@ func timeout(kind string) time.Duration {
 		return 4 * time.Minute // it waits up to 90 s for the evidence, then saves it itself
 	case ActUpdate:
 		return 16 * time.Minute
-	case ActTest:
+	case ActTest, ActClipboardTest, ActMinersTest:
 		return 90 * time.Second
+	case ActDoctorFix, ActAutopsyNow, ActUninstall, ActBaitRename:
+		return 5 * time.Minute
 	}
 	return 2 * time.Minute
 }
@@ -174,13 +227,16 @@ func timeout(kind string) time.Duration {
 // Runner runs the CLI with args, calls line for every line it prints, and
 // returns once it ends. (Windows: without a console window; see
 // run_windows.go.)
-type Runner func(ctx context.Context, exe string, args []string, line func(string)) error
+// stdin, when not nil, is written to its standard input (then closed).
+type Runner func(ctx context.Context, exe string, args []string, stdin []byte, line func(string)) error
 
 // Actor runs actions, one at a time.
 type Actor struct {
 	CLI    string // the installed aba.exe
 	Exists Exists
 	Run    Runner
+	// Secrets reads the secrets file (for phone-reveal, which needs no CLI).
+	Secrets func() (*config.Secrets, error)
 
 	run sync.Mutex // held while an action runs
 
@@ -206,10 +262,14 @@ func (a *Actor) Progress() Progress {
 
 // Act runs one action and returns its result.
 func (a *Actor) Act(kind, id, arg string) Result {
-	args, err := Command(kind, id, arg, a.Exists)
+	if kind == ActPhoneReveal {
+		return a.reveal(id, arg)
+	}
+	inv, err := Prepare(kind, id, arg, a.Exists)
 	if err != nil {
 		return Result{OK: false, Message: err.Error()}
 	}
+	args := inv.Args
 	if !a.run.TryLock() {
 		return Result{OK: false, Message: "ABA is still busy with the last thing you asked. Try again in a moment."}
 	}
@@ -227,7 +287,7 @@ func (a *Actor) Act(kind, id, arg string) Result {
 	defer cancel()
 	var last []byte
 	var other []string
-	runErr := a.Run(ctx, a.CLI, args, func(l string) {
+	runErr := a.Run(ctx, a.CLI, args, inv.Stdin, func(l string) {
 		l = strings.TrimSpace(l)
 		if l == "" {
 			return
@@ -261,6 +321,9 @@ func (a *Actor) Act(kind, id, arg string) Result {
 		}
 		return Result{OK: false, Message: msg}
 	}
+	if kind == ActClipboardKey {
+		res = keepKey(res)
+	}
 	a.mu.Lock()
 	a.events = append(a.events, Event{Event: "done", Text: firstLine(res.Message), Time: time.Now()})
 	a.mu.Unlock()
@@ -285,7 +348,7 @@ func ParseResult(line []byte) (Result, error) {
 	}
 	res := Result{OK: *raw.OK, Message: raw.Message}
 	if len(raw.Details) > 0 && string(raw.Details) != "null" {
-		res.Details = raw.Details
+		res.Details = json.RawMessage(raw.Details)
 	}
 	return res, nil
 }
