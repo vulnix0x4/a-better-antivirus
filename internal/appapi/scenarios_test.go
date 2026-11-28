@@ -251,8 +251,8 @@ func miner() *alerts.Alert {
 		Baits:   []alerts.BaitHit{{ID: "miner", Name: "the miner trap", Access: "mine", Time: t, Path: "gulf.moneroocean.stream:10128"}},
 		Process: &alerts.Process{PID: 4411, Image: exe, CommandLine: exe + ` --donate-level 0 -o gulf.moneroocean.stream:10128 --cpu-max-threads-hint 50`,
 			Signature: unsigned(), SHA256: "3be1d7a0c2f94e8a6b51d03f7c9e2a48b6d1f0e39c75a28d4e6b9f1c0a3d5e72",
-			Parents:   []procinfo.Parent{{PID: 1880, Image: `C:\Windows\System32\svchost.exe`}}},
-		Mine: &alerts.Mine{Pool: "gulf.moneroocean.stream:10128", Wallet: "44AFFq5kSiGBoZ4NMDwYtN18obc8AemS33DBLWs3H7otXft3XjrpDtQGv7SqSsaBYBb98uNbr2VBBEt7f2wfn3RVGQBEP3A", Agent: "XMRig/6.21.0 (Windows NT 10.0; Win64; x64)"},
+			Parents: []procinfo.Parent{{PID: 1880, Image: `C:\Windows\System32\svchost.exe`}}},
+		Mine:    &alerts.Mine{Pool: "gulf.moneroocean.stream:10128", Wallet: "44AFFq5kSiGBoZ4NMDwYtN18obc8AemS33DBLWs3H7otXft3XjrpDtQGv7SqSsaBYBb98uNbr2VBBEt7f2wfn3RVGQBEP3A", Agent: "XMRig/6.21.0 (Windows NT 10.0; Win64; x64)"},
 		Verdict: classify.Verdict{Tier: config.TierCritical, Reasons: []string{"it tried to mine cryptocurrency on this PC"}},
 	}
 	a.Actions = []alerts.ActionResult{

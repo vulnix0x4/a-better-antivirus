@@ -18,6 +18,9 @@ const pauseFlag = "--elevated-pause"
 
 var errRelaunched = errors.New("continued in the administrator window")
 
+// errNeedsAdmin: with --yes nothing asks for administrator rights.
+var errNeedsAdmin = errors.New("this needs administrator rights: run it as administrator")
+
 // noPause: this command's window closes at the end, even where it would
 // otherwise wait for Enter (started from the Start menu), unless it failed.
 var noPause bool

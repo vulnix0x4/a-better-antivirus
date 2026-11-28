@@ -4,6 +4,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/charmbracelet/huh"
@@ -20,12 +21,23 @@ var Version = "dev"
 // Execute runs the CLI and returns the process exit code.
 func Execute() int {
 	service.Version = Version
+	scanModes(os.Args[1:])
 	root := newRoot()
+	var captured func() string
+	if jsonMode {
+		captured = captureStdout()
+	}
 	err := root.Execute()
 	code := 0
 	if err != nil && !errors.Is(err, errRelaunched) {
-		ui.Fail(err)
 		code = 1
+	}
+	if jsonMode {
+		printJSON(err, captured())
+		return code
+	}
+	if code != 0 {
+		ui.Fail(err)
 	}
 	if shouldPause() && !(noPause && code == 0) {
 		pause()
@@ -49,6 +61,10 @@ func newRoot() *cobra.Command {
 			return ui.RunDashboard(false)
 		},
 	}
+	root.PersistentFlags().BoolVar(&jsonMode, "json", jsonMode, "print one line of JSON {ok, message, details} instead of text (for programs)")
+	root.PersistentFlags().BoolVar(&yesMode, "yes", yesMode, "never ask: take the default answer, and fail instead of asking for administrator rights")
+	root.PersistentFlags().MarkHidden("json")
+	root.PersistentFlags().MarkHidden("yes")
 	root.PersistentFlags().Bool(pauseFlag[2:], false, "")
 	root.PersistentFlags().MarkHidden(pauseFlag[2:])
 	cobra.EnableCommandSorting = false // keep the order below: most useful first
@@ -72,7 +88,7 @@ func newRoot() *cobra.Command {
 	}
 	add("main", statusCmd(), alertsCmd(), testCmd(), doctorCmd(), learnCmd())
 	add("respond", trustCmd(), killCmd(), resumeCmd(), releaseCmd(), reportCmd(), reportsCmd(), autopsyCmd(), exportIOCCmd())
-	add("setup", installCmd(), configureCmd(), updateCmd(), baitCmd(), ignoreCmd(), instantCmd(), recorderCmd(), clipboardCmd(), minersCmd(), phoneCmd(), uninstallCmd())
+	add("setup", installCmd(), configureCmd(), updateCmd(), baitCmd(), ignoreCmd(), presetCmd(), instantCmd(), recorderCmd(), clipboardCmd(), minersCmd(), phoneCmd(), uninstallCmd())
 	root.AddCommand(serviceCmd(), notifyCmd(), testReaderCmd())
 	root.AddCommand(clipGuardCmds()...)
 	root.AddCommand(minerCmds()...)
