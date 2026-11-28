@@ -75,7 +75,7 @@ type pageView struct {
 
 // Page is the full report of one alert, as a complete HTML page.
 func Page(a *alerts.Alert) []byte {
-	v := pageView{Title: "ABA report: " + a.ExeName(), Where: Where, Generated: now().Format("Mon Jan 2 2006, 15:04")}
+	v := pageView{Title: "ABA report: " + a.ExeName(), Where: Where(), Generated: now().Format("Mon Jan 2 2006, 15:04")}
 	v.Reports = []reportView{view(a)}
 	return render(v)
 }
@@ -84,7 +84,7 @@ func Page(a *alerts.Alert) []byte {
 // shown when it's picked from the list (no script: the page's own links).
 // Alerts without an autopsy aren't reports and are left out.
 func Index(list []*alerts.Alert) []byte {
-	v := pageView{Title: "ABA reports", Index: true, Where: Where, Generated: now().Format("Mon Jan 2 2006, 15:04")}
+	v := pageView{Title: "ABA reports", Index: true, Where: Where(), Generated: now().Format("Mon Jan 2 2006, 15:04")}
 	for _, a := range list {
 		if a.Autopsy != nil {
 			v.Reports = append(v.Reports, view(a))

@@ -90,8 +90,9 @@ func removeAppSteps() []Step {
 	}
 }
 
-// RegisterApp lists ABA under Installed apps and adds the Start menu shortcut
-// (which opens the dashboard). Safe to repeat.
+// RegisterApp lists ABA under Installed apps and adds the Start menu
+// shortcuts: "ABA" (the app) when the app is installed, otherwise "A Better
+// Antivirus" (the terminal dashboard) and "ABA reports". Safe to repeat.
 func RegisterApp(version string) error {
 	e, err := systemAppEntry()
 	if err != nil {
@@ -160,20 +161,39 @@ func (e appEntry) register(version string) error {
 	if err := os.MkdirAll(e.menuDir, 0o755); err != nil {
 		return err
 	}
+	if fileExists(e.app) {
+		// With the app, the Start menu has one ABA entry: the app, which
+		// shows the reports too.
+		if err := e.addAppShortcut(); err != nil {
+			return err
+		}
+		return e.removeTerminalShortcuts()
+	}
+	// Left out (or never there): the terminal dashboard and the reports in
+	// the browser, and no entry that opens nothing.
 	if err := createShortcut(e.shortcut(), e.exe, "", e.dir, "See whether you're protected and what touched your baits"); err != nil {
 		return err
 	}
 	if err := e.addReportsShortcut(); err != nil {
 		return err
 	}
-	if fileExists(e.app) {
-		return e.addAppShortcut()
-	}
-	// Left out (or never there): no entry that opens nothing.
 	if err := os.Remove(e.appShortcut()); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	return nil
+}
+
+// removeTerminalShortcuts takes away the two entries from before the app
+// ("A Better Antivirus", the terminal dashboard, and "ABA reports"): the
+// app's "ABA" does what both did.
+func (e appEntry) removeTerminalShortcuts() error {
+	var errs []error
+	for _, lnk := range []string{e.shortcut(), e.reportsShortcut()} {
+		if err := os.Remove(lnk); err != nil && !errors.Is(err, os.ErrNotExist) {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func (e appEntry) refresh(version string) error {
@@ -184,14 +204,14 @@ func (e appEntry) refresh(version string) error {
 		return err
 	}
 	// An install from before there were reports, or the app, gets their
-	// shortcut now, once.
+	// shortcut now, once (the reports one only without the app).
 	k, err := registry.OpenKey(e.root, e.keyPath, registry.QUERY_VALUE)
 	if err != nil {
 		return err
 	}
 	_, _, err = k.GetIntegerValue(reportsMade)
 	k.Close()
-	if err != nil {
+	if err != nil && !fileExists(e.app) {
 		if err := os.MkdirAll(e.menuDir, 0o755); err != nil {
 			return err
 		}

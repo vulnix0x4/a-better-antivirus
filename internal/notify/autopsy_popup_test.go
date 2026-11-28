@@ -31,7 +31,7 @@ func TestAutopsyPopupOpensTheFullReport(t *testing.T) {
 		if headline != a.Autopsy.Headline || !strings.Contains(title, "Umbral.exe") || icon != mbIconError {
 			t.Errorf("popup: title %q, headline %q, icon %#x", title, headline, icon)
 		}
-		for _, want := range []string{"000005.ldb", "1. Change your Discord password.", "The full report shows everything", report.Where} {
+		for _, want := range []string{"000005.ldb", "1. Change your Discord password.", "The full report shows everything", report.Where()} {
 			if !strings.Contains(text, want) {
 				t.Errorf("popup text lacks %q:\n%s", want, text)
 			}

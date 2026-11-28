@@ -49,9 +49,10 @@ func (e appEntry) addAppShortcut() error {
 	return k.SetDWordValue(appMade, 1)
 }
 
-// appShortcutOnce makes the app's shortcut if ABA never made it before. Not
-// listed in Installed apps yet (a first install, mid-way): nothing to do, the
-// listing makes it.
+// appShortcutOnce makes the app's shortcut if ABA never made it before, and
+// takes away the two entries from before the app (an install that had them
+// gets the one "ABA" instead). Not listed in Installed apps yet (a first
+// install, mid-way): nothing to do, the listing makes it.
 func (e appEntry) appShortcutOnce() error {
 	if !fileExists(e.app) {
 		return nil
@@ -62,13 +63,15 @@ func (e appEntry) appShortcutOnce() error {
 	}
 	_, _, err = k.GetIntegerValue(appMade)
 	k.Close()
-	if err == nil {
-		return nil
+	if err != nil {
+		if err := os.MkdirAll(e.menuDir, 0o755); err != nil {
+			return err
+		}
+		if err := e.addAppShortcut(); err != nil {
+			return err
+		}
 	}
-	if err := os.MkdirAll(e.menuDir, 0o755); err != nil {
-		return err
-	}
-	return e.addAppShortcut()
+	return e.removeTerminalShortcuts()
 }
 
 // AppWanted reports whether the app belongs on this PC: it wasn't left out

@@ -36,9 +36,9 @@ func TestRegisterAppAddsTheAppShortcut(t *testing.T) {
 	if args, _ := shortcutArgs(lnk); args != "" {
 		t.Errorf("the ABA shortcut passes %q, want nothing", args)
 	}
-	// The other two are still aba.exe's.
-	if target, _ := shortcutTarget(e.shortcut()); !paths.Same(paths.Long(target), paths.Long(e.exe)) {
-		t.Errorf("the A Better Antivirus shortcut opens %s", target)
+	// It is the only one: no terminal dashboard, no reports in the browser.
+	if exists(e.shortcut()) || exists(e.reportsShortcut()) {
+		t.Error("with the app, the Start menu still has the terminal shortcuts")
 	}
 
 	if err := e.unregister(); err != nil {
@@ -62,6 +62,13 @@ func TestRegisterWithoutTheAppHasNoAppShortcut(t *testing.T) {
 	}
 	if exists(e.appShortcut()) {
 		t.Error("an ABA shortcut with no app behind it")
+	}
+	// ...and the terminal dashboard and the reports come back instead.
+	if target, _ := shortcutTarget(e.shortcut()); !paths.Same(paths.Long(target), paths.Long(e.exe)) {
+		t.Errorf("without the app, the A Better Antivirus shortcut opens %q", target)
+	}
+	if !exists(e.reportsShortcut()) {
+		t.Error("without the app, no ABA reports shortcut")
 	}
 }
 
@@ -88,6 +95,9 @@ func TestRefreshAddsTheAppShortcutOnce(t *testing.T) {
 	if !exists(e.appShortcut()) {
 		t.Fatal("the update didn't add the ABA shortcut")
 	}
+	if exists(e.shortcut()) || exists(e.reportsShortcut()) {
+		t.Error("the update that brought the app left the terminal shortcuts")
+	}
 	// Deleted by the owner: the next update (or the app arriving again) leaves it deleted.
 	os.Remove(e.appShortcut())
 	if err := e.refresh("v0.11.1"); err != nil {
@@ -98,6 +108,41 @@ func TestRefreshAddsTheAppShortcutOnce(t *testing.T) {
 	}
 	if exists(e.appShortcut()) {
 		t.Error("the ABA shortcut came back after the owner deleted it")
+	}
+}
+
+func TestAppArrivingLaterTidiesTheStartMenu(t *testing.T) {
+	// Updated by a version from before the app: the update listed ABA with
+	// the two terminal shortcuts, then the service fetched the app
+	// (update.KeepApp -> InstallApp -> appShortcutOnce).
+	e := testEntry(t)
+	if err := e.register("v0.10.2"); err != nil {
+		t.Fatal(err)
+	}
+	if !exists(e.shortcut()) || !exists(e.reportsShortcut()) {
+		t.Fatal("no terminal shortcuts without the app")
+	}
+	e.app = filepath.Join(e.dir, "aba-app.exe")
+	os.WriteFile(e.app, []byte("app"), 0o644)
+	if err := e.appShortcutOnce(); err != nil {
+		t.Fatal(err)
+	}
+	if !exists(e.appShortcut()) {
+		t.Fatal("no ABA shortcut once the app came")
+	}
+	if exists(e.shortcut()) || exists(e.reportsShortcut()) {
+		t.Error("the terminal shortcuts stayed next to the app's")
+	}
+	// A later update, a repair: still just the one.
+	if err := e.refresh("v0.11.0"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.register("v0.11.0"); err != nil {
+		t.Fatal(err)
+	}
+	if !exists(e.appShortcut()) || exists(e.shortcut()) || exists(e.reportsShortcut()) {
+		t.Errorf("after an update and a repair: ABA %v, A Better Antivirus %v, ABA reports %v",
+			exists(e.appShortcut()), exists(e.shortcut()), exists(e.reportsShortcut()))
 	}
 }
 

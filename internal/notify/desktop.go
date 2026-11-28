@@ -57,7 +57,7 @@ func ShowAutopsy(a *alerts.Alert) {
 		return
 	}
 	if err := showReport(a); err != nil {
-		messageBox("ABA: the full report didn't open", "ABA couldn't open the report in your web browser ("+err.Error()+").\n\nTo see it: "+report.Where+".", mbOK|mbIconWarning)
+		messageBox("ABA: the full report didn't open", "ABA couldn't open the report in your web browser ("+err.Error()+").\n\nTo see it: "+report.Where()+".", mbOK|mbIconWarning)
 	}
 }
 
@@ -77,7 +77,7 @@ func autopsyText(a *alerts.Alert) string {
 			fmt.Fprintf(&b, "\n%d. %s", i+1, st)
 		}
 	}
-	b.WriteString("\n\nThe full report shows everything ABA found: what it opened, where it sent it, what it left behind and how to report the thief. To see it later: " + report.Where + ".")
+	b.WriteString("\n\nThe full report shows everything ABA found: what it opened, where it sent it, what it left behind and how to report the thief. To see it later: " + report.Where() + ".")
 	return strings.TrimLeft(b.String(), "\n")
 }
 

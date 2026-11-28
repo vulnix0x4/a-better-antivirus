@@ -63,7 +63,7 @@ func alertsCmd() *cobra.Command {
 			}
 			fmt.Println(ui.AlertTable(list, ui.Width()))
 			fmt.Println("\n" + ui.Hint("Details:", "aba alerts show <id>") + ui.Dim.Render("  (the last part of the ID is enough)"))
-			fmt.Println(ui.Hint("Full reports, in your web browser:", "aba reports") + ui.Dim.Render("  (also: "+report.Where+")"))
+			fmt.Println(ui.Hint("Full reports, in your web browser:", "aba reports") + ui.Dim.Render("  (also: "+report.Where()+")"))
 			return nil
 		},
 	}

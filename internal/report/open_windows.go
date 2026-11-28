@@ -7,12 +7,18 @@ import (
 
 	"golang.org/x/sys/windows"
 
+	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
 	"github.com/vulnix0x4/a-better-antivirus/internal/winsec"
 )
 
 // Where is how to get back to the reports, said at the bottom of the page
 // and in the popup.
-const Where = "Start menu > ABA reports"
+func Where() string {
+	if _, err := os.Stat(paths.InstalledApp()); err == nil {
+		return "Start menu > ABA" // the app, which shows every report
+	}
+	return "Start menu > ABA reports"
+}
 
 // Open opens url in the default browser, as the person at the screen.
 //

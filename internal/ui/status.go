@@ -242,12 +242,12 @@ func RenderStatus(d StatusData) string {
 			b.WriteString(Dim.Render("  "+plural(d.AlertCount, "alert", "alerts")+" in the history, all answered.  ") + Hint("See them:", "aba alerts") + "\n")
 		}
 		b.WriteString(Fainter.Render("  Alerts and baits are only shown to administrators (the commands ask for it).") + "\n")
-		b.WriteString("  " + Hint("Full reports, in your web browser:", "aba reports") + Fainter.Render("  ("+report.Where+")") + "\n")
+		b.WriteString("  " + Hint("Full reports, in your web browser:", "aba reports") + Fainter.Render("  ("+report.Where()+")") + "\n")
 	} else if len(d.Alerts) == 0 {
 		b.WriteString(Dim.Render("  Nothing has touched your baits yet. ") + Hint("See what a catch looks like:", "aba test") + "\n")
 	} else {
 		b.WriteString(AlertTable(d.Alerts, w) + "\n")
-		b.WriteString("  " + Hint("Full reports, in your web browser:", "aba reports") + Fainter.Render("  ("+report.Where+")") + "\n")
+		b.WriteString("  " + Hint("Full reports, in your web browser:", "aba reports") + Fainter.Render("  ("+report.Where()+")") + "\n")
 	}
 	return b.String()
 }

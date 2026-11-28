@@ -40,6 +40,7 @@ $appKey = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\FileAccessM
 $shortcut = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\A Better Antivirus.lnk'
 $appExe = Join-Path $installDir 'aba-app.exe'
 $appShortcut = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\ABA.lnk'
+$reportsShortcut = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\ABA reports.lnk'
 # The app's WebView2 profile (internal/appsec WebViewDir): the person's, not admin-only.
 $webview = Join-Path $env:LOCALAPPDATA 'ABA\webview'
 $logDir = Join-Path ([IO.Path]::GetTempPath()) 'aba-setup-test'
@@ -167,9 +168,9 @@ Check ($app.UninstallString -eq "`"$aba`" uninstall --elevated-pause") "Uninstal
 Check ($app.QuietUninstallString -eq "`"$aba`" uninstall --yes") "the quiet form is: $($app.QuietUninstallString)"
 $entries = @(AppEntries)
 Check ($entries.Count -eq 1) "it is the only entry: the installer registered no uninstaller of its own ($($entries.PSChildName -join ', '))"
-Check (Test-Path $shortcut) 'the Start menu has an A Better Antivirus shortcut'
-$target = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut).TargetPath
-Check ($target -eq $aba) "it opens $target"
+# With the app, its "ABA" is the one entry (no terminal dashboard, no reports in the browser).
+Check (-not (Test-Path $shortcut)) 'the Start menu has no A Better Antivirus (terminal) shortcut'
+Check (-not (Test-Path $reportsShortcut)) 'the Start menu has no ABA reports shortcut'
 
 Step 'The ABA app'
 Check (Test-Path $appExe) "aba-app.exe is in $installDir"
@@ -201,6 +202,7 @@ Check ($cfg.minerTrap -eq $true -and -not $cfg.clipboardBait) 'the traps are as 
 Check ((BaitCount) -eq $baits) "still $baits baits"
 Check ((Get-Service FileAccessMonitor).Status -eq 'Running') 'the service is running again'
 Check (@(AppEntries).Count -eq 1) 'still one entry in Installed apps'
+Check ((Test-Path $appShortcut) -and -not (Test-Path $shortcut) -and -not (Test-Path $reportsShortcut)) 'the Start menu still has just ABA'
 
 # ---------------------------------------------------------------- no downgrade
 Step 'An installer with an older version is refused'
@@ -224,6 +226,7 @@ Check (-not (Get-Service FileAccessMonitor -ErrorAction SilentlyContinue)) 'the 
 Check (-not @(AppEntries).Count) 'the Installed apps entry is gone'
 Check (-not (Test-Path $shortcut)) 'the Start menu shortcut is gone'
 Check (-not (Test-Path $appShortcut)) 'the ABA shortcut is gone'
+Check (-not (Test-Path $reportsShortcut)) 'the ABA reports shortcut is gone'
 Check (-not (Test-Path $webview)) 'the app''s WebView2 profile is gone'
 Check (-not ((MachinePath) -contains $installDir)) 'the program folder is off PATH'
 Check (-not (Test-Path "$data\config.json")) 'the settings are gone'
