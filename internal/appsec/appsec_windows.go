@@ -192,13 +192,12 @@ func readACEs(acl *windows.ACL) ([]ACE, error) {
 // ProgramData (where everyone may create folders).
 const adminOnlySDDL = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"
 
-// PrepareWebViewDir returns the elevated app's WebView2 profile folder,
-// paths.AppWebViewDir() in ABA's data folder, creating what's missing
-// admin-only from the start, and refusing folders someone else could have
-// made or could change (a person can create folders in ProgramData, and
-// would love to hand an administrator's browser a profile of their own).
-func PrepareWebViewDir() (string, error) {
-	for _, d := range []string{paths.DataDir(), paths.AppDir(), paths.AppWebViewDir()} {
+// PrepareAppDir creates the app's folder in ABA's data folder
+// (paths.AppDir) admin-only from the start if it's missing, and refuses one
+// someone else could have made or could change (a person can create
+// folders in ProgramData).
+func PrepareAppDir() (string, error) {
+	for _, d := range []string{paths.DataDir(), paths.AppDir()} {
 		if err := mkdirAdminOnly(d); err != nil {
 			return "", err
 		}
@@ -206,7 +205,7 @@ func PrepareWebViewDir() (string, error) {
 			return "", err
 		}
 	}
-	return paths.AppWebViewDir(), nil
+	return paths.AppDir(), nil
 }
 
 func mkdirAdminOnly(dir string) error {
@@ -225,16 +224,21 @@ func mkdirAdminOnly(dir string) error {
 	return nil
 }
 
-// LockedWebViewDir is the WebView2 profile for the locked view (the app
-// without administrator rights, which can't write to ABA's data folder):
-// the person's own, which is fine, as that view shows nothing that isn't
-// public anyway.
-func LockedWebViewDir() string {
+// WebViewDir is the app's WebView2 profile folder, in the person's own
+// LocalAppData, elevated or not. WebView2 starts its browser and renderer
+// processes de-elevated, with the person's ordinary (medium integrity)
+// token, even when the app hosting it is elevated (by design, per
+// Microsoft; seen with runtime 158): those processes can't write to an
+// admin-only folder, and WebView2 then stops at a "can't read and write to
+// its data directory" box. The profile is therefore as much the person's
+// (and their programs') as the browser processes are; nothing in it is
+// trusted by the elevated app.
+func WebViewDir() string {
 	base, err := os.UserCacheDir() // %LocalAppData%
 	if err != nil || base == "" {
 		base = os.TempDir()
 	}
-	return filepath.Join(base, "ABA", "webview-locked")
+	return filepath.Join(base, "ABA", "webview")
 }
 
 // IsElevated reports whether this process has an elevated (full)

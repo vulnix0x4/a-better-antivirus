@@ -43,12 +43,11 @@ func TestFile() string    { return filepath.Join(DataDir(), "pending-test.json")
 // the guard caught nothing (clipbait.TestResult).
 func ClipboardTestFile() string { return filepath.Join(DataDir(), "clipboard-test.json") }
 
-// AppDir is the desktop app's own corner of the (admin-only) data folder,
-// and AppWebViewDir its WebView2 profile: kept here, not in the person's
-// AppData, so nothing running as them can plant files the elevated app's
-// browser engine would load.
-func AppDir() string        { return filepath.Join(DataDir(), "app") }
-func AppWebViewDir() string { return filepath.Join(AppDir(), "webview") }
+// AppDir is the desktop app's own corner of the (admin-only) data folder.
+// (Not its WebView2 profile: WebView2 runs its browser processes with the
+// person's ordinary rights even for an elevated app, so the profile has to
+// be somewhere they can write; see appsec.WebViewDir.)
+func AppDir() string { return filepath.Join(DataDir(), "app") }
 
 // PublicDir is the one corner of the data folder anyone may read.
 func PublicDir() string        { return filepath.Join(DataDir(), "public") }

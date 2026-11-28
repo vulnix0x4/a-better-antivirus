@@ -138,9 +138,10 @@ func (a *App) run() int {
 		a.fatal(err)
 	}
 	if a.mode == "full" {
-		a.dataDir, err = appsec.PrepareWebViewDir()
-	} else {
-		a.dataDir = appsec.LockedWebViewDir()
+		_, err = appsec.PrepareAppDir()
+	}
+	if err == nil {
+		a.dataDir = appsec.WebViewDir()
 		err = os.MkdirAll(a.dataDir, 0o700)
 	}
 	trace("user data folder %q: %v", a.dataDir, err)
