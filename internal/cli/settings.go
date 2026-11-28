@@ -149,7 +149,7 @@ func phoneSet(in config.PhoneSetting, test bool) error {
 	if err := install.Reload(); err != nil {
 		fmt.Println(ui.Warn.Render("!") + " " + ui.Plain.Render("Saved, but the service didn't pick it up yet ("+err.Error()+")."))
 	}
-	if test && (changed || in.MinTier == "") {
+	if test && changed { // the same settings again: `aba phone test` sends one
 		if err := install.SendTest(p); err != nil {
 			details["testError"] = err.Error()
 			fmt.Println(ui.Warn.Render("!") + " " + ui.Plain.Render("Saved, but the test didn't get through: "+err.Error()))

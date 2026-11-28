@@ -277,7 +277,7 @@ string holding a JSON object (unknown fields are refused, 8 KB at most).
 | `bait-rename` | | | give every bait new file names | |
 | `responses` | | JSON `{"warn": [...], "critical": [...]}` | your own responses (preset becomes `custom`) | |
 | `recent` | | `on`/`off` | keep baits out of Recent files | |
-| `phone-set` | | JSON, below | set up phone alerts, then send a test | `{"tested": bool, "testError"?}` |
+| `phone-set` | | JSON, below | set up phone alerts, then send a test (when they changed; `tested` false and no `testError` when they didn't) | `{"tested": bool, "testError"?}` |
 | `phone-off` | | | no phone alerts | |
 | `phone-tier` | | `info`/`warn`/`critical` | which alerts reach the phone | |
 | `phone-reveal` | | | the app shows the ntfy topic in its own window | |
