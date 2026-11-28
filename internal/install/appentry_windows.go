@@ -44,6 +44,7 @@ type appEntry struct {
 	keyPath string
 	menuDir string // the Start menu's Programs folder
 	exe     string // the installed aba.exe
+	app     string // the installed desktop app (aba-app.exe)
 	dir     string // the program folder
 }
 
@@ -60,6 +61,7 @@ func systemAppEntry() (appEntry, error) {
 		keyPath: uninstallKeyPath,
 		menuDir: menu,
 		exe:     paths.InstalledCLI(),
+		app:     paths.InstalledApp(),
 		dir:     paths.InstallDir(),
 	}, nil
 }
@@ -67,15 +69,25 @@ func systemAppEntry() (appEntry, error) {
 // appSteps put ABA where people look for an installed program: Windows'
 // "Installed apps" list and the Start menu. removeAppSteps undo it on uninstall.
 func appSteps(version string) []Step {
-	return []Step{{Name: "Adding ABA to Installed apps and the Start menu", Soft: true, Run: func() (string, error) {
-		return "listed as \"" + AppName + "\"", RegisterApp(version)
-	}}}
+	self, _ := os.Executable()
+	return []Step{
+		// The desktop app first: the Start menu entry below is made for it.
+		{Name: "Installing the ABA app", Soft: true, Run: func() (string, error) { return installApp(self) }},
+		{Name: "Adding ABA to Installed apps and the Start menu", Soft: true, Run: func() (string, error) {
+			return "listed as \"" + AppName + "\"", RegisterApp(version)
+		}},
+	}
 }
 
 func removeAppSteps() []Step {
-	return []Step{{Name: "Removing ABA from Installed apps and the Start menu", Soft: true, Run: func() (string, error) {
-		return "", UnregisterApp()
-	}}}
+	return []Step{
+		{Name: "Removing ABA from Installed apps and the Start menu", Soft: true, Run: func() (string, error) {
+			return "", UnregisterApp()
+		}},
+		// The app's own files go with the program folder; what WebView2 kept
+		// for it is in each person's folder.
+		{Name: "Removing the ABA app's browser data", Soft: true, Run: removeAppData},
+	}
 }
 
 // RegisterApp lists ABA under Installed apps and adds the Start menu shortcut
@@ -151,7 +163,17 @@ func (e appEntry) register(version string) error {
 	if err := createShortcut(e.shortcut(), e.exe, "", e.dir, "See whether you're protected and what touched your baits"); err != nil {
 		return err
 	}
-	return e.addReportsShortcut()
+	if err := e.addReportsShortcut(); err != nil {
+		return err
+	}
+	if fileExists(e.app) {
+		return e.addAppShortcut()
+	}
+	// Left out (or never there): no entry that opens nothing.
+	if err := os.Remove(e.appShortcut()); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
 }
 
 func (e appEntry) refresh(version string) error {
@@ -161,20 +183,23 @@ func (e appEntry) refresh(version string) error {
 	if err := e.writeKey(version); err != nil {
 		return err
 	}
-	// An install from before there were reports gets their shortcut now, once.
+	// An install from before there were reports, or the app, gets their
+	// shortcut now, once.
 	k, err := registry.OpenKey(e.root, e.keyPath, registry.QUERY_VALUE)
 	if err != nil {
 		return err
 	}
 	_, _, err = k.GetIntegerValue(reportsMade)
 	k.Close()
-	if err == nil {
-		return nil
+	if err != nil {
+		if err := os.MkdirAll(e.menuDir, 0o755); err != nil {
+			return err
+		}
+		if err := e.addReportsShortcut(); err != nil {
+			return err
+		}
 	}
-	if err := os.MkdirAll(e.menuDir, 0o755); err != nil {
-		return err
-	}
-	return e.addReportsShortcut()
+	return e.appShortcutOnce()
 }
 
 // UninstallCommand is what Windows runs when you pick Uninstall in its list.
@@ -234,7 +259,7 @@ func (e appEntry) unregister() error {
 	if err := registry.DeleteKey(e.root, e.keyPath); err != nil && !errors.Is(err, registry.ErrNotExist) {
 		errs = append(errs, err)
 	}
-	for _, lnk := range []string{e.shortcut(), e.reportsShortcut()} {
+	for _, lnk := range []string{e.shortcut(), e.reportsShortcut(), e.appShortcut()} {
 		if err := os.Remove(lnk); err != nil && !errors.Is(err, os.ErrNotExist) {
 			errs = append(errs, err)
 		}
@@ -242,8 +267,9 @@ func (e appEntry) unregister() error {
 	return errors.Join(errs...)
 }
 
-// dirSizeKB adds up the files directly in dir (the program folder holds just
-// the two copies of ABA; downloaded updates in its subfolder don't count).
+// dirSizeKB adds up the files directly in dir (the program folder holds the
+// two copies of ABA and the app; downloaded updates in its subfolder don't
+// count).
 func dirSizeKB(dir string) uint32 {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

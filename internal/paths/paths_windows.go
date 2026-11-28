@@ -15,6 +15,13 @@ const (
 	CLIExe     = "aba.exe"    // what users type; on PATH
 	ServiceExe = "famsvc.exe" // identical copy the service runs from
 
+	// AppExe is the desktop app (cmd/aba-app), installed next to aba.exe.
+	AppExe = "aba-app.exe"
+	// AppOffName, in the program folder, says the app was left out on
+	// purpose (install.ps1 with ABA_NO_APP), so updates don't bring it back.
+	// Next to an aba.exe that runs `aba install`, it asks for that.
+	AppOffName = "aba-app.off"
+
 	// Windows compares file names ignoring case.
 	foldCase = true
 )
@@ -36,6 +43,12 @@ func DataDir() string {
 	}
 	return filepath.Join(pd, dataDirName)
 }
+
+// InstalledApp is the desktop app's place: Program Files, like aba.exe.
+func InstalledApp() string { return filepath.Join(InstallDir(), AppExe) }
+
+// AppOffFile marks an install that was asked to leave the app out.
+func AppOffFile() string { return filepath.Join(InstallDir(), AppOffName) }
 
 func programFiles() string {
 	if p, err := windows.KnownFolderPath(windows.FOLDERID_ProgramFiles, 0); err == nil && p != "" {
