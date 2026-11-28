@@ -11,11 +11,13 @@ builds:
     goarch: [amd64, arm64]
     flags: [-trimpath]
     ldflags: ["-s -w -X main.version={{.Tag}}"]
-    # ABA-Setup.exe, the click-through installer, carries both aba.exe files.
-    # Each build hands its finished binary to installer/build; the second one
-    # to arrive compiles the installer (Inno Setup) into dist/installer. So the
-    # installer holds the same bytes as the aba_<tag>_windows_<arch>.exe
-    # downloads, and it exists before the checksums are made and signed.
+    # ABA-Setup.exe, the click-through installer, carries both aba.exe files
+    # (and both aba-app.exe files, below).
+    # Each build hands its finished binary to installer/build; the last of the
+    # four to arrive compiles the installer (Inno Setup) into dist/installer.
+    # So the installer holds the same bytes as the aba_<tag>_windows_<arch>.exe
+    # and aba-app_<tag>_windows_<arch>.exe downloads, and it exists before the
+    # checksums are made and signed.
     # When the release job sets up code signing (ABA_WINDOWS_SIGNING), the
     # same hook signs each aba.exe in place and then ABA-Setup.exe, so the
     # zips and checksums are of signed files (docs/windows-signing.md).
@@ -26,15 +28,43 @@ builds:
           env: [GOOS=, GOARCH=]
           output: true
 
+  # The desktop app (cmd/aba-app, a Go module of its own so Wails stays out of
+  # aba.exe): a windowed program (-H=windowsgui), CGO off like aba.exe. Its
+  # manifest and icon are the rsrc_windows_<arch>.syso files next to it.
+  # ABA-Setup.exe carries both builds too, so they go through the same hook.
+  - id: aba-app
+    dir: cmd/aba-app
+    main: .
+    binary: aba-app
+    env: [CGO_ENABLED=0]
+    goos: [windows]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    tags: [desktop, production]
+    ldflags: ["-s -w -H=windowsgui -X main.version={{.Tag}}"]
+    hooks:
+      post:
+        - cmd: go run ./installer/build -app -arch {{ .Arch }} -bin "{{ .Path }}" -version {{ .Tag }}
+          env: [GOOS=, GOARCH=]
+          output: true
+
 archives:
   # Plain .exe downloads: the simplest thing to double-click.
   - id: exe
+    ids: [aba]
     formats: [binary]
     name_template: "aba_{{ .Tag }}_windows_{{ .Arch }}"
   - id: zip
+    ids: [aba]
     formats: [zip]
     name_template: "aba_{{ .Tag }}_windows_{{ .Arch }}"
     files: [README.md, LICENSE]
+  # The desktop app: aba-app_<tag>_windows_<arch>.exe, in SHA256SUMS.txt
+  # like aba.exe, which is how updates and install.ps1 check it.
+  - id: app
+    ids: [aba-app]
+    formats: [binary]
+    name_template: "aba-app_{{ .Tag }}_windows_{{ .Arch }}"
 
 checksum:
   name_template: "SHA256SUMS.txt"
@@ -96,7 +126,7 @@ release:
     (Get-FileHash .\ABA-Setup.exe -Algorithm SHA256).Hash
     ```
     and compare with `SHA256SUMS.txt` (the same goes for `aba_{{ .Tag }}_windows_amd64.exe`; `ABA-Setup.exe` holds
-    exactly the two `aba_{{ .Tag }}_windows_*.exe` files, installs the one for your PC, and also holds `miner-pools.txt`, the miner trap's list of mining pools). `SHA256SUMS.txt.sig` is the ed25519 signature the auto-updater checks
+    exactly the two `aba_{{ .Tag }}_windows_*.exe` files and the two `aba-app_{{ .Tag }}_windows_*.exe` files (the ABA app), installs the ones for your PC, and also holds `miner-pools.txt`, the miner trap's list of mining pools). `SHA256SUMS.txt.sig` is the ed25519 signature the auto-updater checks
     before installing anything.
     {{- if isEnvSet "ABA_WINDOWS_SIGNING" }} The Windows programs are also code-signed: Properties → Digital Signatures
     shows who signed them. SmartScreen may still warn about a new version for a while: check the hash, then click

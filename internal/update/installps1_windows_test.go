@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -170,4 +171,36 @@ func reverse(b []byte) []byte {
 		out[len(b)-1-i] = b[i]
 	}
 	return out
+}
+
+// install.ps1 has no other test that runs it; at least it must parse, in
+// both PowerShells, and look for the app under the name releases give it.
+func TestInstallScriptParses(t *testing.T) {
+	path, err := filepath.Abs(filepath.Join("..", "..", "install.ps1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(src), `"aba-app_${tag}_windows_$arch.exe"`) || AppAssetName("vX") != "aba-app_vX_windows_"+runtime.GOARCH+".exe" {
+		t.Error("install.ps1 and AppAssetName don't agree on the app's release file name")
+	}
+	check := `$e = $null; [void][System.Management.Automation.Language.Parser]::ParseFile($args[0], [ref]$null, [ref]$e); $e | ForEach-Object { "$($_.Extent.StartLineNumber): $($_.Message)" }`
+	ran := 0
+	for _, shell := range []string{"powershell.exe", "pwsh.exe"} {
+		exe, err := exec.LookPath(shell)
+		if err != nil {
+			continue
+		}
+		ran++
+		out, err := exec.Command(exe, "-NoProfile", "-NonInteractive", "-Command", "& {"+check+"} '"+strings.ReplaceAll(path, "'", "''")+"'").CombinedOutput()
+		if err != nil || strings.TrimSpace(string(out)) != "" {
+			t.Errorf("%s: install.ps1 doesn't parse: %v\n%s", shell, err, out)
+		}
+	}
+	if ran == 0 {
+		t.Skip("no PowerShell here")
+	}
 }

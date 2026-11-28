@@ -38,6 +38,10 @@ $aba = Join-Path $installDir 'aba.exe'
 $data = Join-Path $env:ProgramData 'FileAccessMonitor'
 $appKey = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\FileAccessMonitor'
 $shortcut = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\A Better Antivirus.lnk'
+$appExe = Join-Path $installDir 'aba-app.exe'
+$appShortcut = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\ABA.lnk'
+# The app's WebView2 profile (internal/appsec WebViewDir): the person's, not admin-only.
+$webview = Join-Path $env:LOCALAPPDATA 'ABA\webview'
 $logDir = Join-Path ([IO.Path]::GetTempPath()) 'aba-setup-test'
 New-Item -ItemType Directory -Force $logDir | Out-Null
 
@@ -94,11 +98,14 @@ function MachinePath { [Environment]::GetEnvironmentVariable('Path', 'Machine') 
 
 # What this release says the aba.exe for this machine is.
 $expected = $null
+$expectedApp = $null
 foreach ($line in Get-Content $Sums) {
     $f = $line -split '\s+', 2
     if ($f.Count -eq 2 -and $f[1].Trim() -match "^aba_v?[^_]+_windows_$Arch\.exe$") { $expected = $f[0].ToLower() }
+    if ($f.Count -eq 2 -and $f[1].Trim() -match "^aba-app_v?[^_]+_windows_$Arch\.exe$") { $expectedApp = $f[0].ToLower() }
 }
 if (-not $expected) { throw "No aba_<tag>_windows_$Arch.exe in $Sums" }
+if (-not $expectedApp) { throw "No aba-app_<tag>_windows_$Arch.exe in $Sums" }
 
 # ---------------------------------------------------------------- a clean machine
 Step 'Before: ABA is not on this machine'
@@ -164,6 +171,24 @@ Check (Test-Path $shortcut) 'the Start menu has an A Better Antivirus shortcut'
 $target = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut).TargetPath
 Check ($target -eq $aba) "it opens $target"
 
+Step 'The ABA app'
+Check (Test-Path $appExe) "aba-app.exe is in $installDir"
+Check ((Sha $appExe) -eq $expectedApp) "it is the $Arch build, byte for byte the aba-app_<tag>_windows_$Arch.exe of this release"
+Check (Test-Path $appShortcut) 'the Start menu has an ABA shortcut'
+$target = (New-Object -ComObject WScript.Shell).CreateShortcut($appShortcut).TargetPath
+Check ($target -eq $appExe) "it opens $target"
+Check ((SetupLog 'install') -match 'WebView2 runtime: machine-wide "\d') 'Setup found the machine-wide WebView2 runtime (so it offered nothing)'
+# The installed app, the way the Start menu starts it here (elevated: UAC is
+# off on the runner). Its self-test also leaves a WebView2 profile, which the
+# uninstall below must take away.
+$st = Join-Path $logDir 'app-selftest.json'
+$p = Start-Process -FilePath $appExe -ArgumentList '--selftest', '--selftest-out', "`"$st`"" -PassThru
+$null = $p.Handle
+if (-not $p.WaitForExit(150000)) { $p.Kill(); Fail 'the installed app''s self-test hung' }
+if (Test-Path $st) { Get-Content $st }
+Check ($p.ExitCode -eq 0) "the installed app's self-test passed (exit code $($p.ExitCode))"
+Check (WaitFor { Test-Path $webview } 10) "it keeps its WebView2 profile in $webview"
+
 # ---------------------------------------------------------------- run it again
 Step 'Running the installer again keeps every setting'
 $code = Run-Setup $Setup 'again' @('/AUTOUPDATE=1', '/PRESET=strict', '/MINERS=0', '/CLIPPERS=1')
@@ -198,6 +223,8 @@ Step 'Nothing is left'
 Check (-not (Get-Service FileAccessMonitor -ErrorAction SilentlyContinue)) 'the service is gone'
 Check (-not @(AppEntries).Count) 'the Installed apps entry is gone'
 Check (-not (Test-Path $shortcut)) 'the Start menu shortcut is gone'
+Check (-not (Test-Path $appShortcut)) 'the ABA shortcut is gone'
+Check (-not (Test-Path $webview)) 'the app''s WebView2 profile is gone'
 Check (-not ((MachinePath) -contains $installDir)) 'the program folder is off PATH'
 Check (-not (Test-Path "$data\config.json")) 'the settings are gone'
 Check (-not @(TrapRules).Count) 'the miner trap''s name rules are gone'

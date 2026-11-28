@@ -1,21 +1,59 @@
-name: App spike
+name: App
 
-# Phase 0 of the desktop app (cmd/aba-app): build it, then run its self-test
-# on throwaway Windows machines: as administrator (GitHub's runners have UAC
-# off, so that's a full admin token) and as an ordinary program (medium
-# integrity, no admin rights: the locked view). The self-test draws the 3D
-# scene, reports the WebGL renderer, and checks that the WebView2 guard
-# stops navigation, new windows, downloads, permissions and unused IPC.
+# The desktop app (cmd/aba-app): build it the way a release does (both
+# processors, cross-built), then run its self-test on throwaway Windows
+# machines: as administrator (GitHub's runners have UAC off, so that's a full
+# admin token) and as an ordinary program (medium integrity, no admin rights:
+# the locked view). The self-test draws the 3D scene, reports the WebGL
+# renderer, and checks that the WebView2 guard stops navigation, new
+# windows, downloads, permissions and unused IPC.
 
 on:
   push:
-    branches: [app-phase0]
+    branches: [main, 'app-*']
+  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  # Both builds, from one machine, with the release's flags (.goreleaser.yaml):
+  # each must be a windowed program for its processor (installer/build checks
+  # the same before ABA-Setup.exe takes it).
+  build:
+    name: build (amd64 + arm64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Cross-build
+        env:
+          CGO_ENABLED: "0"
+          GOOS: windows
+        run: |
+          cd cmd/aba-app
+          for arch in amd64 arm64; do
+            GOARCH=$arch go build -trimpath -tags desktop,production -ldflags "-s -w -H=windowsgui -X main.version=ci-${{ github.sha }}" -o ../../dist/aba-app-$arch.exe .
+          done
+          GOARCH=amd64 go vet -tags desktop,production .
+          ls -l ../../dist
+      - name: Check the builds
+        run: |
+          go run ./installer/build -app -arch amd64 -bin dist/aba-app-amd64.exe -version v0.0.0 -out dist/check 2>&1 | tee build.log
+          go run ./installer/build -app -arch arm64 -bin dist/aba-app-arm64.exe -version v0.0.0 -out dist/check 2>&1 | tee -a build.log
+          # Without an aba.exe to go with them nothing is compiled; each must be taken.
+          test "$(grep -c 'kept the' build.log)" = 2
+      - uses: actions/upload-artifact@v7
+        with:
+          name: aba-app
+          path: dist/aba-app-*.exe
+          if-no-files-found: error
+          retention-days: 7
+
   selftest:
     name: selftest (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -34,7 +72,7 @@ jobs:
         shell: pwsh
         run: |
           go vet ./internal/appsec/ ./internal/session/ ./scripts/applaunch/
-          go test -count=1 ./internal/appsec/ ./internal/session/ ./internal/paths/
+          go test -count=1 ./internal/appsec/ ./internal/session/ ./internal/paths/ ./internal/update/ ./internal/install/
           Push-Location cmd/aba-app
           go vet -tags desktop,production .
           go test -count=1 .
