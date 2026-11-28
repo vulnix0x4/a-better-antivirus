@@ -46,11 +46,9 @@ func contentSecurityPolicy(indexHTML []byte) (string, error) {
 // securityHeaders go on every response the page gets.
 func securityHeaders(csp string) map[string]string {
 	return map[string]string{
-		"Content-Security-Policy":      csp,
-		"X-Content-Type-Options":       "nosniff",
-		"Referrer-Policy":              "no-referrer",
-		"Cross-Origin-Opener-Policy":   "same-origin",
-		"Cross-Origin-Resource-Policy": "same-origin",
-		"Cache-Control":                "no-store",
+		"Content-Security-Policy": csp,
+		"X-Content-Type-Options":  "nosniff",
+		"Referrer-Policy":         "no-referrer",
+		"Cache-Control":           "no-store",
 	}
 }
