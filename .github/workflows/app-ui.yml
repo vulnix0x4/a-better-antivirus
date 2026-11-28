@@ -1,0 +1,61 @@
+name: App UI
+
+# The desktop app's page (cmd/aba-app/frontend), tested in a browser on the
+# mock bridge that serves the fixtures of internal/appapi/testdata: every
+# screen for every fixture with no console errors and no CSP violations,
+# attacker-chosen strings shown as text, absent parts hidden, the answers
+# and their feedback, keyboard order, and no drawing when nobody's looking.
+# (cmd/aba-app/uitest; nothing here is shipped.)
+
+on:
+  push:
+    branches: [main, 'app-phase1*']
+    paths:
+      - 'cmd/aba-app/frontend/**'
+      - 'cmd/aba-app/uitest/**'
+      - 'internal/appapi/testdata/**'
+      - '.github/workflows/app-ui.yml'
+  pull_request:
+    paths:
+      - 'cmd/aba-app/frontend/**'
+      - 'cmd/aba-app/uitest/**'
+      - 'internal/appapi/testdata/**'
+      - '.github/workflows/app-ui.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: app-ui-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ui:
+    name: UI tests (ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: cmd/aba-app/uitest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: cmd/aba-app/uitest/package-lock.json
+      - name: Install Playwright
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: UI tests
+        run: npm test
+      # The page's own rules (no markup parsing, no network, pinned vendored
+      # files) are also checked from Go, where the app embeds it.
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Page checks (Go)
+        working-directory: cmd/aba-app
+        run: go test -count=1 -run 'TestVendorManifest|TestCSP|TestNoDangerousCalls' .

@@ -344,7 +344,7 @@ vec4 mv=modelViewMatrix*vec4(p,1.);gl_Position=projectionMatrix*mv;gl_PointSize=
 
     // labels
     const scr = S.screen; const icy = scr === 'caught' || scr === 'report';
-    const showHome = scr === 'home' && (S.introT0 !== null && open < 60 ? open > 2.4 : ts > .5) && !(C && !fr && t > touchT), showAll = scr === 'baits' && ts > .5;
+    const showHome = scr === 'home' && (S.introT0 !== null && open < 60 ? open > 2.4 : ts > .5) && !(C && (fr ? mk === 0 && fk > .3 : t > touchT)), showAll = scr === 'baits' && ts > .5;
     for (const b of BAITS) {
       const mine = C && C.bait === b && fr && mk === 0;
       const cTag = mine && (scr === 'caught' ? fk > 1.6 : scr === 'home');

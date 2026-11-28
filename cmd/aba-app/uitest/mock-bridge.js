@@ -79,7 +79,7 @@
   window.runtime = { WindowMinimise: () => calls.push(['min']), WindowToggleMaximise: () => calls.push(['max']), Quit: () => calls.push(['quit']) };
   window.__abaDev = {
     tier: Q.get('tier') || undefined, reduced: Q.has('reduced') ? true : (Q.has('motion') ? false : undefined), manual: Q.has('manual'),
-    screen: Q.get('screen') || '', alert: pick && !Q.has('open') ? pick.id : '', fixedNow: !Q.has('realnow'), calls,
+    screen: Q.get('screen') || '', stageH: Number(Q.get('stageh')) || 0, alert: pick && !Q.has('open') ? pick.id : '', fixedNow: !Q.has('realnow'), calls,
     // a catch while the app is open: the alert goes into the snapshot and the open request
     catchNow(name = 'frozen-sent') { const a = clone(F['alert-' + name]); alerts[a.id] = a; const fz = clone(F['home-frozen']); fz.preset = snap.preset; snap = fz; pending.push(a.id); },
     state: () => ({ snap, settings, alerts }),

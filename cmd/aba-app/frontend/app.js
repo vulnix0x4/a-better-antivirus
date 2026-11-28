@@ -29,7 +29,10 @@ function layout() {
   const k = clamp(Math.min(W / 1440, H / 900), .5, 1.35);
   frame.style.width = (W / k) + 'px'; frame.style.height = (H / k) + 'px'; frame.style.transform = k === 1 ? '' : `scale(${k})`;
   root.style.setProperty('--k', k);
-  if (scene) scene.resize(W / k - 88, H / k - 44, k);
+  // (development: a tall page for whole-report pictures keeps the scene at its window size)
+  const sh = dev && dev.stageH ? Math.min(dev.stageH, H / k - 44) : H / k - 44;
+  if (dev && dev.stageH) $('#gl').style.height = sh + 'px';
+  if (scene) scene.resize(W / k - 88, sh, k);
 }
 addEventListener('resize', layout); layout();
 $('#wMin').addEventListener('click', () => win.minimise());
@@ -44,7 +47,7 @@ const screens = {};
 const app = {
   bridge, go, openAlert, runTest, setPreset, answer, reload, watchProgress,
   onFrame: f => { frameHooks.push(f); }, hasScene: () => !!scene, sceneTime: () => scene ? scene.time : 0,
-  setScroll: y => scene && scene.setScroll(y), selectBait: id => scene && scene.select(id),
+  setScroll: y => scene && scene.setScroll(y), selectBait: id => scene && scene.select(id), currentAlert: () => S.alert,
 };
 
 /* ---------------- frame: the title bar, the rail ---------------- */
@@ -181,11 +184,11 @@ async function present(id) {
 // The safe test, live: the fake stealer crawls in while ABA's steps are shown.
 const testCard = $('#testCard');
 async function runTest() {
-  if (S.testing) return; S.testing = true;
+  if (S.testing) return; S.testing = true; document.body.classList.add('testing');
   screens.home.setTestRunning(true); screens.settings.setTestRunning(true);
   if (S.screen !== 'home') await go('home', { quiet: true });
   const steps = h('ol.tc-steps'), msg = h('p.tc-msg');
-  const close = h('button.btn.sm', { type: 'button', hidden: true, on: { click: () => { testCard.hidden = true; } } }, h('span', 'Close'));
+  const close = h('button.btn.sm', { type: 'button', hidden: true, on: { click: () => { testCard.hidden = true; document.body.classList.remove('testing'); } } }, h('span', 'Close'));
   fill(testCard, h('div.tc-h', spinner(), h('strong', 'Running the safe test')), steps, msg, close); testCard.hidden = false; testCard.dataset.state = 'run';
   const tags = S.snap ? S.snap.baits.tags : [];
   const guess = tags.find(t => /passwords$/.test(t.id)) || tags[0];
@@ -201,7 +204,7 @@ async function runTest() {
     const a = await bridge.alert(id).catch(() => null);
     testCard.dataset.state = 'ok'; msg.textContent = 'Caught. ABA works.';
     if (scene && a) { S.sceneCatch = id; S.keepCatch = id; await Promise.race([scene.strike(catchInfo(a)), sleep(6000)]); }
-    S.testing = false; testCard.hidden = true;
+    S.testing = false; testCard.hidden = true; document.body.classList.remove('testing');
     await loadSnap(); await go('caught', { id, d: 1.7 });
   } else {
     if (scene) scene.clearCatch();
@@ -266,7 +269,7 @@ async function startFull(info) {
   const sn = await loadSnap();
   S.started = Date.now() - 5000;
   const want = dev && dev.screen;
-  const startId = info.alert || (sn && sn.waiting[0] ? sn.waiting[0].id : '') || (dev && dev.alert) || '';
+  const startId = info.alert || (dev && dev.alert) || (sn && sn.waiting[0] ? sn.waiting[0].id : '') || '';
   let a = null;
   if (startId && (!want || want === 'caught' || want === 'report')) { S.alertId = startId; a = await loadAlert(startId); }
   if (a) {

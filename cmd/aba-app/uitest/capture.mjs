@@ -18,7 +18,7 @@ const [mode, ...rest] = process.argv.slice(2);
 async function open(query, dpr = 2, h = 900, w = 1440) {
   const ctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: dpr }); const page = await ctx.newPage();
   page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') console.log('[page]', m.text()); }); page.on('pageerror', e => console.log('[pageerror]', e.message));
-  await page.goto(srv.url + '?manual=1&fast=1&' + query); await page.waitForFunction(() => window.__abaReady === true, null, { timeout: 30000 });
+  await page.goto(srv.url + '?manual=1&' + (/slow=1/.test(query) ? '' : 'fast=1&') + query); await page.waitForFunction(() => window.__abaReady === true, null, { timeout: 30000 });
   await page.evaluate(() => document.fonts.ready);
   return page;
 }
@@ -43,7 +43,7 @@ const SHOTS = {
   '14-report-hostile': ['home=protected&alert=hostile&screen=report', 'full'],
   '15-report-miner': ['home=protected&alert=miner&screen=report', 'full'],
   '16-bait-contents': ['home=protected&screen=baits', 'inside'],
-  '17-safe-test-running': ['home=protected', 'test'],
+  '17-safe-test-running': ['home=protected&slow=1', 'test'],
   '18-settings-strict': ['home=protected&screen=settings', 'strict'],
   '19-home-alert-only': ['home=protected', 'alertonly'],
   '20-home-light': ['home=protected&tier=light'],
@@ -53,11 +53,11 @@ const SHOTS = {
 if (mode === 'shots') {
   for (const name of (rest.length ? rest : Object.keys(SHOTS))) {
     const [q, what] = SHOTS[name]; let page = await open(q);
-    if (what === 'full') { await step(page, 0, 2); const hgt = await page.evaluate(() => { window.__aba.revealAll(); return window.__aba.reportHeight(); }); await page.context().close(); page = await open(q, 2, hgt + 44); await page.evaluate(() => window.__aba.revealAll()); }
+    if (what === 'full') { await step(page, 0, 2); const hgt = await page.evaluate(() => { window.__aba.revealAll(); return window.__aba.reportHeight(); }); await page.context().close(); page = await open(q + '&stageh=856', 2, hgt + 44); await page.evaluate(() => window.__aba.revealAll()); }
     await step(page, 0, 9);
     if (what === 'kill') { await page.click('button[data-act=kill]'); await page.waitForSelector('.c-result[data-kind=ok]'); await settle(page); await step(page, 9, 13); }
     if (what === 'inside') { await page.evaluate(() => window.__aba.screens.baits.select('desktop-passwords')); await step(page, 9, 10); await page.click('.bd-btns button'); await page.waitForSelector('.dlg'); await step(page, 10, 12); }
-    if (what === 'test') { await page.evaluate(() => { window.__aba.app.runTest(); }); await settle(page); await step(page, 9, 11.4); }
+    if (what === 'test') { await page.evaluate(() => { window.__aba.app.runTest(); }); await page.waitForSelector('.tc-steps li:nth-child(2)'); await step(page, 9, 11.6); }
     if (what === 'strict') { await page.click('button[data-preset=strict]'); await settle(page); await step(page, 9, 12); }
     if (what === 'alertonly') { await page.focus('.dial'); await page.keyboard.press('ArrowLeft'); await settle(page); await step(page, 9, 12); }
     await settle(page);

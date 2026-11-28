@@ -17,12 +17,15 @@ const ADDR = {
   connection: ['up', 'A connection it made', ''],
 };
 
+// "Kill X: it's still frozen." -> a title and the rest. The words stay as
+// they are (only a first letter is capitalised, never an address).
+const capWord = t => /^[a-z]+:\/\//.test(t) ? t : cap(t);
 function splitStep(t) {
   let i = t.indexOf(': ');
-  if (i > 0 && i < 64) return [t.slice(0, i), cap(t.slice(i + 2))];
+  if (i > 0 && i < 64) return [t.slice(0, i), capWord(t.slice(i + 2))];
   i = t.indexOf(', then ');
-  if (i > 0 && i < 64) return [t.slice(0, i), cap(t.slice(i + 2))];
-  return [t.replace(/\.$/, ''), ''];
+  if (i > 0 && i < 64) return [t.slice(0, i), capWord(t.slice(i + 2))];
+  return t.length > 64 ? ['', t] : [t, ''];
 }
 function stepIcon(t) {
   if (/chrome/i.test(t)) return ['chrome', COLORS.amber];
@@ -65,7 +68,7 @@ export function createReport(app) {
     if (fz) revs.push(h('div.rev.ice', { vars: { left: (split + 2) + '%', width: `calc(${100 - split - 4}%)`, '--k': before.length } }, tile('snow', COLORS.ice), h('time', offset(fz.offsetMs)), h('b', fz.label),
       h('p', a.frozenNow ? (a.cutOff ? 'Internet cut' : 'Still held') : a.outcome === 'killed' ? 'Killed since' : 'Let go since')));
     const svg = s('svg', { class: 'rt-line', viewBox: '0 0 1200 8', preserveAspectRatio: 'none' }, s('path', { d: 'M0 4H1200', pathLength: 100 }));
-    return panel('r-time', dur > 0 ? `The ${span(dur, true)} that mattered` : 'What happened', dayTime(r.baitAt || a.time),
+    return panel('r-time', dur >= 1000 && before.length > 1 ? `The ${span(dur, true)} that mattered` : 'What happened', dayTime(r.baitAt || a.time),
       h('div.rt', { vars: { '--split': split + '%' } }, h('div.rt-free'), fz ? h('div.rt-ice', line('snow')) : null, svg, revs),
       dropped ? h('p.fine', `${plural(dropped, 'more moment')} in the text at the end.`) : null);
   }
@@ -75,9 +78,9 @@ export function createReport(app) {
     const steps = r && r.steps.length ? r.steps : a.checklist; if (!steps.length) return null;
     const urgent = r && r.steps.length ? r.stepsUrgent : a.tier === 'critical';
     const items = steps.map((t, i) => {
-      const [title, rest] = splitStep(t); const ic = stepIcon(title);
+      const [title, rest] = splitStep(t); const ic = stepIcon(title || rest);
       const kill = /^kill /i.test(title) && a.buttons.includes('kill') ? button('Kill it', { icon: 'x', cls: 'kill sm', onClick: async () => { const res = await app.answer(a, 'kill'); toast(res.message || (res.ok ? 'Killed.' : "That didn't work."), res.ok ? 'ok' : 'bad'); } }) : null;
-      return h('li', h('span.num', String(i + 1)), h('div', h('b', title), rest ? h('p', rest) : null), kill || (ic ? tile(ic[0], ic[1]) : null));
+      return h('li', h('span.num', String(i + 1)), h('div', title ? h('b', title) : null, rest ? h('p', { class: title ? '' : 'solo' }, rest) : null), kill || (ic ? tile(ic[0], ic[1]) : null));
     });
     // "0 of 3 done" and the ticks have no data yet (absent: checklistTicks)
     return panel('r-todo', urgent ? 'Do these now' : 'To be safe', null, h('ol', items));
@@ -163,7 +166,7 @@ export function createReport(app) {
         f.entries.length > 6 || f.more ? h('p.fine', `${plural((f.entries.length > 6 ? f.entries.length - 6 : 0) + (f.more || 0), 'more file')} not shown.`) : null);
     });
     const saved = r.staged.some(f => f.saved);
-    return panel('r-files', 'Files it packed', saved ? 'A copy is kept as evidence' : '', blocks,
+    return panel('r-files', r.staged.length ? 'Files it packed' : 'Files it left', saved ? 'A copy is kept as evidence' : '', blocks,
       r.staged.length > 3 ? h('p.fine', `${plural(r.staged.length - 3, 'more file')} in the text at the end.`) : null,
       r.unpacked.length ? h('div.unp', h('b', 'Its own code, unpacked while it ran'), list(r.unpacked.slice(0, 4).map(u => `${baseName(u.dir) || u.dir}: ${plural(u.files, 'file')}, ${bytes(u.size)}`))) : null);
   }

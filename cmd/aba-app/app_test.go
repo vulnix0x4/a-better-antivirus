@@ -96,13 +96,63 @@ func TestCSP(t *testing.T) {
 // to open a browser or a file dialog (elevated, both would be an
 // administrator's).
 func TestNoDangerousCalls(t *testing.T) {
-	app, _ := fs.ReadFile(frontendFS(), "app.js")
-	boot, _ := fs.ReadFile(frontendFS(), "boot.js")
-	js := append(app, boot...)
-	for _, bad := range []string{"innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function", "BrowserOpenURL"} {
-		if strings.Contains(string(js), bad) {
-			t.Errorf("app.js uses %s", bad)
+	// Every script of the page (not the vendored libraries, which are
+	// pinned by the manifest and never given data).
+	ffs := frontendFS()
+	scripts := 0
+	fs.WalkDir(ffs, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
+		if d.IsDir() {
+			if p == "vendor" {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		b, _ := fs.ReadFile(ffs, p)
+		src := string(b)
+		switch path.Ext(p) {
+		case ".js":
+			scripts++
+			// Nothing that parses markup or text as code.
+			for _, bad := range []string{"innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function", "srcdoc",
+				"createContextualFragment", "setAttribute('style'", `setAttribute("style"`, "BrowserOpenURL", "javascript:"} {
+				if strings.Contains(src, bad) {
+					t.Errorf("%s uses %s", p, bad)
+				}
+			}
+			// Nothing that reaches the network or leaves the page; the
+			// self-test tries these on purpose (the guard and the CSP must
+			// stop them).
+			if p != "js/selftest.js" {
+				for _, bad := range []string{"fetch(", "XMLHttpRequest", "WebSocket", "EventSource", "sendBeacon", "window.open", "location.href", "location.assign", "location.replace", "importScripts", "http://", "https://"} {
+					// (the SVG namespace is a name, not an address)
+					if strings.Contains(strings.ReplaceAll(src, "http://www.w3.org/2000/svg", ""), bad) {
+						t.Errorf("%s uses %s", p, bad)
+					}
+				}
+			}
+		case ".css":
+			for _, m := range regexp.MustCompile(`url\(([^)]*)\)`).FindAllStringSubmatch(src, -1) {
+				if !strings.HasPrefix(strings.Trim(m[1], `"'`), "vendor/fonts/") {
+					t.Errorf("%s loads %s", p, m[0])
+				}
+			}
+			if strings.Contains(src, "@import") {
+				t.Errorf("%s uses @import", p)
+			}
+		case ".html":
+			if regexp.MustCompile(`(?i)<a\s|href=|<iframe|<form|<object|<embed|<link [^>]*rel="(?:preload|prefetch|preconnect)`).MatchString(strings.ReplaceAll(src, `<link rel="stylesheet" href="style.css">`, "")) {
+				t.Errorf("%s has a link, a frame or a form", p)
+			}
+		default:
+			t.Errorf("%s: unexpected kind of file in the page", p)
+		}
+		return nil
+	})
+	if scripts < 10 {
+		t.Errorf("only %d scripts checked", scripts)
 	}
 	entries, _ := os.ReadDir(".")
 	for _, e := range entries {

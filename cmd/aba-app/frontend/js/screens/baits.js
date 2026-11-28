@@ -5,6 +5,7 @@ import { tile, line, baitColor, COLORS } from '../icons.js';
 import { enter, button, dialog, toast } from '../ui.js';
 import { MAX_BAITS } from '../gfx.js';
 
+const lower = t => /^(Today|Yesterday)$/.test(t) ? t.toLowerCase() : 'on ' + t;
 const KIND = {
   decoy: ['eye', 'Looks real', 'It sits where the real app keeps its data. A stealer can’t tell the difference.'],
   file: ['hook', 'Only thieves open it', 'Nothing on this PC has a reason to read this file.'],
@@ -51,9 +52,9 @@ export function createBaits(app) {
         h('div.bd-health', { data: { s: st[1] } }, h('span.bd-dot'), h('div', h('b', st[0]), h('span', it.healthNote || (it.lastCheck ? `Checked ${ago(it.lastCheck)}` : 'Not checked yet')))),
         h('div.bd-facts',
           h('div', tile('snow', COLORS.ice, 't-sm'), h('p', h('b', tb.length === 0 ? 'Never touched' : tb.length === 1 ? 'Touched once' : `Touched ${tb.length} times`),
-            lastT ? [`${tb.length > 1 ? 'Last by ' : 'By '}`, h('button.lnk', { type: 'button', on: { click: () => app.openAlert(lastT.alertId) } }, lastT.program || 'a program'), `, ${day(lastT.time).toLowerCase()}.`] : 'Nothing has gone for it yet.')),
+            lastT ? [`${tb.length > 1 ? 'Last by ' : 'By '}`, h('button.lnk', { type: 'button', on: { click: () => app.openAlert(lastT.alertId) } }, lastT.program || 'a program'), `, ${lower(day(lastT.time))}.`] : 'Nothing has gone for it yet.')),
           h('div', tile(kic, COLORS.ice, 't-sm'), h('p', h('b', it.custom ? 'Your own bait' : kt), it.custom ? 'A file you chose to make a bait.' : kd)),
-          h('div', tile('doc', COLORS.ice, 't-sm'), h('p', h('b', plural(it.files.length, 'file')), it.createdAt ? `Planted ${day(it.createdAt).toLowerCase()}.` : ''))),
+          h('div', tile('doc', COLORS.ice, 't-sm'), h('p', h('b', plural(it.files.length, 'file')), it.createdAt ? `Planted ${lower(day(it.createdAt))}.` : ''))),
         // "Replant" isn't there yet (absent: replant)
         it.hasText ? h('div.bd-btns', button("See what's inside", { cls: 'sm', onClick: () => inside(it) })) : null);
     }

@@ -72,7 +72,7 @@ export function createCaught(app) {
     const r = await app.answer(a, kind);
     working = false; el.classList.remove('working'); btn.classList.remove('busy');
     fill(result, line(r.ok ? 'check' : 'warn'), h('span', r.message || (r.ok ? 'Done.' : "That didn't work."))); result.dataset.kind = r.ok ? 'ok' : 'bad';
-    last = ''; // the alert changed (or didn't): draw it again from fresh data
+    last = ''; update(app.currentAlert()); // the alert changed (or didn't): draw it again from fresh data
   }
 
   function update(a) {

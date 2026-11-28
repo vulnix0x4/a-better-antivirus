@@ -96,6 +96,7 @@ export function offset(ms) {
 // "1.9 s", "3 minutes", "2 hours": how long something lasted.
 export function span(ms, long = false) {
   const a = Math.abs(ms);
+  if (a < 995) { const v = (a / 1000).toFixed(2).replace(/0$/, ''); return long ? `${v} seconds` : `${v} s`; }
   if (a < 60000) { const v = a < 9950 ? (a / 1000).toFixed(1).replace(/\.0$/, '') : String(Math.round(a / 1000)); return long ? `${v} second${v === '1' ? '' : 's'}` : `${v} s`; }
   if (a < 3600000) { const v = Math.round(a / 60000); return long ? `${v} minute${v === 1 ? '' : 's'}` : `${v} min`; }
   const v = Math.round(a / 3600000); return long ? `${v} hour${v === 1 ? '' : 's'}` : `${v} h`;
