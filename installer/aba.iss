@@ -98,7 +98,19 @@ CreateUninstallRegKey=no
 CloseApplications=no
 RestartApplications=no
 
-WizardStyle=modern dynamic
+; The look of the ABA app: always dark, ABA's near-black page, its ice-blue
+; gem in the corner and the tripwire web of glowing baits on the first and
+; last page (installer/art, README.md there says how it's made). Several
+; sizes of each picture: Setup picks the one that fits this screen's scaling,
+; so it stays sharp from 100% to 250%. In a Windows high-contrast theme Inno
+; Setup drops the custom colors and uses the theme's own.
+WizardStyle=modern dark hidebevels includetitlebar
+WizardBackColor=#0b0c0b
+WizardImageFile=art\welcome-202.png,art\welcome-269.png,art\welcome-336.png,art\welcome-403.png,art\welcome-534.png
+WizardImageBackColor=#0b0c0b
+WizardSmallImageFile=art\header-58.png,art\header-77.png,art\header-97.png,art\header-116.png,art\header-159.png
+WizardSmallImageBackColor=none
+SetupIconFile=art\aba-setup.ico
 DisableWelcomePage=no
 DisableReadyPage=no
 ShowLanguageDialog=no
