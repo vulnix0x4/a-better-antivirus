@@ -9,6 +9,9 @@
 # and continues in its own window). Afterwards `aba` works in this window too.
 # Pass other arguments with $env:ABA_ARGS, e.g. for a test VM:
 #   $env:ABA_ARGS = 'install --yes --preset strict --learning 0'
+# The ABA app (aba-app.exe, ABA's window) comes along, checked the same way.
+# To leave it out, and have updates leave it out too:
+#   $env:ABA_NO_APP = '1'
 
 & {
     $ErrorActionPreference = 'Stop'
@@ -161,22 +164,32 @@
         $sums = $rel.assets | Where-Object name -eq 'SHA256SUMS.txt'
         $sig = $rel.assets | Where-Object name -eq 'SHA256SUMS.txt.sig'
         if (-not $asset -or -not $sums) { Stop-Install "Release $tag has no build for this PC ($arch)." }
+        # The app, unless asked to leave it out (releases from before it have none).
+        $noApp = "$env:ABA_NO_APP" -match '^(1|true|yes)$'
+        $appName = "aba-app_${tag}_windows_$arch.exe"
+        $appAsset = $null
+        if (-not $noApp) { $appAsset = $rel.assets | Where-Object name -eq $appName }
         if (-not $sig) { Stop-Install "Release $tag has no signature, so nothing was downloaded." 'Please open an issue on GitHub.' }
 
         # A fresh folder each time, so a half-finished earlier download is never reused.
         $dir = Join-Path $env:TEMP ('aba-install-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
         New-Item -ItemType Directory -Force $dir | Out-Null
         $exe = Join-Path $dir 'aba.exe'
+        # aba install picks the app up from next to aba.exe, under this name.
+        $appExe = Join-Path $dir 'aba-app.exe'
         $sumFile = Join-Path $dir 'SHA256SUMS.txt'
         $sigFile = Join-Path $dir 'SHA256SUMS.txt.sig'
         try {
             Invoke-WebRequest $asset.browser_download_url -OutFile $exe -UseBasicParsing -TimeoutSec 300
+            if ($appAsset) { Invoke-WebRequest $appAsset.browser_download_url -OutFile $appExe -UseBasicParsing -TimeoutSec 300 }
             Invoke-WebRequest $sums.browser_download_url -OutFile $sumFile -UseBasicParsing -TimeoutSec 60
             Invoke-WebRequest $sig.browser_download_url -OutFile $sigFile -UseBasicParsing -TimeoutSec 60
         } catch {
             Stop-Install "The download didn't finish." 'Check your internet connection and run the command again.'
         }
-        Say $ok "Downloaded $tag" 'Green' ('{0:N1} MB, {1}' -f ($asset.size / 1MB), $arch)
+        $size = $asset.size
+        if ($appAsset) { $size += $appAsset.size }
+        Say $ok "Downloaded $tag" 'Green' ('{0:N1} MB, {1}' -f ($size / 1MB), $arch)
 
         # The checksum list must be signed with ABA's release key: whoever can
         # change a release's files can change its checksum list too, but can't
@@ -193,18 +206,24 @@
         }
         Say $ok "Signed with ABA's release key" 'Green' 'ed25519'
 
-        # The download's line in the list that was just verified (those bytes,
+        # Each download's line in the list that was just verified (those bytes,
         # not the file read again): "<sha256>  <name>".
-        $expected = $null
-        foreach ($line in ([Text.Encoding]::UTF8.GetString($sumBytes) -split "`n")) {
-            $parts = $line.Trim() -split '\s+'
-            if ($parts.Count -eq 2 -and $parts[1].TrimStart('*') -ceq $name) { $expected = $parts[0]; break }
+        function Test-Listed([string]$file, [string]$listed) {
+            $expected = $null
+            foreach ($line in ([Text.Encoding]::UTF8.GetString($sumBytes) -split "`n")) {
+                $parts = $line.Trim() -split '\s+'
+                if ($parts.Count -eq 2 -and $parts[1].TrimStart('*') -ceq $listed) { $expected = $parts[0]; break }
+            }
+            $actual = (Get-FileHash $file -Algorithm SHA256).Hash
+            return [bool]($expected -and $actual -eq $expected.ToUpper())
         }
-        $actual = (Get-FileHash $exe -Algorithm SHA256).Hash
-        if (-not $expected -or $actual -ne $expected.ToUpper()) {
+        if (-not (Test-Listed $exe $name) -or ($appAsset -and -not (Test-Listed $appExe $appName))) {
             Stop-Install "The download doesn't match the release's signed checksum, so it was not run." 'Run the command again. If it keeps happening, please open an issue on GitHub.'
         }
         Say $ok 'Checksum matches the signed list' 'Green' 'SHA-256'
+        # Left out on purpose: aba install sees this next to aba.exe and
+        # remembers it, so updates don't bring the app back either.
+        if ($noApp) { Set-Content -Path (Join-Path $dir 'aba-app.off') -Value 'leave the app out' }
 
         $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
         if (-not $admin -and -not $env:ABA_ARGS) {
