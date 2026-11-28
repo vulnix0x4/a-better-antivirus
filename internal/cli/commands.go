@@ -323,6 +323,13 @@ func testCmd() *cobra.Command {
 	}
 }
 
+// appInstalled: the desktop app is there (the service opens it on a catch,
+// where it can run; see service.openApp).
+var appInstalled = func() bool {
+	fi, err := os.Stat(paths.InstalledApp())
+	return err == nil && fi.Mode().IsRegular() && runtime.GOOS == "windows"
+}
+
 func runTest() error {
 	if s, _ := svcctl.Status(); s != svcctl.Running {
 		return exitf("the service isn't running (%s); try `aba doctor --fix`", s)
@@ -1346,6 +1353,9 @@ func renderTestResult(found *alerts.Alert, phoneKind string) string {
 		rows = append(rows, [3]string{"x", "Not frozen", ui.Dim.Render("see the alert for why")})
 	}
 	alert := "popup on your desktop"
+	if appInstalled() {
+		alert = "the ABA app, on your desktop"
+	}
 	if phoneKind != "" {
 		alert += ", and your phone (" + phoneKind + ")"
 	}

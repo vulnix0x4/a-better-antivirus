@@ -58,6 +58,14 @@ func TestLockedStates(t *testing.T) {
 	if l := LockedView(config.MakePublic(baseConfig(), st, "v1", 0, 0), "v1", "", now); l.State != "attention" {
 		t.Errorf("missing bait: %s", l.State)
 	}
+	st = baseState()
+	st.Blocked = []config.BlockedProgram{{Path: `C:\x.exe`, AlertID: "20261101-000000-aaaa"}} // killed: stays blocked
+	if l := LockedView(config.MakePublic(baseConfig(), st, "v1", 3, 0), "v1", "", now); l.State != "protected" || l.SomethingFrozen {
+		t.Errorf("a killed program's block: %+v", l)
+	}
+	if l := LockedView(config.MakePublic(baseConfig(), st, "v1", 3, 1), "v1", "", now); l.State != "frozen" {
+		t.Errorf("cut off and waiting: %s", l.State)
+	}
 	if l := LockedView(config.MakePublic(baseConfig(), baseState(), "v1", 0, 0), "v1", "", now); l.State != "protected" || !reflect.DeepEqual(l.Health, healthItems(serviceHealth())) {
 		t.Errorf("protected: %+v", l)
 	}

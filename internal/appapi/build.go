@@ -854,7 +854,9 @@ func LockedView(p *config.Public, version, alertID string, now time.Time) *Locke
 	out.Heartbeat = tp(p.Heartbeat)
 	out.Health = healthItems(p.Health)
 	out.Isolated = p.IsolatedSince != nil
-	out.SomethingFrozen = p.Frozen > 0 || p.Blocked > 0
+	// A program you killed stays cut off for good: a block alone means
+	// something waits only while an alert is still unanswered.
+	out.SomethingFrozen = p.Frozen > 0 || (p.Blocked > 0 && p.OpenAlerts > 0)
 	bad := p.Baits == 0 || p.BaitsHealthy < p.Baits
 	for _, h := range p.Health {
 		bad = bad || !h.OK
