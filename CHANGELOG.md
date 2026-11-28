@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+**The ABA app (Windows)**
+
+- ABA now has a window of its own. **Home** shows whether you're protected and what ABA did lately; **Caught** shows
+  a program ABA stopped, what it took, and buttons to kill it, let it go or say it's yours; the **full report** (what
+  it opened of yours, where it sent things, what it left behind, how to report the thief) is in the app now, with
+  **History** (every alert), **Baits** (each bait and whether it's armed) and **Settings** (how strict ABA is, the
+  traps, automatic updates).
+- **It opens by itself when ABA catches something**, on the alert, with a small notification that names no files.
+  You no longer need to find the popup or the browser page.
+- **In the Start menu it's called "ABA"**, and it's the only ABA entry there: it replaces "A Better Antivirus" (the
+  terminal dashboard) and "ABA reports". `aba` in a terminal works as before.
+- **Opening it asks for the Windows admin approval**, every time, because it shows what only administrators may see
+  (which files are baits, what a caught program did). Say no and it opens a locked view that only says whether you're
+  protected, with an **Open ABA** button to approve it after all. On a PC where you're not an administrator, that
+  locked view is what you get, and it tells you an administrator needs to decide.
+- It needs Microsoft Edge WebView2, which Windows 11 and most Windows 10 PCs already have; if yours doesn't, setup
+  offers to fetch it from Microsoft. Without it, ABA works exactly as before: the popup, and the report in your web
+  browser.
+- `ABA-Setup.exe` is bigger: about 18 MB instead of 11. Updates bring the app along by themselves, checked against
+  the release's signed checksum list like ABA itself.
+- **Don't want it?** Install with the PowerShell command and `$env:ABA_NO_APP = '1'` first: you get ABA without the
+  app (and the two old Start menu entries), and updates leave it out too.
+
 ## v0.10.2
 
 **Releases are no longer code-signed**
