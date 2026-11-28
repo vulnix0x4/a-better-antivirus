@@ -138,7 +138,7 @@ FinishedHeadingLabel=You're protected
 FinishedLabelNoIcons=[name] is installed and running.
 FinishedLabel=[name] is installed and running.
 ClickFinish=Click Finish to close Setup.
-ExitSetupMessage=Setup isn't finished. If you close it now, [name] won't be set up.%n%nClose Setup?
+ExitSetupMessage=Setup isn't finished. If you close it now, {#AppName} won't be set up.%n%nClose Setup?
 
 #ifndef Preview
 [Files]
@@ -662,6 +662,36 @@ begin
     RtfText('Keep Windows Defender, or the antivirus you have, switched on. ABA works next to it.') + '\par }';
 end;
 
+// ---- the look (the colors and pictures are in [Setup]) ----
+
+// The first and the last page open with a big headline, like the app's
+// "Protected", with the text right under it. Called when the page shows:
+// Setup lays these pages out again each time.
+procedure Headline(Title, Body: TNewStaticText);
+var
+  Bottom: Integer;
+begin
+  Bottom := Body.Top + Body.Height;
+  Title.Font.Name := 'Segoe UI Semibold';
+  Title.Font.Style := [];
+  Title.Font.Size := 18;
+  // One line: every headline here is short ("Update A Better Antivirus" is
+  // the longest). The label is laid out two lines tall: make it one.
+  Title.Height := (-Title.Font.Height) * 4 / 3;
+  Body.Top := Title.Top + Title.Height + ScaleY(10);
+  Body.Height := Bottom - Body.Top;
+end;
+
+// ABA's green, for "You're protected". Only with Setup's own dark colors: a
+// high-contrast theme turns them off, and its own colors must win then.
+procedure MakeGreen(L: TNewStaticText);
+begin
+  if not IsDarkInstallMode then
+    Exit;
+  L.StyleElements := L.StyleElements - [seFont];
+  L.Font.Color := $A0E76E; // #6ee7a0, written blue-green-red
+end;
+
 procedure InitializeWizard;
 var
   Y: Integer;
@@ -1124,6 +1154,8 @@ var
   Text: String;
   Bottom: Integer;
 begin
+  if CurPageID = wpWelcome then
+    Headline(WizardForm.WelcomeLabel1, WizardForm.WelcomeLabel2);
   if CurPageID <> wpFinished then
     Exit;
   if not Existing then
@@ -1143,6 +1175,9 @@ begin
   else if not Existing and WantNtfy then
     Text := Text + #13#10#13#10 + 'A test alert was sent to your phone. Check that it arrived.';
   WizardForm.FinishedLabel.Caption := Text;
+  Headline(WizardForm.FinishedHeadingLabel, WizardForm.FinishedLabel);
+  if Warnings = '' then
+    MakeGreen(WizardForm.FinishedHeadingLabel);
 
   // The text is longer than the one Setup laid the page out for: move the
   // list of check boxes down to make room.
