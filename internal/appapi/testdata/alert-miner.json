@@ -1,0 +1,87 @@
+{
+  "schema": 1,
+  "id": "20261119-031244-0b9d",
+  "shortId": "0b9d",
+  "time": "2026-11-19T03:12:44Z",
+  "category": "miner",
+  "tier": "critical",
+  "outcome": "killed",
+  "status": "resolved",
+  "note": "killed",
+  "title": "Hidden miner: svc-update.exe tried to mine on this PC",
+  "summary": "it logged in to mine at a mining pool (gulf.moneroocean.stream), which the miner trap answers",
+  "test": false,
+  "learning": false,
+  "frozenNow": false,
+  "cutOff": false,
+  "isolated": false,
+  "instant": false,
+  "latencyMs": 0,
+  "program": {
+    "name": "svc-update.exe",
+    "path": "C:\\Users\\sam\\AppData\\Roaming\\Microsoft\\svc-update.exe",
+    "pid": 4411,
+    "signed": false,
+    "signature": "None. Nobody vouches for this file.",
+    "sha256": "3be1d7a0c2f94e8a6b51d03f7c9e2a48b6d1f0e39c75a28d4e6b9f1c0a3d5e72",
+    "folder": "your AppData folder",
+    "startedBy": "svchost.exe",
+    "commandLine": "C:\\Users\\sam\\AppData\\Roaming\\Microsoft\\svc-update.exe --donate-level 0 -o gulf.moneroocean.stream:10128 --cpu-max-threads-hint 50",
+    "exited": false
+  },
+  "baits": [
+    {
+      "id": "miner",
+      "label": "The miner trap",
+      "icon": "doc",
+      "name": "the miner trap",
+      "path": "gulf.moneroocean.stream:10128",
+      "access": "mine",
+      "time": "2026-11-19T03:12:44Z"
+    }
+  ],
+  "reasons": [
+    "it tried to mine cryptocurrency on this PC"
+  ],
+  "did": [
+    {
+      "action": "freeze",
+      "ok": true,
+      "words": "Froze it",
+      "time": "2026-11-19T03:12:44Z"
+    },
+    {
+      "action": "block-program",
+      "ok": true,
+      "words": "Cut its internet",
+      "time": "2026-11-19T03:12:44Z"
+    },
+    {
+      "action": "kill",
+      "ok": true,
+      "words": "Killed it",
+      "time": "2026-11-19T03:15:44Z"
+    }
+  ],
+  "buttons": [],
+  "trustForGood": true,
+  "checklist": [
+    "If you didn't start a miner yourself: kill it (Yes in the alert, or `aba kill` with the alert's number).",
+    "Miners come back by themselves. Look in Task Scheduler and in Settings \u003e Apps \u003e Startup for anything you don't recognise, and in the alert for where the program came from.",
+    "What brings a miner (a cracked game, a cheat, a \"free\" tool) often brings a stealer too. From another device, change your important passwords, email first.",
+    "You can report the wallet in the alert to the mining pool it wanted: pools block wallets that malware mines for.",
+    "Strongly consider erasing the Mac and reinstalling macOS (back up your documents, not your apps): stealers often drop more malware. At the least, remove anything you don't recognise from System Settings \u003e General \u003e Login Items.",
+    "Look the file up on VirusTotal from another device: https://www.virustotal.com/gui/file/3be1d7a0c2f94e8a6b51d03f7c9e2a48b6d1f0e39c75a28d4e6b9f1c0a3d5e72"
+  ],
+  "mine": {
+    "pool": "gulf.moneroocean.stream:10128",
+    "wallet": "44AFFq5kSiGBoZ4NMDwYtN18obc8AemS33DBLWs3H7otXft3XjrpDtQGv7SqSsaBYBb98uNbr2VBBEt7f2wfn3RVGQBEP3A",
+    "agent": "XMRig/6.21.0 (Windows NT 10.0; Win64; x64)"
+  },
+  "absent": [
+    "checklistTicks",
+    "webhookShutdown",
+    "blockedSends",
+    "programSize"
+  ]
+}

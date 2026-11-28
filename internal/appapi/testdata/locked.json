@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "mode": "locked",
+  "version": "v0.10.2",
+  "state": "protected",
+  "headline": "Protected",
+  "somethingFrozen": false,
+  "isolated": false,
+  "baits": 14,
+  "baitsHealthy": 14,
+  "openAlerts": 0,
+  "heartbeat": "2026-11-27T14:02:20Z",
+  "health": [
+    {
+      "name": "Instant freeze armed",
+      "ok": true
+    },
+    {
+      "name": "Backup watcher on",
+      "ok": true,
+      "detail": "the event log, in case instant freeze misses one"
+    },
+    {
+      "name": "Flight recorder",
+      "ok": true
+    }
+  ]
+}

@@ -1,0 +1,429 @@
+{
+  "schema": 1,
+  "id": "20261127-135900-dead",
+  "shortId": "dead",
+  "time": "2026-11-27T14:02:07.12Z",
+  "category": "stealer",
+  "tier": "critical",
+  "outcome": "frozen",
+  "status": "open",
+  "title": "Likely infostealer: \u003cimg src=x onerror=alert(1)\u003e.exe opened your bait",
+  "summary": "Caught the moment it opened the bait (instant freeze). unsigned program running from your Downloads folder",
+  "test": false,
+  "learning": false,
+  "frozenNow": true,
+  "frozenSince": "2026-11-27T14:02:07.12Z",
+  "cutOff": false,
+  "isolated": false,
+  "instant": true,
+  "latencyMs": 120,
+  "program": {
+    "name": "\u003cimg src=x onerror=alert(1)\u003e.exe",
+    "path": "C:\\Users\\sam\\Downloads\\\u003cimg src=x onerror=alert(1)\u003e.exe",
+    "pid": 9120,
+    "signed": false,
+    "signature": "None. Nobody vouches for this file.",
+    "sha256": "9f2c41d077ab03e5c1b6f28e4d9a0c73b5e18d2f6a4c90b7e3d1f5a8c2b6e41b",
+    "folder": "your Downloads folder",
+    "startedBy": "explorer.exe",
+    "commandLine": "\"\u003cscript\u003ealert('cmd')\u003c/script\u003e\" --x=\"\u003c/textarea\u003e\u003csvg onload=alert(2)\u003e\"",
+    "user": "DESKTOP-4K2\\sam",
+    "exited": false,
+    "origin": {
+      "url": "javascript:alert(3)//https://example.com/\"\u003e\u003cb\u003ebold\u003c/b\u003e",
+      "referrer": "https://discord.com/channels/@me",
+      "line": "Downloaded from javascript:alert(3)//https://example.com/\"\u003e\u003cb\u003ebold\u003c/b\u003e (NitroGen-Free.exe)"
+    }
+  },
+  "baits": [
+    {
+      "id": "discord",
+      "label": "Discord login",
+      "icon": "discord",
+      "name": "Discord token store",
+      "path": "C:\\Users\\sam\\AppData\\Roaming\\discord\\Local Storage\\leveldb\\000005.ldb",
+      "access": "read",
+      "time": "2026-11-27T14:02:07Z"
+    }
+  ],
+  "reasons": [
+    "unsigned program running from your Downloads folder",
+    "it opened a bait no program of its kind has any reason to read"
+  ],
+  "did": [
+    {
+      "action": "freeze",
+      "ok": true,
+      "words": "Froze it and 1 process(es) it started",
+      "time": "2026-11-27T14:02:07.12Z"
+    },
+    {
+      "action": "block-program",
+      "ok": true,
+      "words": "Cut its internet",
+      "time": "2026-11-27T14:02:07.15Z"
+    }
+  ],
+  "buttons": [
+    "kill",
+    "resume",
+    "trust"
+  ],
+  "trustForGood": true,
+  "checklist": [
+    "Keep this Mac offline. Don't log in to anything from it until it's cleaned.",
+    "From another device (your phone), change your passwords: email first (it resets everything else), then banking, then anything saved in this Mac's browsers.",
+    "Log out everywhere: stolen browser cookies keep sessions alive after a password change. Use 'Sign out of all devices' for Google, Microsoft, Discord, Steam, Telegram (Settings \u003e Devices \u003e Terminate all), social media.",
+    "Crypto: move funds to a NEW wallet created on a clean device. Treat every seed phrase this Mac has ever seen as burned.",
+    "Turn on 2FA with an authenticator app (not SMS) for important accounts.",
+    "Strongly consider erasing the Mac and reinstalling macOS (back up your documents, not your apps): stealers often drop more malware. At the least, remove anything you don't recognise from System Settings \u003e General \u003e Login Items.",
+    "Look the file up on VirusTotal from another device: https://www.virustotal.com/gui/file/9f2c41d077ab03e5c1b6f28e4d9a0c73b5e18d2f6a4c90b7e3d1f5a8c2b6e41b"
+  ],
+  "report": {
+    "pending": false,
+    "started": "2026-11-27T14:02:07.32Z",
+    "finished": "2026-11-27T14:02:16.12Z",
+    "answer": "read",
+    "tone": "bad",
+    "headline": "It had already opened \u003cb\u003eyour\u003c/b\u003e real Chrome cookies.",
+    "summary": [
+      "1.8 s before it opened the bait, it opened your real Chrome cookies (the flight recorder saw it).",
+      "It packed them into a zip in your Temp folder, with the Discord bait.",
+      "It sent about 4 KB to discord.com 1.1 s before it opened the bait: assume they were taken."
+    ],
+    "steps": [
+      "Kill NitroGen-Free.exe: it's still frozen. Killing it ends it for good and keeps the evidence.",
+      "Sign out of every site in Chrome: stolen cookies let someone be you without a password. Signing out makes them useless.",
+      "Change your Discord password, then log out all other sessions in Discord's settings."
+    ],
+    "stepsUrgent": true,
+    "unsure": [],
+    "leads": [],
+    "dataLeft": "sent",
+    "dataLeftWhy": [],
+    "baitAt": "2026-11-27T14:02:07Z",
+    "processStart": "2026-11-27T14:02:05.1Z",
+    "frozenAt": "2026-11-27T14:02:07.12Z",
+    "timeline": [
+      {
+        "at": "2026-11-27T14:02:05.1Z",
+        "offsetMs": -1900,
+        "kind": "start",
+        "label": "It started",
+        "detail": "\u003cimg src=x onerror=alert(1)\u003e.exe",
+        "bad": false
+      },
+      {
+        "at": "2026-11-27T14:02:05.2Z",
+        "offsetMs": -1800,
+        "kind": "read",
+        "label": "Read your real Chrome cookies",
+        "detail": "Cookies",
+        "bad": true
+      },
+      {
+        "at": "2026-11-27T14:02:05.4Z",
+        "offsetMs": -1600,
+        "kind": "send",
+        "label": "Sent 310 bytes to ip-api.com",
+        "detail": "208.95.112.1:80",
+        "bad": false
+      },
+      {
+        "at": "2026-11-27T14:02:05.9Z",
+        "offsetMs": -1100,
+        "kind": "send",
+        "label": "Sent 4.1 KB to discord.com",
+        "detail": "162.159.135.232:443",
+        "bad": true
+      },
+      {
+        "at": "2026-11-27T14:02:07Z",
+        "offsetMs": 0,
+        "kind": "bait",
+        "label": "Opened the Discord login bait",
+        "bad": false
+      },
+      {
+        "at": "2026-11-27T14:02:07.12Z",
+        "offsetMs": 120,
+        "kind": "frozen",
+        "label": "Frozen",
+        "bad": false
+      }
+    ],
+    "reads": [
+      {
+        "store": "chrome",
+        "name": "your Chrome",
+        "kind": "browser",
+        "path": "C:\\Users\\sam\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Network\\Cookies",
+        "at": "2026-11-27T14:02:05.2Z",
+        "offsetMs": -1800,
+        "count": 0,
+        "pid": 9120,
+        "image": "C:\\Users\\sam\\Downloads\\NitroGen-Free.exe",
+        "how": "the flight recorder saw it open it"
+      },
+      {
+        "store": "chrome",
+        "name": "your Chrome",
+        "kind": "browser",
+        "path": "C:\\Users\\sam\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Login Data",
+        "at": "2026-11-27T14:02:05.3Z",
+        "offsetMs": -1700,
+        "count": 0,
+        "pid": 9120,
+        "image": "C:\\Users\\sam\\Downloads\\NitroGen-Free.exe",
+        "how": "the flight recorder saw it open it"
+      }
+    ],
+    "sends": [
+      {
+        "to": "162.159.135.232:443",
+        "host": "discord.com",
+        "bytes": 4198,
+        "bytesAfter": 4198,
+        "after": true,
+        "first": "2026-11-27T14:02:05.9Z",
+        "last": "2026-11-27T14:02:06Z",
+        "offsetMs": -1100,
+        "conns": 1,
+        "lan": false,
+        "udp": false,
+        "pid": 9120,
+        "image": "NitroGen-Free.exe"
+      },
+      {
+        "to": "208.95.112.1:80",
+        "host": "ip-api.com",
+        "bytes": 310,
+        "bytesAfter": 0,
+        "after": false,
+        "first": "2026-11-27T14:02:05.4Z",
+        "last": "2026-11-27T14:02:05.5Z",
+        "offsetMs": -1600,
+        "conns": 1,
+        "lan": false,
+        "udp": false,
+        "pid": 9120,
+        "image": "NitroGen-Free.exe"
+      }
+    ],
+    "addresses": [
+      {
+        "kind": "discord-webhook",
+        "label": "Discord webhook",
+        "value": "https://discord.com/api/webhooks/1/\"\u003e\u003cimg src=x onerror=alert(4)\u003e",
+        "where": "memory+file",
+        "shareable": true
+      },
+      {
+        "kind": "telegram-bot",
+        "label": "Telegram bot",
+        "value": "bot123456:AA\u003cscript\u003ealert(5)\u003c/script\u003e",
+        "where": "file",
+        "shareable": true
+      }
+    ],
+    "staged": [
+      {
+        "path": "C:\\Users\\sam\\AppData\\Local\\Temp\\​‮\\loot\u003cb\u003e.zip",
+        "name": "loot\u003cb\u003e.zip",
+        "folder": "C:\\Users\\sam\\AppData\\Local\\Temp\\​‮",
+        "size": 198656,
+        "appeared": "2026-11-27T14:02:06.1Z",
+        "heldOpen": true,
+        "what": "an archive of 4 files (1 baits, 2 copies of your real files)",
+        "archive": "zip",
+        "entries": [
+          {
+            "name": "Chrome/Cookies",
+            "size": 151552,
+            "tag": "real-copy",
+            "what": "your Chrome's: the same bytes as your real file C:\\Users\\sam\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Network\\Cookies"
+          },
+          {
+            "name": "Chrome/Login Data",
+            "size": 45056,
+            "tag": "real-copy",
+            "what": "your Chrome's: the same bytes as your real file C:\\Users\\sam\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Login Data"
+          },
+          {
+            "name": "Discord/000005.ldb",
+            "size": 2148,
+            "tag": "bait",
+            "what": "a bait (Discord token store): fake, nothing lost"
+          },
+          {
+            "name": "info.txt",
+            "size": 512,
+            "tag": ""
+          },
+          {
+            "name": "\u003ciframe src=javascript:alert(6)\u003e.txt",
+            "size": 10,
+            "tag": "named-like",
+            "what": "named like a bait (\u003cu\u003ex\u003c/u\u003e)"
+          }
+        ],
+        "more": 0,
+        "saved": true,
+        "baits": 1,
+        "real": 2
+      }
+    ],
+    "unpacked": [],
+    "watched": [
+      {
+        "name": "your Chrome",
+        "state": "watched",
+        "since": "2026-11-27T08:01:00Z"
+      },
+      {
+        "name": "your Firefox",
+        "state": "absent"
+      },
+      {
+        "name": "Telegram Desktop",
+        "state": "not-seen",
+        "why": "it was installed after the flight recorder started"
+      }
+    ],
+    "openFiles": [
+      {
+        "path": "C:\\Users\\sam\\AppData\\Local\\Temp\\ng_7f3a.zip",
+        "pid": 9120
+      }
+    ],
+    "left": [],
+    "evidence": {
+      "saved": true,
+      "folder": "C:\\ProgramData\\FileAccessMonitor\\evidence\\20261127-140207-7f3a",
+      "memoryImage": true,
+      "memoryScanned": 50331648
+    },
+    "notes": [],
+    "sections": [
+      {
+        "key": "answer",
+        "title": "Answer",
+        "lines": [
+          "It had already opened \u003cb\u003eyour\u003c/b\u003e real Chrome cookies.",
+          "1.8 s before it opened the bait, it opened your real Chrome cookies (the flight recorder saw it).",
+          "It packed them into a zip in your Temp folder, with the Discord bait.",
+          "It sent about 4 KB to discord.com 1.1 s before it opened the bait: assume they were taken."
+        ]
+      },
+      {
+        "key": "steps",
+        "title": "Do this now, from another device",
+        "lines": [
+          "1. Kill NitroGen-Free.exe: it's still frozen. Killing it ends it for good and keeps the evidence.",
+          "2. Sign out of every site in Chrome: stolen cookies let someone be you without a password. Signing out makes them useless.",
+          "3. Change your Discord password, then log out all other sessions in Discord's settings."
+        ]
+      },
+      {
+        "key": "sent",
+        "title": "What it sent over the network",
+        "lines": [
+          "14:02:05  discord.com (162.159.135.232:443)  about 4 KB, 1 connection  pid 9120  - after it opened your data",
+          "14:02:05  ip-api.com (208.95.112.1:80)  about 310 bytes, 1 connection  pid 9120  - before it opened anything of yours"
+        ]
+      },
+      {
+        "key": "reads",
+        "title": "Real data it opened",
+        "lines": [
+          "14:02:05  your Chrome  C:\\Users\\sam\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Network\\Cookies  (1.8 s before it opened the bait)  pid 9120  - the flight recorder saw it open it",
+          "14:02:05  your Chrome  C:\\Users\\sam\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Login Data  (1.7 s before it opened the bait)  pid 9120  - the flight recorder saw it open it"
+        ]
+      },
+      {
+        "key": "watched",
+        "title": "What ABA was watching while it ran",
+        "lines": [
+          "It started at 14:02:05; it opened the bait at 14:02:07.",
+          "watched   your Chrome (since Nov 27 08:01)",
+          "not here  your Firefox",
+          "NOT SEEN  Telegram Desktop: it was installed after the flight recorder started"
+        ]
+      },
+      {
+        "key": "open",
+        "title": "Files it has open",
+        "lines": [
+          "pid 9120  C:\\Users\\sam\\AppData\\Local\\Temp\\ng_7f3a.zip"
+        ]
+      },
+      {
+        "key": "staged",
+        "title": "Files that appeared while it ran",
+        "lines": [
+          "14:02:06  194 KB  C:\\Users\\sam\\AppData\\Local\\Temp\\\"‹U+200B›‹U+202E›\"\\loot\u003cb\u003e.zip  (it has this open)  an archive of 4 files (1 baits, 2 copies of your real files)",
+          "    Chrome/Cookies  - your Chrome's: the same bytes as your real file C:\\Users\\sam\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Network\\Cookies",
+          "    Chrome/Login Data  - your Chrome's: the same bytes as your real file C:\\Users\\sam\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Login Data",
+          "    Discord/000005.ldb  - a bait (Discord token store): fake, nothing lost",
+          "    info.txt",
+          "    \u003ciframe src=javascript:alert(6)\u003e.txt  - named like a bait (\u003cu\u003ex\u003c/u\u003e)",
+          "(‹U+…› marks characters that don't show on screen: a folder or file named so you can't see or type its name is a stealer's trick to hide what it collects.)",
+          "(Files that appeared in these places while it ran. Unless it has one open, ABA can't prove it made it.)"
+        ]
+      },
+      {
+        "key": "addresses",
+        "title": "Where it was sending",
+        "lines": [
+          "Discord webhook  https://discord.com/api/webhooks/1/\"\u003e\u003cimg src=x onerror=alert(4)\u003e  (seen in its memory+file)",
+          "Telegram bot     bot123456:AA\u003cscript\u003ealert(5)\u003c/script\u003e  (seen in its file)",
+          "(48.0 MB of its memory looked through.)",
+          "The Discord webhook is the stealer's own mailbox, not yours. You can report it to Discord (Trust \u0026 Safety, at dis.gd/request): Discord deletes webhooks used for stealing, and then nothing more reaches the thief through it.",
+          "The Telegram bot is the stealer's own, not yours. You can report it to Telegram (abuse@telegram.org, with the bot's token): Telegram shuts such bots down."
+        ]
+      },
+      {
+        "key": "program",
+        "title": "The program",
+        "lines": [
+          "Name: C:\\Users\\sam\\Downloads\\\u003cimg src=x onerror=alert(1)\u003e.exe (pid 9120)",
+          "File: C:\\Users\\sam\\Downloads\\\u003cimg src=x onerror=alert(1)\u003e.exe",
+          "Signature: unsigned",
+          "Fingerprint (SHA-256): 9f2c41d077ab03e5c1b6f28e4d9a0c73b5e18d2f6a4c90b7e3d1f5a8c2b6e41b",
+          "Downloaded from: javascript:alert(3)//https://example.com/\"\u003e\u003cb\u003ebold\u003c/b\u003e (C:\\Users\\sam\\Downloads\\NitroGen-Free.exe)",
+          "Started by: explorer.exe (pid 5124)",
+          "Command line: \"\u003cscript\u003ealert('cmd')\u003c/script\u003e\" --x=\"\u003c/textarea\u003e\u003csvg onload=alert(2)\u003e\"",
+          "Ran as: DESKTOP-4K2\\sam"
+        ]
+      },
+      {
+        "key": "did",
+        "title": "What ABA did",
+        "lines": [
+          "Caught on Fri Nov 27 2026 at 14:02:07, the moment it opened the bait (stopped 120 ms after).",
+          "Done: Froze it and 1 process(es) it started",
+          "Done: Cut its internet",
+          "To answer it, type one of these in Terminal, with sudo in front (or answer ABA's first popup about it):",
+          "aba kill dead  it's malware: end it (it stays cut off)",
+          "aba trust dead  it's yours: undo everything and stop alerting about it",
+          "aba resume dead  not sure: let it run again, without trusting it"
+        ]
+      },
+      {
+        "key": "evidence",
+        "title": "Evidence",
+        "lines": [
+          "Saved to C:\\ProgramData\\FileAccessMonitor\\evidence\\20261127-140207-7f3a (administrators only).",
+          "It includes a copy of the program's memory, which holds whatever it collected: maybe your own passwords and cookies. Keep it to yourself.",
+          "To share what's safe to share: aba export-ioc 20261127-135900-dead"
+        ]
+      }
+    ]
+  },
+  "absent": [
+    "checklistTicks",
+    "webhookShutdown",
+    "blockedSends",
+    "programSize"
+  ]
+}

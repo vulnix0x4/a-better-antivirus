@@ -1,0 +1,211 @@
+{
+  "schema": 1,
+  "mode": "full",
+  "version": "v0.10.2",
+  "now": "2026-11-27T14:03:00Z",
+  "protection": {
+    "state": "protected",
+    "headline": "Protected",
+    "problems": [],
+    "serviceRunning": true,
+    "heartbeat": "2026-11-27T14:02:20Z",
+    "health": [
+      {
+        "name": "Instant freeze armed",
+        "ok": true
+      },
+      {
+        "name": "Backup watcher on",
+        "ok": true,
+        "detail": "the event log, in case instant freeze misses one"
+      },
+      {
+        "name": "Flight recorder",
+        "ok": true
+      }
+    ],
+    "learning": false
+  },
+  "baits": {
+    "total": 14,
+    "healthy": 14,
+    "lastCheck": "2026-11-27T14:01:00Z",
+    "byKind": [
+      {
+        "category": "Files",
+        "total": 3,
+        "healthy": 3
+      },
+      {
+        "category": "Browsers",
+        "total": 4,
+        "healthy": 4
+      },
+      {
+        "category": "Wallets",
+        "total": 3,
+        "healthy": 3
+      },
+      {
+        "category": "Apps",
+        "total": 2,
+        "healthy": 2
+      },
+      {
+        "category": "Credentials",
+        "total": 2,
+        "healthy": 2
+      }
+    ],
+    "tags": [
+      {
+        "id": "discord",
+        "label": "Discord login",
+        "icon": "discord",
+        "health": "ok"
+      },
+      {
+        "id": "chrome-profile",
+        "label": "Chrome passwords",
+        "icon": "chrome",
+        "health": "ok"
+      },
+      {
+        "id": "metamask",
+        "label": "MetaMask wallet",
+        "icon": "wallet",
+        "health": "ok"
+      },
+      {
+        "id": "ssh-backup",
+        "label": "SSH keys",
+        "icon": "key",
+        "health": "ok"
+      },
+      {
+        "id": "telegram",
+        "label": "Telegram session",
+        "icon": "telegram",
+        "health": "ok"
+      },
+      {
+        "id": "desktop-passwords",
+        "label": "Password list",
+        "icon": "doc",
+        "health": "ok"
+      },
+      {
+        "id": "edge-profile",
+        "label": "Edge profile",
+        "icon": "globe",
+        "health": "ok"
+      },
+      {
+        "id": "exodus",
+        "label": "Exodus wallet",
+        "icon": "wallet",
+        "health": "ok"
+      },
+      {
+        "id": "aws",
+        "label": "AWS keys",
+        "icon": "cloud",
+        "health": "ok"
+      },
+      {
+        "id": "seed-phrase",
+        "label": "Recovery phrase",
+        "icon": "grid",
+        "health": "ok"
+      },
+      {
+        "id": "brave",
+        "label": "Brave profile",
+        "icon": "globe",
+        "health": "ok"
+      },
+      {
+        "id": "electrum",
+        "label": "Electrum wallet",
+        "icon": "wallet",
+        "health": "ok"
+      },
+      {
+        "id": "backup-codes",
+        "label": "2FA backup codes",
+        "icon": "hashi",
+        "health": "ok"
+      },
+      {
+        "id": "opera",
+        "label": "Opera profile",
+        "icon": "globe",
+        "health": "ok"
+      }
+    ]
+  },
+  "quietDays": 8,
+  "lastCatch": "2026-11-19T03:12:44Z",
+  "preset": {
+    "id": "balanced",
+    "name": "Balanced",
+    "says": "On a catch: freeze it, cut its internet"
+  },
+  "traps": {
+    "baits": 14,
+    "instant": true,
+    "recorder": true,
+    "clipboard": {
+      "on": true,
+      "supported": true
+    },
+    "miners": {
+      "on": true,
+      "supported": true
+    }
+  },
+  "update": {
+    "version": "v0.10.2",
+    "latest": "v0.10.2",
+    "available": false,
+    "auto": true,
+    "updatable": true,
+    "lastCheck": "2026-11-27T08:00:00Z",
+    "lastResult": "up to date"
+  },
+  "waiting": [],
+  "frozen": [],
+  "recentQuiet": [
+    {
+      "id": "20261125-091502-1a2b",
+      "shortId": "1a2b",
+      "time": "2026-11-25T09:15:02Z",
+      "category": "stealer",
+      "tier": "info",
+      "outcome": "noted",
+      "program": "SearchProtocolHost.exe",
+      "title": "SearchProtocolHost.exe read a bait (looks legitimate)",
+      "line": "Looked legitimate. Noted quietly.",
+      "bait": "Password list",
+      "icon": "quiet",
+      "test": false
+    },
+    {
+      "id": "20261122-201144-3c4d",
+      "shortId": "3c4d",
+      "time": "2026-11-22T20:11:44Z",
+      "category": "stealer",
+      "tier": "info",
+      "outcome": "noted",
+      "program": "MsMpEng.exe",
+      "title": "MsMpEng.exe read a bait (looks legitimate)",
+      "line": "Looked legitimate. Noted quietly.",
+      "bait": "Recovery phrase",
+      "icon": "quiet",
+      "test": false
+    }
+  ],
+  "absent": [
+    "touchChart"
+  ]
+}

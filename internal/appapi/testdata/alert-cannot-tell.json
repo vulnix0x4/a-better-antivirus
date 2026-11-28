@@ -1,0 +1,262 @@
+{
+  "schema": 1,
+  "id": "20261126-221530-c41e",
+  "shortId": "c41e",
+  "time": "2026-11-26T22:15:30Z",
+  "category": "stealer",
+  "tier": "critical",
+  "outcome": "frozen",
+  "status": "open",
+  "title": "Likely infostealer: Setup.exe opened your bait",
+  "summary": "Caught the moment it opened the bait (instant freeze). unsigned program running from your Downloads folder",
+  "test": false,
+  "learning": false,
+  "frozenNow": true,
+  "frozenSince": "2026-11-26T22:15:30Z",
+  "cutOff": false,
+  "isolated": false,
+  "instant": true,
+  "latencyMs": 120,
+  "program": {
+    "name": "Setup.exe",
+    "path": "C:\\Users\\sam\\AppData\\Local\\Temp\\7zS4A21\\Setup.exe",
+    "pid": 9120,
+    "signed": false,
+    "signature": "None. Nobody vouches for this file.",
+    "sha256": "9f2c41d077ab03e5c1b6f28e4d9a0c73b5e18d2f6a4c90b7e3d1f5a8c2b6e41b",
+    "folder": "your Temp folder",
+    "startedBy": "a program that has ended since",
+    "commandLine": "\"C:\\Users\\sam\\Downloads\\NitroGen-Free.exe\"",
+    "user": "DESKTOP-4K2\\sam",
+    "exited": false
+  },
+  "baits": [
+    {
+      "id": "discord",
+      "label": "Discord login",
+      "icon": "discord",
+      "name": "Discord token store",
+      "path": "C:\\Users\\sam\\AppData\\Roaming\\discord\\Local Storage\\leveldb\\000005.ldb",
+      "access": "read",
+      "time": "2026-11-26T22:15:29.88Z"
+    }
+  ],
+  "reasons": [
+    "unsigned program running from your Downloads folder",
+    "it opened a bait no program of its kind has any reason to read"
+  ],
+  "did": [
+    {
+      "action": "freeze",
+      "ok": true,
+      "words": "Froze it and 1 process(es) it started",
+      "time": "2026-11-26T22:15:30Z"
+    },
+    {
+      "action": "block-program",
+      "ok": true,
+      "words": "Cut its internet",
+      "time": "2026-11-26T22:15:30.03Z"
+    }
+  ],
+  "buttons": [
+    "kill",
+    "resume",
+    "trust"
+  ],
+  "trustForGood": true,
+  "checklist": [
+    "Keep this Mac offline. Don't log in to anything from it until it's cleaned.",
+    "From another device (your phone), change your passwords: email first (it resets everything else), then banking, then anything saved in this Mac's browsers.",
+    "Log out everywhere: stolen browser cookies keep sessions alive after a password change. Use 'Sign out of all devices' for Google, Microsoft, Discord, Steam, Telegram (Settings \u003e Devices \u003e Terminate all), social media.",
+    "Crypto: move funds to a NEW wallet created on a clean device. Treat every seed phrase this Mac has ever seen as burned.",
+    "Turn on 2FA with an authenticator app (not SMS) for important accounts.",
+    "Strongly consider erasing the Mac and reinstalling macOS (back up your documents, not your apps): stealers often drop more malware. At the least, remove anything you don't recognise from System Settings \u003e General \u003e Login Items.",
+    "Look the file up on VirusTotal from another device: https://www.virustotal.com/gui/file/9f2c41d077ab03e5c1b6f28e4d9a0c73b5e18d2f6a4c90b7e3d1f5a8c2b6e41b"
+  ],
+  "report": {
+    "pending": false,
+    "started": "2026-11-26T22:15:30.2Z",
+    "finished": "2026-11-26T22:15:39Z",
+    "answer": "cannot-tell",
+    "tone": "warn",
+    "headline": "ABA can't tell whether it took anything of yours.",
+    "summary": [
+      "It started before ABA did, so the flight recorder didn't see its first seconds."
+    ],
+    "steps": [
+      "Kill Setup.exe.",
+      "To be safe, change your important passwords from another device, email first."
+    ],
+    "stepsUrgent": false,
+    "unsure": [
+      "It had been running for 3 minutes before ABA's service started.",
+      "Your Telegram data wasn't watched (installed after the flight recorder started)."
+    ],
+    "leads": [
+      "A folder of its own code appeared in your Temp folder while it ran."
+    ],
+    "dataLeft": "cannot-tell",
+    "dataLeftWhy": [
+      "The network record wasn't running when it started (the service had just restarted)."
+    ],
+    "baitAt": "2026-11-26T22:15:29.88Z",
+    "frozenAt": "2026-11-26T22:15:30Z",
+    "timeline": [
+      {
+        "at": "2026-11-26T22:15:29.88Z",
+        "offsetMs": 0,
+        "kind": "bait",
+        "label": "Opened the Discord login bait",
+        "bad": false
+      },
+      {
+        "at": "2026-11-26T22:15:30Z",
+        "offsetMs": 120,
+        "kind": "frozen",
+        "label": "Frozen",
+        "bad": false
+      }
+    ],
+    "reads": [],
+    "sends": [],
+    "addresses": [],
+    "staged": [],
+    "unpacked": [
+      {
+        "dir": "C:\\Users\\sam\\AppData\\Local\\Temp\\_MEI66402",
+        "files": 212,
+        "size": 32505856
+      }
+    ],
+    "watched": [
+      {
+        "name": "your Chrome",
+        "state": "watched",
+        "since": "2026-11-27T08:01:00Z"
+      },
+      {
+        "name": "your Firefox",
+        "state": "absent"
+      },
+      {
+        "name": "Telegram Desktop",
+        "state": "not-seen",
+        "why": "it was installed after the flight recorder started"
+      }
+    ],
+    "openFiles": [],
+    "left": [],
+    "evidence": {
+      "saved": false,
+      "memoryImage": false,
+      "memoryScanned": 50331648
+    },
+    "notes": [
+      "Its memory couldn't be copied: it's a 32-bit program and the copy failed (access denied)."
+    ],
+    "sections": [
+      {
+        "key": "answer",
+        "title": "Answer",
+        "lines": [
+          "ABA can't tell whether it took anything of yours.",
+          "It started before ABA did, so the flight recorder didn't see its first seconds."
+        ]
+      },
+      {
+        "key": "steps",
+        "title": "To be safe",
+        "lines": [
+          "1. Kill Setup.exe.",
+          "2. To be safe, change your important passwords from another device, email first."
+        ]
+      },
+      {
+        "key": "unsure",
+        "title": "Why ABA can't be sure",
+        "lines": [
+          "It had been running for 3 minutes before ABA's service started.",
+          "Your Telegram data wasn't watched (installed after the flight recorder started)."
+        ]
+      },
+      {
+        "key": "leads",
+        "title": "Leads",
+        "lines": [
+          "A folder of its own code appeared in your Temp folder while it ran."
+        ]
+      },
+      {
+        "key": "sent",
+        "title": "What it sent over the network",
+        "lines": [
+          "ABA can't tell: the network record wasn't running when it started (the service had just restarted)."
+        ]
+      },
+      {
+        "key": "watched",
+        "title": "What ABA was watching while it ran",
+        "lines": [
+          "watched   your Chrome (since Nov 27 08:01)",
+          "not here  your Firefox",
+          "NOT SEEN  Telegram Desktop: it was installed after the flight recorder started"
+        ]
+      },
+      {
+        "key": "staged",
+        "title": "Files that appeared while it ran",
+        "lines": [
+          "C:\\Users\\sam\\AppData\\Local\\Temp\\_MEI66402  212 files, 31.0 MB: the program's own code, unpacked there while it ran (it runs code from this folder); not listed",
+          "(Files that appeared in these places while it ran. Unless it has one open, ABA can't prove it made it.)"
+        ]
+      },
+      {
+        "key": "addresses",
+        "title": "Where it was sending",
+        "lines": [
+          "(48.0 MB of its memory looked through.)"
+        ]
+      },
+      {
+        "key": "program",
+        "title": "The program",
+        "lines": [
+          "Name: C:\\Users\\sam\\AppData\\Local\\Temp\\7zS4A21\\Setup.exe (pid 9120)",
+          "File: C:\\Users\\sam\\AppData\\Local\\Temp\\7zS4A21\\Setup.exe",
+          "Signature: unsigned",
+          "Fingerprint (SHA-256): 9f2c41d077ab03e5c1b6f28e4d9a0c73b5e18d2f6a4c90b7e3d1f5a8c2b6e41b",
+          "Started by: a program that has ended since (pid 6640)",
+          "Command line: \"C:\\Users\\sam\\Downloads\\NitroGen-Free.exe\"",
+          "Ran as: DESKTOP-4K2\\sam"
+        ]
+      },
+      {
+        "key": "did",
+        "title": "What ABA did",
+        "lines": [
+          "Caught on Thu Nov 26 2026 at 22:15:30, the moment it opened the bait (stopped 120 ms after).",
+          "Done: Froze it and 1 process(es) it started",
+          "Done: Cut its internet",
+          "To answer it, type one of these in Terminal, with sudo in front (or answer ABA's first popup about it):",
+          "aba kill c41e  it's malware: end it (it stays cut off)",
+          "aba trust c41e  it's yours: undo everything and stop alerting about it",
+          "aba resume c41e  not sure: let it run again, without trusting it"
+        ]
+      },
+      {
+        "key": "notes",
+        "title": "Notes",
+        "lines": [
+          "Its memory couldn't be copied: it's a 32-bit program and the copy failed (access denied)."
+        ]
+      }
+    ]
+  },
+  "absent": [
+    "checklistTicks",
+    "webhookShutdown",
+    "blockedSends",
+    "programSize"
+  ]
+}

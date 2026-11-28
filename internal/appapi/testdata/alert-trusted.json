@@ -1,0 +1,54 @@
+{
+  "schema": 1,
+  "id": "20261106-112031-91aa",
+  "shortId": "91aa",
+  "time": "2026-11-06T11:20:31Z",
+  "category": "stealer",
+  "tier": "warn",
+  "outcome": "trusted",
+  "status": "resolved",
+  "note": "you trusted this program",
+  "title": "Reflect.exe read a bait",
+  "summary": "signed program running from an unusual place",
+  "test": false,
+  "learning": false,
+  "frozenNow": false,
+  "cutOff": false,
+  "isolated": false,
+  "instant": false,
+  "latencyMs": 0,
+  "program": {
+    "name": "Reflect.exe",
+    "path": "C:\\Program Files\\Macrium\\Reflect\\Reflect.exe",
+    "pid": 6012,
+    "signed": true,
+    "signer": "Paramount Software UK Ltd",
+    "signature": "Signed by Paramount Software UK Ltd.",
+    "folder": "Program Files",
+    "exited": false
+  },
+  "baits": [
+    {
+      "id": "seed-phrase",
+      "label": "Recovery phrase",
+      "icon": "grid",
+      "name": "wallet recovery phrase (Documents)",
+      "path": "C:\\Users\\sam\\Documents\\wallet seed.txt",
+      "access": "read",
+      "time": "2026-11-06T11:20:31Z"
+    }
+  ],
+  "reasons": [
+    "signed by Paramount Software UK Ltd, but it read a bait"
+  ],
+  "did": [],
+  "buttons": [],
+  "trustForGood": true,
+  "checklist": [],
+  "absent": [
+    "checklistTicks",
+    "webhookShutdown",
+    "blockedSends",
+    "programSize"
+  ]
+}

@@ -259,6 +259,9 @@ type Alert struct {
 	// Buttons are the answers this alert takes, in order (see Button*).
 	// Empty when it's answered or there's nothing to answer.
 	Buttons []string `json:"buttons"`
+	// TrustForGood: "It's mine" trusts it from now on (for the baits it read);
+	// else it lets it run this once and trusts nothing (see package trust).
+	TrustForGood bool `json:"trustForGood"`
 	// Checklist is what to do after a catch, in words (no tick state).
 	Checklist []string `json:"checklist"`
 
