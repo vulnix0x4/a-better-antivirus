@@ -14,6 +14,7 @@ import (
 	"golang.org/x/sys/windows/registry"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
+	"github.com/vulnix0x4/a-better-antivirus/internal/sysenv"
 )
 
 // ScrubProcessEnv takes every WEBVIEW2_* variable out of this process's
@@ -235,12 +236,28 @@ func mkdirAdminOnly(dir string) error {
 // its data directory" box. The profile is therefore as much the person's
 // (and their programs') as the browser processes are; nothing in it is
 // trusted by the elevated app.
-func WebViewDir() string {
-	base, err := os.UserCacheDir() // %LocalAppData%
-	if err != nil || base == "" {
-		base = os.TempDir()
+//
+// Where LocalAppData is comes from the machine's list of profiles (by the
+// account's SID), not from %LOCALAPPDATA%: the person's variables go along
+// into the elevated app, and an administrator creating folders where they
+// say is more than the person may do (see package sysenv). The folder is
+// made through os.Root, so a junction the person put in AppData\Local\ABA
+// can't make it land elsewhere either.
+func WebViewDir() (string, error) {
+	base := sysenv.LocalAppData()
+	if base == "" {
+		return "", errors.New("this account's profile folder isn't in Windows' list of profiles")
 	}
-	return filepath.Join(base, "ABA", "webview")
+	root, err := os.OpenRoot(base)
+	if err != nil {
+		return "", err
+	}
+	defer root.Close()
+	rel := filepath.Join("ABA", "webview")
+	if err := root.MkdirAll(rel, 0o700); err != nil {
+		return "", err
+	}
+	return filepath.Join(base, rel), nil
 }
 
 // IsElevated reports whether this process has an elevated (full)

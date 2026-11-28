@@ -11,6 +11,7 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/appsec"
+	"github.com/vulnix0x4/a-better-antivirus/internal/sysenv"
 )
 
 // AppLaunch is how the desktop app was started in one session.
@@ -121,15 +122,20 @@ func appToken(user windows.Token) (windows.Token, TokenPick, error) {
 	return linked, pick, nil
 }
 
-// appEnvironment is the person's environment for tok, minus WEBVIEW2_*
-// (which the person may set in HKCU\Environment to steer the elevated app's
-// browser engine; the app scrubs them itself too), as a UTF-16 block.
+// appEnvironment is the person's environment for tok, as a UTF-16 block,
+// minus WEBVIEW2_* (which the person may set in HKCU\Environment to steer
+// the elevated app's browser engine), and with the machine's own Windows,
+// Program Files and ProgramData folders, PATH, and the person's folders
+// from the machine's list of profiles, whatever HKCU\Environment says
+// (sysenv.Clean: an elevated app reading ABA's data from a folder the person
+// chose is theirs to steer). The app cleans its own environment too.
 func appEnvironment(tok windows.Token) ([]uint16, error) {
 	env, err := tok.Environ(false)
 	if err != nil {
 		return nil, fmt.Errorf("environment: %w", err)
 	}
 	keep, _ := appsec.ScrubWebView2Env(env)
+	keep = sysenv.Clean(keep, sysenv.Machine(), sysenv.TokenProfile(tok))
 	var block []uint16
 	for _, kv := range keep {
 		u, err := windows.UTF16FromString(kv)

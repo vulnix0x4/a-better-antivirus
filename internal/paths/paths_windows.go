@@ -1,11 +1,12 @@
 package paths
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/vulnix0x4/a-better-antivirus/internal/sysenv"
 )
 
 const (
@@ -35,26 +36,22 @@ func InstallDir() string {
 // Administrators can get in: it lists every bait and every program you
 // trusted, which is exactly what a stealer would like to read. What `aba`
 // shows without admin rights comes from PublicStatusFile.
+//
+// ProgramData comes from the machine's settings, never the environment: a
+// person's own variables (HKCU\Environment) go along into what they start
+// as administrator, and into the app the service starts for them (see
+// package sysenv).
 func DataDir() string {
-	pd := os.Getenv("ProgramData")
-	if pd == "" {
-		pd = `C:\ProgramData`
-	}
-	return filepath.Join(pd, dataDirName)
+	return filepath.Join(sysenv.Machine().Defaults().ProgramData, dataDirName)
 }
 
 // AppOffFile marks an install that was asked to leave the app out.
 func AppOffFile() string { return filepath.Join(InstallDir(), AppOffName) }
 
-func programFiles() string {
-	if p, err := windows.KnownFolderPath(windows.FOLDERID_ProgramFiles, 0); err == nil && p != "" {
-		return p
-	}
-	if p := os.Getenv("ProgramFiles"); p != "" {
-		return p
-	}
-	return `C:\Program Files`
-}
+// programFiles is the machine's (native) Program Files folder, from HKLM,
+// never the environment (see DataDir), nor SHGetKnownFolderPath (it never
+// returns on the app's main thread).
+func programFiles() string { return sysenv.Machine().Defaults().ProgramFiles }
 
 // Long expands 8.3 short names (C:\Users\VULNIX~1 -> C:\Users\vulnix0x4) so
 // the same file always compares equal. It only queries directory entries,

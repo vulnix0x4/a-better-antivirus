@@ -5,7 +5,6 @@ package classify
 // paths and command lines.
 
 import (
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -14,6 +13,7 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
 	"github.com/vulnix0x4/a-better-antivirus/internal/provenance"
+	"github.com/vulnix0x4/a-better-antivirus/internal/sysenv"
 )
 
 // systemCritical are the Windows processes ABA never suspends or kills:
@@ -159,21 +159,16 @@ type Env struct {
 	WinDir, WinTemp, ProgramFiles, ProgramFilesX86, ProgramData string
 }
 
+// DefaultEnv is this machine's: from its settings, not the environment (an
+// elevated CLI has the person's own variables; see package sysenv).
 func DefaultEnv() Env {
-	win := os.Getenv("SystemRoot")
-	if win == "" {
-		win = `C:\Windows`
-	}
-	pf := os.Getenv("ProgramW6432")
-	if pf == "" {
-		pf = os.Getenv("ProgramFiles")
-	}
+	m := sysenv.Machine().Defaults()
 	return Env{
-		WinDir:          win,
-		WinTemp:         filepath.Join(win, "Temp"),
-		ProgramFiles:    pf,
-		ProgramFilesX86: os.Getenv("ProgramFiles(x86)"),
-		ProgramData:     os.Getenv("ProgramData"),
+		WinDir:          m.SystemRoot,
+		WinTemp:         filepath.Join(m.SystemRoot, "Temp"),
+		ProgramFiles:    m.ProgramFiles,
+		ProgramFilesX86: m.ProgramFilesX86,
+		ProgramData:     m.ProgramData,
 	}
 }
 

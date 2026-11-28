@@ -1,21 +1,15 @@
 package baits
 
 import (
-	"os"
-
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
+	"github.com/vulnix0x4/a-better-antivirus/internal/sysenv"
 )
 
-func pf() string   { return env("ProgramW6432", env("ProgramFiles", `C:\Program Files`)) }
-func pf86() string { return env("ProgramFiles(x86)", `C:\Program Files (x86)`) }
-
-func env(k, def string) string {
-	if v := os.Getenv(k); v != "" {
-		return v
-	}
-	return def
-}
+// Program Files, from the machine's settings (not the environment: see
+// package sysenv).
+func pf() string   { return sysenv.Machine().Defaults().ProgramFiles }
+func pf86() string { return sysenv.Machine().Defaults().ProgramFilesX86 }
 
 // adminOnly reports whether path is somewhere only administrators can write
 // to (Program Files): what's there was installed, not dropped by a program

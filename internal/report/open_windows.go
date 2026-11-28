@@ -8,6 +8,7 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
+	"github.com/vulnix0x4/a-better-antivirus/internal/sysenv"
 	"github.com/vulnix0x4/a-better-antivirus/internal/winsec"
 )
 
@@ -28,10 +29,9 @@ func Where() string {
 // the browser in your own, ordinary rights.
 func Open(url string) error {
 	if winsec.IsElevated() {
-		explorer := filepath.Join(os.Getenv("SystemRoot"), "explorer.exe")
-		if os.Getenv("SystemRoot") == "" {
-			explorer = `C:\Windows\explorer.exe`
-		}
+		// The Windows folder from the machine's settings: the environment's
+		// SystemRoot is the person's to set (see package sysenv).
+		explorer := filepath.Join(sysenv.Machine().Defaults().SystemRoot, "explorer.exe")
 		// (Explorer's exit code says nothing about whether it worked.)
 		return exec.Command(explorer, url).Start()
 	}

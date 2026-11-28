@@ -45,6 +45,7 @@ import (
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/appsec"
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
+	"github.com/vulnix0x4/a-better-antivirus/internal/sysenv"
 )
 
 var version = "dev"
@@ -55,8 +56,11 @@ const windowClass = "ABAAppWindow"
 var trace = func(string, ...any) {}
 
 func main() {
-	// First: nothing below may see what the person put in WEBVIEW2_*.
+	// First: nothing below may see what the person put in WEBVIEW2_*, nor
+	// their own idea of where Windows, Program Files and ProgramData are
+	// (their variables come along into an elevated start; package sysenv).
 	scrubbed := appsec.ScrubProcessEnv()
+	sysenv.CleanProcess()
 
 	alert := flag.String("alert", "", "alert ID to open")
 	selftest := flag.Bool("selftest", false, "check the app works and is locked down, then exit")
@@ -162,8 +166,7 @@ func (a *App) run() int {
 		_, err = appsec.PrepareAppDir()
 	}
 	if err == nil {
-		a.dataDir = appsec.WebViewDir()
-		err = os.MkdirAll(a.dataDir, 0o700)
+		a.dataDir, err = appsec.WebViewDir()
 	}
 	trace("user data folder %q: %v", a.dataDir, err)
 	if err != nil {

@@ -13,7 +13,6 @@ package notify
 
 import (
 	"encoding/binary"
-	"os"
 	"path/filepath"
 	"runtime"
 	"sync"
@@ -21,6 +20,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/vulnix0x4/a-better-antivirus/internal/sysenv"
 )
 
 var (
@@ -56,10 +57,7 @@ const (
 // commonControls6 activates an activation context that asks for common
 // controls 6, on this thread (keep it locked), and returns how to undo it.
 func commonControls6() (undo func(), ok bool) {
-	win := os.Getenv("SystemRoot")
-	if win == "" {
-		win = `C:\Windows`
-	}
+	win := sysenv.Machine().Defaults().SystemRoot // not the environment's
 	sys := filepath.Join(win, "System32")
 	tries := []actCtxW{
 		// The manifest Explorer itself uses (asks for common controls 6).
