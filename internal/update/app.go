@@ -34,27 +34,44 @@ var errNoApp = errors.New("the release has no app for this PC")
 
 // KeepApp installs the desktop app of version (the running service's own
 // release) when this PC should have it and doesn't: a little after the
-// service starts, then hourly until it's there. It returns when ctx ends or
-// the release has no app.
+// service starts, then hourly until it's there. One that keeps failing
+// (each try downloads 14 MB) is tried less and less often, down to once a
+// day. It returns when ctx ends or the release has no app.
 func KeepApp(ctx context.Context, version string, logf func(string, ...any)) {
 	wait := 2 * time.Minute
+	failed := 0
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-time.After(wait):
 		}
-		wait = time.Hour
 		installed, err := ensureApp(ctx, version, Dir())
+		if err != nil {
+			failed++
+		} else {
+			failed = 0
+		}
+		wait = keepAppWait(failed)
 		switch {
 		case errors.Is(err, errNoApp):
 			return
 		case err != nil:
-			logf("app: fetching the ABA app of %s: %v", version, err)
+			logf("app: fetching the ABA app of %s: %v (next try in %v)", version, err, wait)
 		case installed:
 			logf("app: installed the ABA app of %s (signature and checksum verified)", version)
 		}
 	}
+}
+
+// keepAppWait is how long KeepApp waits after failed tries in a row: an
+// hour, doubling with each failure, at most a day.
+func keepAppWait(failed int) time.Duration {
+	w := time.Hour
+	for i := 1; i < failed && w < 24*time.Hour; i++ {
+		w *= 2
+	}
+	return min(w, 24*time.Hour)
 }
 
 // ensureApp fetches and installs version's app, checked against the
@@ -115,6 +132,6 @@ func restoreApp(backup string, had bool) error {
 	if err := os.Rename(target, old); err != nil {
 		return err
 	}
-	os.Remove(old)
+	install.ScheduleDelete(old) // now, or at the next restart if it's open
 	return nil
 }

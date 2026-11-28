@@ -675,3 +675,7 @@ func UninstallSteps(purge bool) []Step {
 
 // Reload asks the running service to re-read its configuration.
 func Reload() error { return svcctl.Send(svcctl.Reload) }
+
+// ScheduleDelete deletes p now or, if it can't be (a program still open on
+// Windows), when the PC next starts.
+func ScheduleDelete(p string) { scheduleDelete(p) }

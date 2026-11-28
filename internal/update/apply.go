@@ -14,7 +14,18 @@ import (
 
 // Dir holds downloaded updates and the rollback copy, somewhere only
 // administrators and the service can write to (updatesDir, per system).
-func Dir() string { return updatesDir() }
+func Dir() string { return dirOf() }
+
+// What Apply works on (tests point them at folders of their own and a fake
+// service).
+var (
+	dirOf         = updatesDir
+	cliTarget     = paths.InstalledCLI
+	serviceTarget = paths.InstalledService
+	poolsTarget   = minertrap.PoolsFile
+	serviceStop   = svcctl.Stop
+	serviceStart  = svcctl.Start
+)
 
 // Apply installs the verified exe at src as the CLI and the service binary,
 // with the list of mining pools and the desktop app that came with it, then
@@ -28,8 +39,8 @@ func Apply(src string, logf func(string, ...any)) error {
 		return fmt.Errorf("refusing to install %s: updates must come from %s", src, Dir())
 	}
 	backup := filepath.Join(Dir(), "rollback.exe")
-	if _, err := os.Stat(paths.InstalledService()); err == nil {
-		if err := install.CopyFile(paths.InstalledService(), backup); err != nil {
+	if _, err := os.Stat(serviceTarget()); err == nil {
+		if err := install.CopyFile(serviceTarget(), backup); err != nil {
 			return fmt.Errorf("back up the current version: %w", err)
 		}
 	}
@@ -46,26 +57,26 @@ func Apply(src string, logf func(string, ...any)) error {
 		}
 	}
 	swap := func(from string) error {
-		for _, dst := range []string{paths.InstalledCLI(), paths.InstalledService()} {
+		for _, dst := range []string{cliTarget(), serviceTarget()} {
 			if err := install.CopyFile(from, dst); err != nil {
 				return fmt.Errorf("%s: %w", dst, err)
 			}
 		}
 		return nil
 	}
-	if err := svcctl.Stop(); err != nil {
+	if err := serviceStop(); err != nil {
 		return fmt.Errorf("stop the service: %w", err)
 	}
 	if err := swap(src); err != nil {
 		logf("update: install failed (%v); restoring the previous version", err)
 		swap(backup)
-		svcctl.Start()
+		serviceStart()
 		return err
 	}
 	// The list of mining pools that came with it (Download checked it like
 	// the exe). Without one the service fetches its own (see minertrap).
 	if pools := PoolsBeside(src); fileExists(pools) {
-		if err := install.CopyFile(pools, minertrap.PoolsFile()); err != nil {
+		if err := install.CopyFile(pools, poolsTarget()); err != nil {
 			logf("update: the list of mining pools wasn't installed: %v", err)
 		}
 	}
@@ -75,7 +86,7 @@ func Apply(src string, logf func(string, ...any)) error {
 			logf("update: the ABA app wasn't installed: %v", err)
 		}
 	}
-	if err := svcctl.Start(); err != nil {
+	if err := serviceStart(); err != nil {
 		logf("update: new version did not start (%v); rolling back", err)
 		if e := swap(backup); e != nil {
 			logf("update: rollback copy failed: %v", e)
@@ -85,7 +96,7 @@ func Apply(src string, logf func(string, ...any)) error {
 				logf("update: putting back the previous app failed: %v", e)
 			}
 		}
-		if e := svcctl.Start(); e != nil {
+		if e := serviceStart(); e != nil {
 			logf("update: previous version did not start either: %v", e)
 		}
 		return fmt.Errorf("the new version failed to start, so the previous one was restored: %w", err)

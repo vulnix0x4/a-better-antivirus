@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeApp switches the desktop app on (whatever this system is) and installs
@@ -196,5 +197,13 @@ func TestRollbackPutsTheAppBack(t *testing.T) {
 	}
 	if left, _ := filepath.Glob(target + "*"); len(left) != 0 {
 		t.Errorf("left behind: %v", left)
+	}
+}
+
+func TestKeepAppBacksOff(t *testing.T) {
+	for failed, want := range map[int]time.Duration{0: time.Hour, 1: time.Hour, 2: 2 * time.Hour, 3: 4 * time.Hour, 5: 16 * time.Hour, 6: 24 * time.Hour, 40: 24 * time.Hour} {
+		if got := keepAppWait(failed); got != want {
+			t.Errorf("after %d failures: %v, want %v", failed, got, want)
+		}
 	}
 }
