@@ -201,8 +201,9 @@ func taskDialog(title, instruction, content, label, note string, icon uint32) (c
 // askReport shows the autopsy popup: the headline, the text, a "Show full
 // report" button (the answer is true) and Close.
 func askReport(title, headline, text string, icon uint32) bool {
-	if clicked, ok := taskDialog(title, headline, text, showReportLabel, "Opens everything ABA found in your web browser", icon); ok {
+	note := reportButtonNote()
+	if clicked, ok := taskDialog(title, headline, text, showReportLabel, note, icon); ok {
 		return clicked
 	}
-	return messageBox(title, headline+"\n\n"+text+"\n\nShow the full report now?\nYes = "+showReportLabel+" (in your web browser)\nNo = Close", mbYesNo|icon) == idYes
+	return messageBox(title, headline+"\n\n"+text+"\n\nShow the full report now?\nYes = "+showReportLabel+" ("+note+")\nNo = Close", mbYesNo|icon) == idYes
 }

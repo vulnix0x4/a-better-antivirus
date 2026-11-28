@@ -87,10 +87,11 @@ var ask = askReport
 // showReport opens the alert's full report in the browser and waits until
 // it has loaded (swapped in tests).
 // Where the desktop app is installed, the report opens there instead (one
-// administrator prompt; see openAppFor).
+// administrator prompt; see openAppFor); if the app can't be started, in the
+// browser after all.
 var showReport = func(a *alerts.Alert) error {
-	if opened, err := openAppFor(a); opened {
-		return err
+	if handled, _ := openAppFor(a); handled {
+		return nil
 	}
 	return report.Show(report.Page(a))
 }

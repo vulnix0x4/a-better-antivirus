@@ -20,7 +20,7 @@
 - It needs Microsoft Edge WebView2, which Windows 11 and most Windows 10 PCs already have; if yours doesn't, setup
   offers to fetch it from Microsoft. Without it, ABA works exactly as before: the popup, and the report in your web
   browser.
-- `ABA-Setup.exe` is bigger: about 18 MB instead of 11. Updates bring the app along by themselves, checked against
+- `ABA-Setup.exe` is bigger: about 19 MB instead of 11. Updates bring the app along by themselves, checked against
   the release's signed checksum list like ABA itself.
 - **Don't want it?** Install with the PowerShell command and `$env:ABA_NO_APP = '1'` first: you get ABA without the
   app (and the two old Start menu entries), and updates leave it out too.
