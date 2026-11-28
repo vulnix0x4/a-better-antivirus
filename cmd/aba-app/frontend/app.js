@@ -243,6 +243,7 @@ async function attacks() {
     $('#probe').hidden = false;
     const show = c => { $('#pClicks').textContent = c.clicks; $('#pKeys').textContent = c.keys; };
     $('#probeBtn').onclick = async () => show(await API.Probe('click'));
+    $('#probeConfirm').onclick = async () => show(await API.ProbeConfirm());
     addEventListener('keydown', async () => show(await API.Probe('key')));
   }
 

@@ -209,3 +209,13 @@ func messageBox(title, text string) {
 	m, _ := windows.UTF16PtrFromString(text)
 	procMessageBox.Call(0, uintptr(unsafe.Pointer(m)), uintptr(unsafe.Pointer(t)), 0x10 /* MB_ICONERROR */)
 }
+
+// confirmBox asks a Yes/No question in a native box owned by owner; No is
+// the default button.
+func confirmBox(owner uintptr, title, text string) bool {
+	t, _ := windows.UTF16PtrFromString(title)
+	m, _ := windows.UTF16PtrFromString(text)
+	const mbYesNo, mbIconQuestion, mbDefButton2, idYes = 0x4, 0x20, 0x100, 6
+	r, _, _ := procMessageBox.Call(owner, uintptr(unsafe.Pointer(m)), uintptr(unsafe.Pointer(t)), mbYesNo|mbIconQuestion|mbDefButton2)
+	return r == idYes
+}

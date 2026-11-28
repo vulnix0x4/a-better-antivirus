@@ -105,6 +105,7 @@ type App struct {
 	report   map[string]any
 	clicks   int
 	keys     int
+	confirm  string
 	done     chan int // the self-test's exit code
 	finished bool
 	logLines []string
@@ -324,8 +325,9 @@ func (p *API) OpenElevated() string {
 
 // ProbeCounts: input that reached the page, in --probe mode.
 type ProbeCounts struct {
-	Clicks int `json:"clicks"`
-	Keys   int `json:"keys"`
+	Clicks  int    `json:"clicks"`
+	Keys    int    `json:"keys"`
+	Confirm string `json:"confirm,omitempty"` // the native dialog's answer
 }
 
 // Probe counts a click or key press that reached the page and records the
@@ -343,12 +345,38 @@ func (p *API) Probe(kind string) ProbeCounts {
 	case "key":
 		a.keys++
 	}
-	c := ProbeCounts{a.clicks, a.keys}
+	return a.saveProbe()
+}
+
+func (a *App) saveProbe() ProbeCounts {
+	c := ProbeCounts{a.clicks, a.keys, a.confirm}
 	if a.mode == "full" {
 		b, _ := json.Marshal(c)
 		os.WriteFile(filepath.Join(paths.AppDir(), "probe.json"), b, 0o600)
 	}
 	return c
+}
+
+// ProbeConfirm shows a native Yes/No box owned by the app's (elevated)
+// window, the way a dangerous action would be confirmed, and records the
+// answer: can a lower program answer it?
+func (p *API) ProbeConfirm() ProbeCounts {
+	a := p.a
+	if !a.probe {
+		return ProbeCounts{}
+	}
+	a.mu.Lock()
+	a.confirm = "open"
+	a.saveProbe()
+	a.mu.Unlock()
+	answer := "no"
+	if confirmBox(findOwnWindow(windowClass), "ABA confirm", "Probe: let the program go?") {
+		answer = "yes"
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.confirm = answer
+	return a.saveProbe()
 }
 
 // SelftestDone takes the page's report, adds what Go knows and decides.
