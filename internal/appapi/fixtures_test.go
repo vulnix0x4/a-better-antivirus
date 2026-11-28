@@ -19,7 +19,7 @@ import (
 // them again; run it on Windows (or GOOS=windows in the VM) so the words
 // that depend on the system (the report's sections, the checklist) read as
 // they do on a PC. Elsewhere those two are left out of the comparison.
-var update = flag.Bool("update", false, "write the fixtures in testdata/ again")
+var updateFixtures = flag.Bool("update", false, "write the fixtures in testdata/ again")
 
 func TestMain(m *testing.M) {
 	time.Local = time.UTC // the report's sections show clock times
@@ -98,7 +98,7 @@ func TestFixtures(t *testing.T) {
 			}
 			got = append(got, '\n')
 			file := filepath.Join("testdata", f.name+".json")
-			if *update {
+			if *updateFixtures {
 				if err := os.WriteFile(file, got, 0o644); err != nil {
 					t.Fatal(err)
 				}
