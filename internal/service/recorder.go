@@ -228,8 +228,19 @@ func (s *server) Autopsy(c autopsy.Case) *alerts.Autopsy {
 // NotifyAutopsy tells the person, on the desktop and the phone, that the
 // caught program had read real data, and what to do first.
 func (s *server) NotifyAutopsy(a *alerts.Alert) {
-	b, err := json.Marshal(notify.Envelope{Alert: a, Autopsy: true})
-	if err == nil {
+	// The app shows the report: open it again (an open app turns to this
+	// alert), with a toast. Without the app: the autopsy popup.
+	if s.openApp(a) {
+		ta := notify.ToastAlert(a)
+		ta.Title = "ABA: what " + a.ExeName() + " had already opened"
+		if a.Autopsy != nil && a.Autopsy.Sent == alerts.SentNothing {
+			ta.Title = "ABA: " + a.ExeName() + " was stopped before it sent anything"
+		}
+		ta.Summary = "The full report is open in ABA."
+		if b, err := json.Marshal(notify.Envelope{Alert: ta, ToastOnly: true}); err == nil {
+			session.LaunchWithInput(s.cliExe, b, "notify")
+		}
+	} else if b, err := json.Marshal(notify.Envelope{Alert: a, Autopsy: true}); err == nil {
 		if _, err := session.LaunchWithInput(s.cliExe, b, "notify"); err != nil {
 			s.log.Printf("desktop notify (autopsy): %v", err)
 		}

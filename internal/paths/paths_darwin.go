@@ -22,6 +22,7 @@ const (
 	// other would break the signature.)
 	CLIExe     = "famsvc"
 	ServiceExe = "famsvc"
+	AppExe     = "aba-app" // no desktop app on macOS yet
 
 	// CommandName is what people type.
 	CommandName = "aba"

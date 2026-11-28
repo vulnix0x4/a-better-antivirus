@@ -25,6 +25,17 @@ type Envelope struct {
 	// Autopsy: show what the autopsy of the alert's program found (it read
 	// real data), not the alert itself.
 	Autopsy bool `json:"autopsy,omitempty"`
+	// ToastOnly: only a notification (Alert.Title and Summary); the desktop
+	// app shows the rest. The alert carries nothing else (see ToastAlert).
+	ToastOnly bool `json:"toastOnly,omitempty"`
+}
+
+// ToastAlert is what a toast needs of a: no paths, no program details, no
+// autopsy. (The notify command runs as the person, and reads it from a
+// pipe anything running as them could watch.)
+func ToastAlert(a *alerts.Alert) *alerts.Alert {
+	return &alerts.Alert{ID: a.ID, Time: a.Time, Kind: a.Kind, Tier: a.Tier, Title: a.Title, Summary: a.Summary,
+		Test: a.Test, Status: a.Status}
 }
 
 // ShowAutopsy tells the person what the autopsy of a caught program found:
@@ -75,7 +86,14 @@ var ask = askReport
 
 // showReport opens the alert's full report in the browser and waits until
 // it has loaded (swapped in tests).
-var showReport = func(a *alerts.Alert) error { return report.Show(report.Page(a)) }
+// Where the desktop app is installed, the report opens there instead (one
+// administrator prompt; see openAppFor).
+var showReport = func(a *alerts.Alert) error {
+	if opened, err := openAppFor(a); opened {
+		return err
+	}
+	return report.Show(report.Page(a))
+}
 
 // showReportLabel is the autopsy popup's button (askReport, desktop_<os>.go).
 const showReportLabel = "Show full report"

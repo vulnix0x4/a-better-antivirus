@@ -1085,6 +1085,11 @@ func notifyCmd() *cobra.Command {
 				return nil
 			}
 			a := env.Alert
+			if env.ToastOnly {
+				notify.Toast(a.Title, a.Summary)
+				time.Sleep(3 * time.Second) // let the toast process start before we exit
+				return nil
+			}
 			if env.Autopsy && a.Autopsy != nil {
 				title := "ABA: what " + a.ExeName() + " had already opened"
 				if a.Autopsy.Sent == alerts.SentNothing {

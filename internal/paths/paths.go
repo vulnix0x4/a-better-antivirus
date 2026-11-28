@@ -28,6 +28,10 @@ const (
 func InstalledCLI() string     { return filepath.Join(InstallDir(), CLIExe) }
 func InstalledService() string { return filepath.Join(InstallDir(), ServiceExe) }
 
+// InstalledApp is the desktop app, when it's installed (Windows only for
+// now): next to the CLI, in the admin-only install folder.
+func InstalledApp() string { return filepath.Join(InstallDir(), AppExe) }
+
 func ConfigFile() string  { return filepath.Join(DataDir(), "config.json") }
 func StateFile() string   { return filepath.Join(DataDir(), "state.json") }
 func SecretsFile() string { return filepath.Join(DataDir(), "secrets.json") } // admin-only, and encrypted where the OS offers it

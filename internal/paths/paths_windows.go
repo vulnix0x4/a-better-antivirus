@@ -12,8 +12,9 @@ const (
 	installDirName = "File Access Monitor"
 	dataDirName    = "FileAccessMonitor"
 
-	CLIExe     = "aba.exe"    // what users type; on PATH
-	ServiceExe = "famsvc.exe" // identical copy the service runs from
+	CLIExe     = "aba.exe"     // what users type; on PATH
+	ServiceExe = "famsvc.exe"  // identical copy the service runs from
+	AppExe     = "aba-app.exe" // the desktop app (optional: installed with it)
 
 	// Windows compares file names ignoring case.
 	foldCase = true
