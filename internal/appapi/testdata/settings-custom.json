@@ -1,0 +1,110 @@
+{
+  "schema": 1,
+  "preset": "custom",
+  "presets": [
+    {
+      "id": "alert",
+      "name": "Alert only",
+      "says": "Tells you. Stops nothing.",
+      "does": [
+        "alert"
+      ]
+    },
+    {
+      "id": "balanced",
+      "name": "Balanced",
+      "says": "Freezes it and cuts its internet.",
+      "does": [
+        "alert",
+        "freeze",
+        "cut"
+      ]
+    },
+    {
+      "id": "strict",
+      "name": "Strict",
+      "says": "Also takes the whole PC offline.",
+      "does": [
+        "alert",
+        "freeze",
+        "cut",
+        "offline"
+      ]
+    }
+  ],
+  "instant": false,
+  "recorder": true,
+  "clipboard": {
+    "on": true,
+    "supported": true
+  },
+  "miners": {
+    "on": true,
+    "supported": true
+  },
+  "phone": {
+    "on": true,
+    "via": "email",
+    "describe": "Email to sam.okafor91@gmail.com",
+    "minTier": "critical",
+    "email": {
+      "host": "smtp.gmail.com",
+      "port": 465,
+      "implicitTls": true,
+      "username": "sam.okafor91@gmail.com",
+      "hasPassword": true,
+      "to": "sam.okafor91@gmail.com"
+    }
+  },
+  "update": {
+    "version": "v0.10.2",
+    "latest": "v0.10.2",
+    "available": false,
+    "auto": true,
+    "updatable": true,
+    "lastCheck": "2026-11-27T08:00:00Z",
+    "lastResult": "up to date"
+  },
+  "learning": true,
+  "absent": [],
+  "learningUntil": "2026-11-29T16:03:00Z",
+  "learningMatters": true,
+  "responses": {
+    "info": [],
+    "warn": [
+      "block-program"
+    ],
+    "critical": [
+      "freeze",
+      "block-program",
+      "kill"
+    ]
+  },
+  "actions": [
+    {
+      "id": "freeze",
+      "says": "Freeze the process (and its children) so it can't upload"
+    },
+    {
+      "id": "block-program",
+      "says": "Block that program's internet access"
+    },
+    {
+      "id": "kill",
+      "says": "Kill the process tree"
+    },
+    {
+      "id": "isolate",
+      "says": "Isolate the PC from the network (ABA alerts still get out)"
+    },
+    {
+      "id": "disable-adapters",
+      "says": "Disable network adapters (blunt fallback)"
+    }
+  ],
+  "cleanRecent": false,
+  "canary": {
+    "on": false,
+    "tokens": []
+  }
+}

@@ -60,7 +60,10 @@ func fixtures() []fixture {
 		{"alert-hostile", func() any { return hostileSrc.Alert(h) }},
 		{"history", func() any { return frozen.History() }},
 		{"baits", func() any { return frozen.Baits() }},
-		{"settings", func() any { return prot.Settings() }},
+		{"settings", func() any { return settingsSource().Settings() }},
+		{"settings-custom", func() any { return customSettingsSource().Settings() }},
+		{"catalog", func() any { return catalogSource().Catalog() }},
+		{"trusted", func() any { return trustedSource().Trusted() }},
 		{"locked", func() any { return LockedView(pub(baseState(), 0), "v0.10.2", "", now) }},
 		{"locked-frozen", func() any {
 			return LockedView(pub(frozen.State, 1), "v0.10.2", nitro.ID, now)
@@ -69,7 +72,7 @@ func fixtures() []fixture {
 }
 
 // osWords are the fields whose words depend on the system the test runs on.
-var osWords = map[string]bool{"sections": true, "checklist": true}
+var osWords = map[string]bool{"sections": true, "checklist": true, "actions": true}
 
 func strip(v any) any {
 	switch x := v.(type) {

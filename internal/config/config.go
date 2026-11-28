@@ -4,6 +4,8 @@
 package config
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -187,6 +189,21 @@ func (r IgnoreRule) CoversBait(id string) bool {
 		}
 	}
 	return false
+}
+
+// ID names the rule for `aba ignore remove <id>` and the app: the first 12
+// hex digits of a hash of everything it matches on (not its note). Unlike
+// the number `aba ignore list` shows, it can't come to mean another rule
+// when one before it is removed.
+func (r IgnoreRule) ID() string {
+	bs := make([]string, len(r.Baits))
+	for i, b := range r.Baits {
+		bs[i] = strings.ToLower(b)
+	}
+	sort.Strings(bs)
+	key := strings.ToLower(r.Path+"\x00"+r.Signer+"\x00"+r.SHA256+"\x00"+r.CommandLine) + "\x00" + r.Dir + "\x00" + strings.Join(bs, ",") + "\x00" + fmt.Sprint(r.Tricks)
+	h := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(h[:6])
 }
 
 // SameProgram reports whether two rules describe the same program (they may

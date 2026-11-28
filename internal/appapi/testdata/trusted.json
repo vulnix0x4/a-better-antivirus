@@ -1,0 +1,80 @@
+{
+  "schema": 1,
+  "rules": [
+    {
+      "id": "3ca2e312d73e",
+      "path": "C:\\Program Files\\Macrium\\Reflect\\Reflect.exe",
+      "signer": "Paramount Software UK Ltd",
+      "baits": [
+        {
+          "id": "seed-phrase",
+          "label": "Recovery phrase"
+        }
+      ],
+      "tricks": false,
+      "says": "signed by Paramount Software UK Ltd; only for: wallet recovery phrase (Documents)"
+    },
+    {
+      "id": "9703c5d3fe9a",
+      "path": "C:\\Program Files\\Backblaze\\bztransmit64.exe",
+      "signer": "Backblaze",
+      "baits": [],
+      "tricks": true,
+      "note": "backup",
+      "says": "signed by Backblaze; all baits; also when it reads in ways that look like evasion"
+    }
+  ],
+  "suggestions": [
+    {
+      "id": "f51542e2a22a",
+      "program": "SearchProtocolHost.exe",
+      "path": "C:\\Windows\\System32\\SearchProtocolHost.exe",
+      "signer": "Microsoft Windows",
+      "tier": "info",
+      "count": 2,
+      "last": "2026-11-25T09:15:02Z",
+      "baits": [
+        {
+          "id": "backup-codes",
+          "label": "2FA backup codes"
+        },
+        {
+          "id": "desktop-passwords",
+          "label": "Password list"
+        }
+      ],
+      "says": "signed by Microsoft Windows; only for: 2FA backup codes (Documents), password list on the Desktop",
+      "recommended": true,
+      "alerts": [
+        "20261124-080000-5e6f",
+        "20261125-091502-1a2b"
+      ]
+    },
+    {
+      "id": "07ff9b44dcbe",
+      "program": "MsMpEng.exe",
+      "path": "C:\\Windows\\System32\\MsMpEng.exe",
+      "signer": "Microsoft Windows Publisher",
+      "tier": "info",
+      "count": 1,
+      "last": "2026-11-22T20:11:44Z",
+      "baits": [
+        {
+          "id": "seed-phrase",
+          "label": "Recovery phrase"
+        }
+      ],
+      "says": "signed by Microsoft Windows Publisher; only for: wallet recovery phrase (Documents)",
+      "recommended": true,
+      "alerts": [
+        "20261122-201144-3c4d"
+      ]
+    }
+  ],
+  "learning": {
+    "on": true,
+    "until": "2026-11-28T16:03:00Z",
+    "matters": true
+  },
+  "builtin": "Windows Defender and Windows Search are always left alone."
+}

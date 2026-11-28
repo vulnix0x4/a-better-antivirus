@@ -44,7 +44,14 @@
   },
   "phone": {
     "on": true,
-    "via": "ntfy"
+    "via": "ntfy",
+    "describe": "ntfy (https://ntfy.sh/ab**********wd)",
+    "minTier": "warn",
+    "ntfy": {
+      "server": "https://ntfy.sh",
+      "topic": "ab**********wd",
+      "hasToken": true
+    }
   },
   "update": {
     "version": "v0.10.2",
@@ -56,5 +63,53 @@
     "lastResult": "up to date"
   },
   "learning": false,
-  "absent": []
+  "absent": [],
+  "learningMatters": false,
+  "responses": {
+    "info": [],
+    "warn": [],
+    "critical": [
+      "freeze",
+      "block-program"
+    ]
+  },
+  "actions": [
+    {
+      "id": "freeze",
+      "says": "Freeze the process (and its children) so it can't upload"
+    },
+    {
+      "id": "block-program",
+      "says": "Block that program's internet access"
+    },
+    {
+      "id": "kill",
+      "says": "Kill the process tree"
+    },
+    {
+      "id": "isolate",
+      "says": "Isolate the PC from the network (ABA alerts still get out)"
+    },
+    {
+      "id": "disable-adapters",
+      "says": "Disable network adapters (blunt fallback)"
+    }
+  ],
+  "cleanRecent": true,
+  "canary": {
+    "on": true,
+    "email": "sam.okafor91@gmail.com",
+    "tokens": [
+      {
+        "kind": "aws_keys",
+        "bait": "aws",
+        "label": "Fake AWS keys"
+      },
+      {
+        "kind": "web",
+        "bait": "passwords",
+        "label": "A link in the password list"
+      }
+    ]
+  }
 }

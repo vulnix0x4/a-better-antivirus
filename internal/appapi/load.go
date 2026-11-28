@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/alerts"
+	"github.com/vulnix0x4/a-better-antivirus/internal/baits"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
 	"github.com/vulnix0x4/a-better-antivirus/internal/svcctl"
@@ -81,8 +82,11 @@ func Load(version string) (*Source, error) {
 	if svc, err := svcctl.Status(); err == nil && svc == svcctl.Running {
 		s.ServiceRunning = true
 	}
-	if sec, err := config.LoadSecrets(); err == nil && sec.Phone.Enabled() {
-		s.PhoneVia = sec.Phone.Kind
+	if sec, err := config.LoadSecrets(); err == nil {
+		s.Secrets = sec
+		if sec.Phone.Enabled() {
+			s.PhoneVia = sec.Phone.Kind
+		}
 	}
 	if st.ServiceVersion != "" && version == "dev" {
 		s.Version = st.ServiceVersion
@@ -137,4 +141,17 @@ func LoadLocked(version, alertID string) *Locked {
 		alertID = ""
 	}
 	return LockedView(p, version, alertID, time.Now())
+}
+
+// LoadPlan adds the bait catalog for this PC to s (for Catalog): which
+// baits fit, from what's installed. It only looks at whether files and
+// folders are there, never into them.
+func (s *Source) LoadPlan() {
+	ours := map[string]bool{}
+	for id, b := range s.state().Baits {
+		if b.Status != "retired" {
+			ours[id] = true
+		}
+	}
+	s.Plan = baits.Plan(s.cfg().User, ours)
 }

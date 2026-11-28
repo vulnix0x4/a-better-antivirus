@@ -41,6 +41,8 @@ an error.
 | `History()` | History | |
 | `Baits()` | Baits | |
 | `Settings()` | Settings | |
+| `Catalog()` | Catalog | every bait ABA knows, for "Add a bait" (looks at the disk: call it when that screen opens, not on a timer) |
+| `Trusted()` | Trusted | trusted programs, suggestions, learning mode |
 | `Locked()` | Locked | the only data method that works in locked mode |
 | `Act(kind, id, arg)` | Result `{ok, message, details?}` | see Actions |
 | `Progress()` | `{running, kind, events: [Event]}` | events of the running `test` / `update` (poll every ~300 ms while Act is pending) |
@@ -181,12 +183,50 @@ the real one"), category, kind (`file|decoy|canary`), health
 Icons (baits): `doc grid hashi vault globe chrome firefox wallet telegram
 discord server cloud key git`.
 
-## Settings (`settings.json`)
+## Settings (`settings.json`, `settings-custom.json`)
 
 `preset` (`alert|balanced|strict|custom`), `presets[]` {id, name, says,
 does[] of `alert|freeze|cut|offline`}, `instant`, `recorder`, `clipboard`
-{on, supported}, `miners` {on, supported}, `phone` {on, via
-(`ntfy|pushover|discord|email`)}, `update` (UpdateView), `learning`.
+{on, supported}, `miners` {on, supported}, `phone` (below), `update`
+(UpdateView), `learning`.
+
+The rest of `aba configure` (PARITY.md has every step):
+
+- `learningUntil` (absent when off), `learningMatters` (learning mode
+  changes anything only when suspicious readers get more than an alert:
+  hide the learning control otherwise, as setup does).
+- `responses` {info[], warn[], critical[]}: the actions each tier gets now
+  (`freeze|block-program|kill|isolate|disable-adapters`; empty = only tell
+  me). `actions[]` {id, says}: the ones a custom response may use. Setup
+  lets you choose `warn` ("suspicious") and `critical`.
+- `cleanRecent`: baits are kept out of Windows' Recent files.
+- `canary` {on, email, tokens[] {kind `aws_keys|web`, bait, label}}.
+- `phone`: {on, via `ntfy|discord|pushover|email`, describe ("ntfy
+  (https://ntfy.sh/ab******cd)"), minTier `info|warn|critical`, and for the
+  channel in use one of: `ntfy` {server, topic (masked), hasToken},
+  `discord` {host}, `pushover` {set}, `email` {host, port, implicitTls,
+  username, hasPassword, from, to}}. **No stored secret is ever in it**:
+  "Show my topic" is Act `phone-reveal` (the app shows it in its own
+  window); a form saved with a secret field left empty keeps the stored one.
+
+## Catalog (`catalog.json`)
+
+`categories[]` in order; `items[]` {id (for `bait-add`), label, icon, name,
+category, kind `file|decoy|canary`, description, caveat (why it's opt-in),
+synced (its folder syncs to a cloud: a sentence), recommended, planted,
+available, reason (why it doesn't fit this PC), health (planted only:
+`ok|missing|error`)}. Offer "Add" for available, unplanted items, "Remove"
+(`bait-remove`) for planted ones. Custom baits are in `Baits()` (`custom`).
+
+## Trusted (`trusted.json`)
+
+- `rules[]`: {id (for `ignore-remove`), path, signer, sha256, commandLine,
+  dir, baits[] {id, label} (empty = every bait), tricks, note, says}.
+- `suggestions[]`: programs that touched baits and could be trusted (what
+  `aba learn` lists): {id (for `learn-trust`), program, path, signer (""
+  = unsigned: say so, plainly), tier, count, last, baits[], says,
+  recommended (tick it to start with), alerts[]}. Most frequent first.
+- `learning` {on, until, matters}; `builtin`: what's trusted without a rule.
 
 ## Locked (`locked.json`, `locked-frozen.json`)
 
@@ -216,5 +256,43 @@ before anything runs.
 | `update-check` | | | check for a new version | `{"current","latest","available","url"}` |
 | `update` | | | install it; progress via `Progress()` | |
 | `phone-test` | | | send a test phone alert | |
+
+The rest of the CLI (PARITY.md maps every command). `arg` that is JSON is a
+string holding a JSON object (unknown fields are refused, 8 KB at most).
+
+| kind | id | arg | does | details |
+|---|---|---|---|---|
+| `alert-json` | alert | | the alert file as is | the alert |
+| `autopsy-now` | alert | | look into it again from here (only while it's frozen; can take ~30 s) | |
+| `export-ioc` | alert | | write what's safe to share to the person's Downloads folder | `{"path", "ioc"}` |
+| `doctor` | | | check everything | `{"checks": [{level `ok|note|warning|problem`, name, detail, fix}]}` |
+| `doctor-fix` | | | repair, then check | `{"fixed": [sentences], "checks": […]}` |
+| `learn-days` | | `0`–`30` | learning mode for N days from now; `0` ends it | |
+| `learn-trust` | | suggestion IDs, comma-separated (≤ 50) | trust those programs | |
+| `ignore-add` | | JSON `{"path", "signer"?, "note"?, "allowTricks"?}` | trust a program by its path pattern (`*` within a folder, `**` across) | |
+| `ignore-remove` | rule ID | | stop trusting it | |
+| `bait-add` | catalog ID | | plant it | |
+| `bait-add-file` | | an absolute path | make that file a bait (made with fake passwords if it isn't there) | |
+| `bait-remove` | bait ID | | take it away | |
+| `bait-rename` | | | give every bait new file names | |
+| `responses` | | JSON `{"warn": [...], "critical": [...]}` | your own responses (preset becomes `custom`) | |
+| `recent` | | `on`/`off` | keep baits out of Recent files | |
+| `phone-set` | | JSON, below | set up phone alerts, then send a test | `{"tested": bool, "testError"?}` |
+| `phone-off` | | | no phone alerts | |
+| `phone-tier` | | `info`/`warn`/`critical` | which alerts reach the phone | |
+| `phone-reveal` | | | the app shows the ntfy topic in its own window | |
+| `canary-on` | | JSON `{"email"}` | make canary tokens (asks canarytokens.org; your address is shared with it) | |
+| `clipboard-test` | | | the clipper test (don't touch mouse or keyboard for a few seconds) | |
+| `clipboard-key` | a bait wallet address | | the app shows its private key in its own window | |
+| `miners-test` | | | the miner test | |
+| `uninstall` | | `""` or `purge` (also delete alert history) | remove ABA; the app closes after | |
+
+`phone-set` takes `{"kind": "ntfy"|"discord"|"pushover"|"email", "minTier"?:
+"info"|"warn"|"critical"}` plus the channel's own object:
+`"ntfy": {"server": "https://ntfy.sh", "topic", "token"?}`,
+`"discord": {"webhookUrl"}`, `"pushover": {"appToken", "userKey"}`,
+`"email": {"host", "port", "implicitTls", "username"?, "password"?, "from"?, "to"}`.
+A secret left out or "" (ntfy token, webhook, Pushover keys, password)
+keeps the stored one when phone alerts already go the same way.
 
 Events: `{event: "step"|"done", text, time}`.

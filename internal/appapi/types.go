@@ -588,6 +588,53 @@ type Settings struct {
 	Update    UpdateView     `json:"update"`
 	Learning  bool           `json:"learning"`
 	Absent    []string       `json:"absent"`
+
+	// The rest of `aba configure` (PARITY.md).
+
+	// LearningUntil is when learning mode ends (absent when it's off);
+	// LearningMatters: it changes anything with these responses (only when
+	// suspicious readers get more than an alert, as with Strict).
+	LearningUntil   *time.Time `json:"learningUntil,omitempty"`
+	LearningMatters bool       `json:"learningMatters"`
+	// Responses are what each tier gets now (the preset's, or your own
+	// with preset "custom"); Actions are the ones a custom response can
+	// use, in order.
+	Responses Responses      `json:"responses"`
+	Actions   []ActionOption `json:"actions"`
+	// CleanRecent: ABA takes baits out of Windows' Recent files.
+	CleanRecent bool   `json:"cleanRecent"`
+	Canary      Canary `json:"canary"`
+}
+
+// Responses are the actions per tier (each a config action ID:
+// freeze | block-program | kill | isolate | disable-adapters). Every tier
+// alerts too; an empty list means "only tell me".
+type Responses struct {
+	Info     []string `json:"info"`
+	Warn     []string `json:"warn"`
+	Critical []string `json:"critical"`
+}
+
+// ActionOption is one action a response can take.
+type ActionOption struct {
+	ID   string `json:"id"`   // freeze
+	Says string `json:"says"` // "Freeze the process (and its children) so it can't upload"
+}
+
+// Canary is the canary tokens: fake AWS keys and a link in the baits that
+// email you when someone uses them, even from another computer. (Their
+// management links stay in the secrets file.)
+type Canary struct {
+	On     bool          `json:"on"`
+	Email  string        `json:"email,omitempty"` // where canarytokens.org writes
+	Tokens []CanaryToken `json:"tokens"`
+}
+
+// CanaryToken is one token.
+type CanaryToken struct {
+	Kind  string `json:"kind"`  // aws_keys | web
+	Bait  string `json:"bait"`  // the bait it's in (aws, passwords)
+	Label string `json:"label"` // "Fake AWS keys"
 }
 
 // PresetOption is one stop of the protection level slider.
@@ -599,11 +646,140 @@ type PresetOption struct {
 	Does []string `json:"does"`
 }
 
-// Phone is phone alerts (no address, token or topic: those stay in the
-// secrets file).
+// Phone is phone alerts. No secret comes back to the page: not the ntfy
+// topic (masked; the app shows it whole in a window of its own, Act
+// phone-reveal), its token, the Discord webhook, Pushover's keys or the
+// SMTP password. What isn't secret is here so the page can show the form
+// filled in.
 type Phone struct {
 	On  bool   `json:"on"`
-	Via string `json:"via,omitempty"` // ntfy | telegram | discord | pushover | …
+	Via string `json:"via,omitempty"` // ntfy | discord | pushover | email
+	// Describe is it in a few words: "ntfy (https://ntfy.sh/ab******cd)".
+	Describe string `json:"describe,omitempty"`
+	// MinTier: which alerts reach the phone (info = everything, warn =
+	// suspicious and critical, critical = critical only).
+	MinTier  string         `json:"minTier"`
+	Ntfy     *PhoneNtfy     `json:"ntfy,omitempty"`
+	Discord  *PhoneDiscord  `json:"discord,omitempty"`
+	Pushover *PhonePushover `json:"pushover,omitempty"`
+	Email    *PhoneEmail    `json:"email,omitempty"`
+}
+
+// PhoneNtfy is ntfy's settings.
+type PhoneNtfy struct {
+	Server   string `json:"server"`
+	Topic    string `json:"topic"` // masked: "ab******cd"
+	HasToken bool   `json:"hasToken"`
+}
+
+// PhoneDiscord is Discord's (the webhook is a password: only that it's set).
+type PhoneDiscord struct {
+	Host string `json:"host"` // discord.com
+}
+
+// PhonePushover is Pushover's (both keys are secret).
+type PhonePushover struct {
+	Set bool `json:"set"`
+}
+
+// PhoneEmail is email's.
+type PhoneEmail struct {
+	Host        string `json:"host"`
+	Port        int    `json:"port"`
+	ImplicitTLS bool   `json:"implicitTls"` // TLS from the start (465); else STARTTLS (587)
+	Username    string `json:"username"`
+	HasPassword bool   `json:"hasPassword"`
+	From        string `json:"from,omitempty"`
+	To          string `json:"to"`
+}
+
+// ---- Bait catalog ----
+
+// Catalog is every bait ABA knows, whether it fits this PC and which are
+// planted: the "Add a bait" list (`aba bait catalog`).
+type Catalog struct {
+	Schema     int           `json:"schema"`
+	Categories []string      `json:"categories"` // in order
+	Items      []CatalogItem `json:"items"`      // by category, then as the catalog lists them
+}
+
+// CatalogItem is one bait of the catalog.
+type CatalogItem struct {
+	ID          string `json:"id"` // what Act bait-add takes
+	Label       string `json:"label"`
+	Icon        string `json:"icon"`
+	Name        string `json:"name"`
+	Category    string `json:"category"`
+	Kind        string `json:"kind"` // file | decoy | canary
+	Description string `json:"description"`
+	// Caveat: why it's opt-in ("" for most). Synced: its folder syncs to a
+	// cloud (a sentence, "" when not).
+	Caveat      string `json:"caveat,omitempty"`
+	Synced      string `json:"synced,omitempty"`
+	Recommended bool   `json:"recommended"`
+	Planted     bool   `json:"planted"`
+	// Available: it fits this PC (a planted one always does); Reason says
+	// why not ("you have it installed (…)").
+	Available bool   `json:"available"`
+	Reason    string `json:"reason,omitempty"`
+	// Health of a planted one (ok | missing | error), "" otherwise.
+	Health string `json:"health,omitempty"`
+}
+
+// ---- Trusted programs ----
+
+// Trusted is the programs ABA leaves alone (`aba ignore list`), the ones
+// it suggests trusting (`aba learn`), and learning mode.
+type Trusted struct {
+	Schema      int               `json:"schema"`
+	Rules       []TrustRule       `json:"rules"`
+	Suggestions []TrustSuggestion `json:"suggestions"`
+	Learning    Learning          `json:"learning"`
+	// Builtin says what's trusted without a rule.
+	Builtin string `json:"builtin"`
+}
+
+// TrustRule is one ignore rule. All of its non-empty fields must match.
+type TrustRule struct {
+	ID          string    `json:"id"` // what Act ignore-remove takes
+	Path        string    `json:"path,omitempty"`
+	Signer      string    `json:"signer,omitempty"`
+	SHA256      string    `json:"sha256,omitempty"`
+	CommandLine string    `json:"commandLine,omitempty"`
+	Dir         string    `json:"dir,omitempty"`
+	Baits       []BaitRef `json:"baits"` // empty: every bait
+	Tricks      bool      `json:"tricks"`
+	Note        string    `json:"note,omitempty"`
+	Says        string    `json:"says"` // in plain words, as `aba ignore list` says it
+}
+
+// BaitRef names a bait.
+type BaitRef struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+// TrustSuggestion is a program that touched baits and could be trusted for
+// good (every alert about it folded into one narrow rule).
+type TrustSuggestion struct {
+	ID          string    `json:"id"` // what Act learn-trust takes
+	Program     string    `json:"program"`
+	Path        string    `json:"path"`
+	Signer      string    `json:"signer,omitempty"` // "" = unsigned
+	Tier        string    `json:"tier"`             // the highest of its alerts
+	Count       int       `json:"count"`
+	Last        time.Time `json:"last"`
+	Baits       []BaitRef `json:"baits"`
+	Says        string    `json:"says"`
+	Recommended bool      `json:"recommended"` // tick it to start with
+	Alerts      []string  `json:"alerts"`      // newest first
+}
+
+// Learning is learning mode.
+type Learning struct {
+	On      bool       `json:"on"`
+	Until   *time.Time `json:"until,omitempty"`
+	Matters bool       `json:"matters"`
 }
 
 // ---- Locked ----

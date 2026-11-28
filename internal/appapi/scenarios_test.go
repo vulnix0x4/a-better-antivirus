@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/alerts"
+	"github.com/vulnix0x4/a-better-antivirus/internal/baits"
 	"github.com/vulnix0x4/a-better-antivirus/internal/classify"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/origin"
@@ -376,4 +377,89 @@ func frozenSource(sent string) (*Source, *alerts.Alert) {
 	list := append([]*alerts.Alert{a}, quietOnes()...)
 	list = append(list, testCatch(), miner(), clipper(), trusted(), oldStealer())
 	return source(st, list...), a
+}
+
+// ---- settings, catalog and trusted programs (PARITY.md) ----
+
+// phoneSecrets: ntfy set up, canary tokens made.
+func ntfySecrets() *config.Secrets {
+	return &config.Secrets{
+		Phone: config.PhoneConfig{Kind: "ntfy", Ntfy: config.NtfyConfig{Server: "https://ntfy.sh", Topic: "aba-k3m9q2x7wd", Token: "tk_secret_never_shown"}},
+		Canary: config.CanaryConfig{Email: "sam.okafor91@gmail.com", Tokens: []config.CanaryToken{
+			{Kind: "aws_keys", Token: "SECRET-TOKEN-1", AuthToken: "SECRET-AUTH-1", ManageURL: "https://canarytokens.org/manage?token=SECRET", BaitID: "aws"},
+			{Kind: "web", Token: "SECRET-TOKEN-2", AuthToken: "SECRET-AUTH-2", ManageURL: "https://canarytokens.org/manage?token=SECRET2", BaitID: "passwords"},
+		}},
+	}
+}
+
+// settingsSource: the protected PC with phone alerts by ntfy and canary tokens.
+func settingsSource() *Source {
+	s := protectedSource()
+	s.Secrets = ntfySecrets()
+	return s
+}
+
+// customSettingsSource: your own responses, learning mode for two more
+// days, email alerts for critical only, no canary tokens.
+func customSettingsSource() *Source {
+	s := protectedSource()
+	c := s.Config
+	c.Preset = "custom"
+	c.Responses = map[config.Tier][]config.Action{
+		config.TierWarn:     {config.ActionBlockProgram},
+		config.TierCritical: {config.ActionFreeze, config.ActionBlockProgram, config.ActionKill},
+	}
+	c.LearningUntil = now.Add(50 * time.Hour)
+	c.PhoneMinTier = config.TierCritical
+	c.CleanRecent = false
+	c.InstantFreeze = false
+	s.PhoneVia = "email"
+	s.Secrets = &config.Secrets{Phone: config.PhoneConfig{Kind: "email", Email: config.EmailConfig{Host: "smtp.gmail.com", Port: 465,
+		ImplicitTLS: true, Username: "sam.okafor91@gmail.com", Password: "app-password-never-shown", To: "sam.okafor91@gmail.com"}}}
+	return s
+}
+
+// catalogSource: the protected PC and the catalog for it (made up here
+// rather than taken from the system's own catalog, so every system makes
+// the same fixture).
+func catalogSource() *Source {
+	s := protectedSource()
+	spec := func(id, name, cat, kind, desc string, def bool) baits.Spec {
+		return baits.Spec{ID: id, Name: name, Category: cat, Kind: kind, Description: desc, Default: def}
+	}
+	onedrive := spec("documents-passwords", "password list in Documents", "Files", "file", "A plain-text password list in your Documents folder", false)
+	onedrive.Synced = func(config.UserInfo) string { return "Your Documents folder syncs to OneDrive." }
+	kp := spec("keepass", "KeePass database (Documents)", "Files", "file", "A KeePass database stealers crack offline", false)
+	kp.Caveat = "KeePass users may open it by mistake"
+	s.Plan = []baits.Availability{
+		{Spec: spec("desktop-passwords", "password list on the Desktop", "Files", "file", "A plain-text password list on your Desktop", true), Available: true},
+		{Spec: onedrive, Available: true},
+		{Spec: kp, Available: true},
+		{Spec: spec("seed-phrase", "wallet recovery phrase (Documents)", "Files", "file", "A 12-word recovery phrase", true), Available: true},
+		{Spec: spec("chrome-profile", "extra profile inside your Chrome", "Browsers", "decoy", "A fake profile next to your real ones", true), Available: true},
+		{Spec: spec("firefox", "Firefox profile", "Browsers", "decoy", "Fake saved logins", true), Available: false, Reason: "you have it installed (firefox.exe)"},
+		{Spec: spec("metamask", "MetaMask wallet (inside a fake browser)", "Wallets", "decoy", "The wallet extension's vault", true), Available: true},
+		{Spec: spec("atomic", "Atomic wallet", "Wallets", "decoy", "A fake Atomic wallet", false), Available: true},
+		{Spec: spec("discord", "Discord token store", "Apps", "decoy", "A fake Discord login token", true), Available: true},
+		{Spec: spec("filezilla", "FileZilla saved servers", "Apps", "decoy", "Fake saved server logins", false), Available: false, Reason: "its data folder already exists (you use or used it)"},
+		{Spec: spec("aws", "AWS credentials (~/.aws)", "Credentials", "canary", "Fake cloud keys", true), Available: true},
+		{Spec: spec("git-credentials", "saved git passwords", "Credentials", "file", "Fake saved git passwords", false), Available: true},
+	}
+	s.State.Baits["discord"].Status = "missing"
+	return s
+}
+
+// trustedSource: two rules (one from "It's mine", one added by hand), and
+// programs that touched baits and could be trusted.
+func trustedSource() *Source {
+	s := protectedSource()
+	s.Config.Ignore = []config.IgnoreRule{
+		{Path: `C:\Program Files\Macrium\Reflect\Reflect.exe`, Signer: "Paramount Software UK Ltd", Baits: []string{"seed-phrase"}},
+		{Path: `C:\Program Files\Backblaze\bztransmit64.exe`, Signer: "Backblaze", Tricks: true, Note: "backup"},
+	}
+	extra := quietTouch("20261124-080000-5e6f", at("2026-11-24T08:00:00Z"), "SearchProtocolHost.exe", "Microsoft Windows", "backup-codes", "2FA backup codes (Documents)", user+`\Documents\backup codes.txt`)
+	s.Alerts = append([]*alerts.Alert{extra}, s.Alerts...)
+	s.Config.LearningUntil = now.Add(26 * time.Hour)
+	s.Config.ApplyPreset("strict")
+	return s
 }

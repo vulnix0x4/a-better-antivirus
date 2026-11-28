@@ -8,6 +8,7 @@ import (
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/alerts"
 	"github.com/vulnix0x4/a-better-antivirus/internal/autopsy"
+	"github.com/vulnix0x4/a-better-antivirus/internal/baits"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/trust"
 )
@@ -24,6 +25,11 @@ type Source struct {
 	ServiceRunning bool
 	// PhoneVia is the kind of phone alerts set up ("" when off).
 	PhoneVia string
+	// Secrets are the phone and canary settings (nil: none). The models
+	// show only what isn't secret (see Phone).
+	Secrets *config.Secrets
+	// Plan is the bait catalog for this PC (baits.Plan), for Catalog.
+	Plan []baits.Availability
 	// ClipboardSupported and MinersSupported: the traps exist on this system.
 	ClipboardSupported bool
 	MinersSupported    bool
@@ -835,6 +841,7 @@ func (s *Source) Settings() *Settings {
 	for _, id := range []string{"alert", "balanced", "strict"} {
 		out.Presets = append(out.Presets, presetWords[id])
 	}
+	s.moreSettings(out)
 	return out
 }
 

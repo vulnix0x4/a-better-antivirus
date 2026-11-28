@@ -92,6 +92,9 @@ func (p PhoneConfig) Describe() string {
 	return "off"
 }
 
+// Mask shows a secret's first and last two characters only.
+func Mask(s string) string { return mask(s) }
+
 func mask(s string) string {
 	if len(s) <= 4 {
 		return "****"
