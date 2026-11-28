@@ -80,7 +80,7 @@ main design question for phase 1.
   objects, autofill, swipe, external drop off. If any part fails, the app
   shows nothing (fail closed).
 - CSP: `default-src 'none'; script-src 'self' 'sha256-<import map>'; ...;
-  connect-src 'none'; frame-src 'none'`, plus nosniff, no-referrer, COOP.
+  connect-src 'none'; frame-src 'none'`, plus nosniff and no-referrer.
   Embedded assets only (no socket); vendored three.js 0.187.0 and fonts with
   a SHA-256 manifest checked by tests (npm tarballs checked against the
   registry's sha512).
@@ -103,7 +103,33 @@ HKLM).
 
 Wails v3: still nightlies only (v3.2.0-nightly.20261123 on 2026-11-28).
 
+Old runtimes: WebView2 131 (the windows-2022 image) never finished loading
+the page while responses carried `Cross-Origin-Opener-Policy` /
+`Cross-Origin-Resource-Policy`; without them it works. Those headers are
+gone (no use for a page with no network).
+
+## Where it ran (self-test: guard, CSP, WebGL, scene)
+
+| Machine | WebView2 | Elevated | Locked view |
+|---|---|---|---|
+| Win11 Pro Arm64 26100, VMware (VM) | 158.0.4370.45 | pass, 189 frames / 3 s (56-63 fps, software GL, light scene) | pass |
+| Same VM, started by SYSTEM (`applaunch`) | 158 | pass, no UAC prompt | n/a |
+| CI windows-11-arm (Win11 Enterprise 26200) | 158.0.4370.33 | pass, 192 frames (61 fps) | pass |
+| CI windows-latest (Server 2025, x64) | 157.0.4341.60 | pass (reduced motion is on there: one still frame, by design) | pass |
+| CI windows-2022 (Server 2022 x64, Win10-era 21H2 base) | 131.0.2903.86 | pass (reduced motion) | pass |
+| QEMU x64 Win11 (TCG emulation, Defender on) | 158.0.4370.45 | guard, CSP, permissions, navigation all held; 1 frame in 3 s (emulated CPU + software GL); download counter didn't land in time | not run |
+
+Every machine reported the software renderer "Microsoft Basic Render
+Driver" (no GPU in VMs or runners); the app switches to the light scene
+there. No real Windows 10 client was available.
+
 ## Numbers
 
-See the results section of the phase 0 report (sizes, CI, VirusTotal,
-Defender) in the PR description.
+- Sizes (stripped, `-s -w`): aba-app.exe amd64 14.2 MB, arm64 13.3 MB,
+  including 2.2 MB of embedded assets (three.js 2.1 MB unminified).
+- VirusTotal, unsigned amd64 build
+  (sha256 7a87157aa1d0948311b76073aaf7f712bca289ea1a2051f05766e78419683fad):
+  1/68, Bkav "W32.Malware.C72D77F5" (generic); everything else clean.
+- Defender (x64 VM, real-time on, signatures 1.463.486.0 of 2026-11-26; the
+  update wouldn't finish there): no detection scanning it with the
+  internet-zone mark, and none while it ran.
