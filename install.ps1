@@ -141,6 +141,7 @@
     Write-Host ''
 
     $dir = $null
+    $held = @()
     try {
         if ([Environment]::OSVersion.Version.Major -lt 10) {
             Stop-Install 'A Better Antivirus needs Windows 10 or 11.'
@@ -206,18 +207,27 @@
         }
         Say $ok "Signed with ABA's release key" 'Green' 'ed25519'
 
+        # The programs are held open from here until setup has finished, letting
+        # others only read them: what was checked is what setup runs and copies
+        # (anything running as you could otherwise swap a file in between).
+        $held = @()
+        foreach ($f in @($exe) + @(if ($appAsset) { $appExe })) {
+            $held += [IO.File]::Open($f, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+        }
         # Each download's line in the list that was just verified (those bytes,
-        # not the file read again): "<sha256>  <name>".
-        function Test-Listed([string]$file, [string]$listed) {
+        # not the file read again): "<sha256>  <name>". Hashed through the
+        # handle that holds it.
+        function Test-Listed($stream, [string]$listed) {
             $expected = $null
             foreach ($line in ([Text.Encoding]::UTF8.GetString($sumBytes) -split "`n")) {
                 $parts = $line.Trim() -split '\s+'
                 if ($parts.Count -eq 2 -and $parts[1].TrimStart('*') -ceq $listed) { $expected = $parts[0]; break }
             }
-            $actual = (Get-FileHash $file -Algorithm SHA256).Hash
+            $sha = [Security.Cryptography.SHA256]::Create()
+            try { $stream.Position = 0; $actual = -join ($sha.ComputeHash($stream) | ForEach-Object { $_.ToString('X2') }) } finally { $sha.Dispose() }
             return [bool]($expected -and $actual -eq $expected.ToUpper())
         }
-        if (-not (Test-Listed $exe $name) -or ($appAsset -and -not (Test-Listed $appExe $appName))) {
+        if (-not (Test-Listed $held[0] $name) -or ($appAsset -and -not (Test-Listed $held[1] $appName))) {
             Stop-Install "The download doesn't match the release's signed checksum, so it was not run." 'Run the command again. If it keeps happening, please open an issue on GitHub.'
         }
         Say $ok 'Checksum matches the signed list' 'Green' 'SHA-256'
@@ -255,6 +265,7 @@
             Write-Host ''
         }
     } finally {
+        foreach ($h in $held) { if ($h) { $h.Dispose() } }
         # aba.exe copied itself into Program Files; the download isn't needed any more.
         if ($dir) { Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue }
     }
