@@ -11,6 +11,7 @@
 package paths
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 )
@@ -52,6 +53,19 @@ func ClipboardTestFile() string { return filepath.Join(DataDir(), "clipboard-tes
 // person's ordinary rights even for an elevated app, so the profile has to
 // be somewhere they can write; see appsec.WebViewDir.)
 func AppDir() string { return filepath.Join(DataDir(), "app") }
+
+// AppShownFile is where the app, started by the service for alert id in a
+// session, says it showed its window (or handed the alert to the copy
+// already open there). Until it does, the service has the popup ready.
+func AppShownFile(session uint32, id string) string {
+	return filepath.Join(AppDir(), fmt.Sprintf("shown-%d-%s", session, id))
+}
+
+// AppOpenRequestFile is where a second start of the app in a session leaves
+// its alert for the copy already open there.
+func AppOpenRequestFile(session uint32) string {
+	return filepath.Join(AppDir(), fmt.Sprintf("open-request-%d.json", session))
+}
 
 // PublicDir is the one corner of the data folder anyone may read.
 func PublicDir() string        { return filepath.Join(DataDir(), "public") }

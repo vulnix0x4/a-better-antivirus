@@ -7,13 +7,23 @@
 // everything; without administrator rights it shows only a locked view
 // whose one button asks Windows to start it again elevated.
 //
-//	aba-app.exe [--elevate] [--alert <id>] [--selftest [--selftest-out <file>]] [--probe]
+//	aba-app.exe [--elevate] [--alert <id> [--from-service]] [--selftest [--selftest-out <file>]] [--probe] [--debug-log <file>]
 //
 // --elevate (what the Start menu's "ABA" passes) asks Windows straight away
 // for administrator rights: the UAC prompt comes before any window, and the
 // copy that gets them is started without --elevate (so it can't ask again).
 // Declined, or not possible: this copy goes on to the locked view, whose
 // "Open ABA" asks again.
+//
+// --alert opens on that alert. --from-service: the service started it for a
+// catch, and shows the popup instead if this copy can't open (so it ends at
+// once, with no error box of its own) or never says it showed its window
+// (paths.AppShownFile).
+//
+// Elevated, --selftest-out and --debug-log write only to selftest.json and
+// debug.log in the app's admin-only folder (paths.AppDir), whatever file
+// they name: anyone may start the app with any arguments, and an
+// administrator writing where they said is more than they may do.
 //
 // --selftest runs the app, has the page check WebGL and try what the guard
 // must stop, prints a JSON report and exits 0 when everything held.
@@ -42,6 +52,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	wopts "github.com/wailsapp/wails/v2/pkg/options/windows"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"golang.org/x/sys/windows"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/appsec"
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
@@ -68,7 +79,12 @@ func main() {
 	probe := flag.Bool("probe", false, "show a probe button and count input reaching the page")
 	debugLog := flag.String("debug-log", "", "write start-up steps to this file")
 	elevate := flag.Bool("elevate", false, "ask for administrator rights first (the Start menu's ABA)")
+	fromService := flag.Bool("from-service", false, "started by the service for --alert (it has the popup ready)")
 	flag.Parse()
+	elevated := appsec.IsElevated()
+	if elevated && (*debugLog != "" || *selftestOut != "") {
+		*debugLog, *selftestOut = elevatedOutputs(*debugLog, *selftestOut)
+	}
 	if *debugLog != "" {
 		if f, err := os.Create(*debugLog); err == nil {
 			trace = func(f2 string, args ...any) {
@@ -86,7 +102,7 @@ func main() {
 
 	a := &App{
 		version: version, selftest: *selftest, selftestOut: *selftestOut, probe: *probe,
-		elevated: appsec.IsElevated(), scrubbed: scrubbed, guard: newGuard(),
+		elevated: elevated, scrubbed: scrubbed, guard: newGuard(), fromService: *fromService,
 		report: map[string]any{}, done: make(chan int, 1),
 	}
 	if *alert != "" {
@@ -109,11 +125,29 @@ func main() {
 	os.Exit(a.run())
 }
 
+// elevatedOutputs is where an elevated app writes its debug log and
+// self-test report: fixed names in its admin-only folder ("" for what
+// wasn't asked for, or when that folder isn't safe).
+func elevatedOutputs(debugLog, selftestOut string) (string, string) {
+	dir, err := appsec.PrepareAppDir()
+	if err != nil {
+		return "", ""
+	}
+	if debugLog != "" {
+		debugLog = filepath.Join(dir, "debug.log")
+	}
+	if selftestOut != "" {
+		selftestOut = filepath.Join(dir, "selftest.json")
+	}
+	return debugLog, selftestOut
+}
+
 // App is the running app; API (the methods the page may call) wraps it.
 type App struct {
 	version, mode, alert string
 	elevated             bool
 	selftest, probe      bool
+	fromService          bool
 	selftestOut          string
 	scrubbed             []string
 	runtimeDir, dataDir  string
@@ -135,12 +169,18 @@ func (a *App) run() int {
 		inst, err := appsec.SingleInstance()
 		trace("single instance: %v", err)
 		if errors.Is(err, appsec.ErrAlreadyRunning) {
+			code := 0
 			if a.alert != "" && !a.selftest {
 				// The open app shows it (it asks for it every few seconds).
 				err := leaveOpenRequest(a.alert)
 				trace("open request for %s: %v", a.alert, err)
+				if err == nil {
+					a.markShown()
+				} else {
+					code = 2 // the service's popup, then
+				}
 			}
-			if hwnd := findWindowInSession(windowClass); hwnd != 0 {
+			if hwnd := findAppWindowInSession(windowClass); hwnd != 0 {
 				procShowWindow.Call(hwnd, 9 /* SW_RESTORE */)
 				procSetForegroundWindow.Call(hwnd)
 			}
@@ -148,7 +188,7 @@ func (a *App) run() int {
 				a.finish(map[string]any{"ok": false, "error": err.Error()})
 				return 3
 			}
-			return 0
+			return code
 		}
 		if err != nil {
 			a.fatal(err)
@@ -257,14 +297,34 @@ func (a *App) startup(ctx context.Context) {
 			a.fatal(err)
 		}
 		runtime.WindowShow(ctx)
+		a.markShown()
 	}()
 }
 
-// fatal tells the person (or the self-test) and ends the app.
+// markShown tells the service, which started this app for an alert, that
+// the person has it in front of them (paths.AppShownFile): no popup. Only an
+// elevated app can write there; the service doesn't wait for a locked one.
+func (a *App) markShown() {
+	if a.alert == "" || a.mode != "full" || a.selftest {
+		return
+	}
+	var sess uint32
+	windows.ProcessIdToSessionId(windows.GetCurrentProcessId(), &sess)
+	err := os.WriteFile(paths.AppShownFile(sess, a.alert), nil, 0o600)
+	trace("shown marker: %v", err)
+}
+
+// fatal tells the person (or the self-test) and ends the app. Started by
+// the service for a catch, it ends at once instead: the service sees that
+// and shows the popup, which has the answer buttons (an error box here would
+// only hold that up).
 func (a *App) fatal(err error) {
 	trace("fatal: %v", err)
 	if a.selftest {
 		a.finish(map[string]any{"ok": false, "error": err.Error()})
+		os.Exit(1)
+	}
+	if a.fromService && a.alert != "" {
 		os.Exit(1)
 	}
 	messageBox("ABA", "ABA can't open: "+err.Error())

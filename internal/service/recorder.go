@@ -230,7 +230,16 @@ func (s *server) Autopsy(c autopsy.Case) *alerts.Autopsy {
 func (s *server) NotifyAutopsy(a *alerts.Alert) {
 	// The app shows the report: open it again (an open app turns to this
 	// alert), with a toast. Without the app: the autopsy popup.
-	if s.openApp(a) {
+	popup, err := json.Marshal(notify.Envelope{Alert: a, Autopsy: true})
+	if err != nil {
+		s.log.Printf("desktop notify (autopsy): %v", err)
+	}
+	popupIn := func(sess uint32) {
+		if err := session.LaunchWithInputIn(sess, s.cliExe, popup, "notify"); err != nil {
+			s.log.Printf("desktop notify (autopsy, session %d): %v", sess, err)
+		}
+	}
+	if s.openApp(a, popupIn) {
 		ta := notify.ToastAlert(a)
 		ta.Title = "ABA: what " + a.ExeName() + " had already opened"
 		if a.Autopsy != nil && a.Autopsy.Sent == alerts.SentNothing {
@@ -240,8 +249,8 @@ func (s *server) NotifyAutopsy(a *alerts.Alert) {
 		if b, err := json.Marshal(notify.Envelope{Alert: ta, ToastOnly: true}); err == nil {
 			session.LaunchWithInput(s.cliExe, b, "notify")
 		}
-	} else if b, err := json.Marshal(notify.Envelope{Alert: a, Autopsy: true}); err == nil {
-		if _, err := session.LaunchWithInput(s.cliExe, b, "notify"); err != nil {
+	} else if err == nil {
+		if _, err := session.LaunchWithInput(s.cliExe, popup, "notify"); err != nil {
 			s.log.Printf("desktop notify (autopsy): %v", err)
 		}
 	}

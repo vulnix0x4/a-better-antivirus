@@ -182,11 +182,13 @@ Check ((SetupLog 'install') -match 'WebView2 runtime: machine-wide "\d') 'Setup 
 # The installed app, the way the Start menu starts it here (elevated: UAC is
 # off on the runner). Its self-test also leaves a WebView2 profile, which the
 # uninstall below must take away.
-$st = Join-Path $logDir 'app-selftest.json'
-$p = Start-Process -FilePath $appExe -ArgumentList '--selftest', '--selftest-out', "`"$st`"" -PassThru
+# Elevated, it writes the report only to selftest.json in its admin-only folder.
+$st = Join-Path $data 'app\selftest.json'
+Remove-Item $st -ErrorAction SilentlyContinue
+$p = Start-Process -FilePath $appExe -ArgumentList '--selftest', '--selftest-out', 'x' -PassThru
 $null = $p.Handle
 if (-not $p.WaitForExit(150000)) { $p.Kill(); Fail 'the installed app''s self-test hung' }
-if (Test-Path $st) { Get-Content $st }
+if (Test-Path $st) { Copy-Item $st (Join-Path $logDir 'app-selftest.json'); Get-Content $st }
 Check ($p.ExitCode -eq 0) "the installed app's self-test passed (exit code $($p.ExitCode))"
 Check (WaitFor { Test-Path $webview } 10) "it keeps its WebView2 profile in $webview"
 

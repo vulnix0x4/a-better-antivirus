@@ -33,6 +33,7 @@ func main() {
 		Error    string `json:"error,omitempty"`
 	}{Launched: []row{}}
 	for _, l := range launched {
+		l.Close()
 		out.Launched = append(out.Launched, row{l.Session, l.PID, l.Pick.String(), l.Pick.Elevated()})
 	}
 	if err != nil {

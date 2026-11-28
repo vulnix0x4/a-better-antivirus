@@ -4,13 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"golang.org/x/sys/windows"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/appapi"
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
@@ -145,7 +145,13 @@ func (p *API) Pending() string {
 
 var openMu sync.Mutex
 
-func openRequestFile() string { return filepath.Join(paths.AppDir(), "open-request.json") }
+// openRequestFile is this session's: the single-instance lock is per session,
+// so is the hand-over (another person's app must not take this one's alert).
+func openRequestFile() string {
+	var sess uint32
+	windows.ProcessIdToSessionId(windows.GetCurrentProcessId(), &sess)
+	return paths.AppOpenRequestFile(sess)
+}
 
 type openRequest struct {
 	Alert string    `json:"alert"`

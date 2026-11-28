@@ -94,15 +94,21 @@ jobs:
           [Environment]::OSVersion.VersionString
           (Get-CimInstance Win32_OperatingSystem).Caption
 
+      # Elevated, the app writes its report and log only to fixed names in
+      # its admin-only folder, whatever --selftest-out / --debug-log say.
       - name: Self-test, as administrator
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force reports | Out-Null
-          $out = "$pwd\reports\st-admin.json"
-          $p = Start-Process dist\aba-app.exe -ArgumentList '--selftest', '--selftest-out', $out, '--debug-log', "$pwd\reports\debug-admin.txt" -PassThru
+          $dir = "$env:ProgramData\FileAccessMonitor\app"
+          Remove-Item "$dir\selftest.json", "$dir\debug.log" -ErrorAction SilentlyContinue
+          $p = Start-Process dist\aba-app.exe -ArgumentList '--selftest', '--selftest-out', "$pwd\reports\ignored.json", '--debug-log', "$pwd\reports\ignored.txt" -PassThru
           if (!$p.WaitForExit(150000)) { $p.Kill(); throw 'self-test hung' }
+          Copy-Item "$dir\selftest.json" reports\st-admin.json -ErrorAction SilentlyContinue
+          Copy-Item "$dir\debug.log" reports\debug-admin.txt -ErrorAction SilentlyContinue
           Get-Content reports\debug-admin.txt | Select-String -NotMatch '^\s|^goroutine|^created|^$' | Select -First 30
-          Get-Content $out
+          Get-Content reports\st-admin.json
+          if (Test-Path reports\ignored.json, reports\ignored.txt) { throw 'the elevated app wrote where it was told' }
           if ($p.ExitCode -ne 0) { throw "self-test failed (exit $($p.ExitCode))" }
 
       # medium.exe -lua: the program's token loses its administrator rights,

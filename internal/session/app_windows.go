@@ -14,11 +14,42 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/sysenv"
 )
 
-// AppLaunch is how the desktop app was started in one session.
+// AppLaunch is how the desktop app was started in one session. It holds the
+// process open (to see whether it ended, and how): Close it.
 type AppLaunch struct {
 	Session uint32
 	PID     uint32
 	Pick    TokenPick
+	proc    windows.Handle
+}
+
+// Exited reports whether the app has ended, and its exit code if so.
+func (l AppLaunch) Exited() (bool, uint32) {
+	if l.proc == 0 {
+		return false, 0
+	}
+	if ev, err := windows.WaitForSingleObject(l.proc, 0); err != nil || ev != windows.WAIT_OBJECT_0 {
+		return false, 0
+	}
+	var code uint32
+	if windows.GetExitCodeProcess(l.proc, &code) != nil {
+		return true, 1
+	}
+	return true, code
+}
+
+// Terminate ends the app (one that never showed its window).
+func (l AppLaunch) Terminate() {
+	if l.proc != 0 {
+		windows.TerminateProcess(l.proc, 1)
+	}
+}
+
+// Close lets go of the process.
+func (l AppLaunch) Close() {
+	if l.proc != 0 {
+		windows.CloseHandle(l.proc)
+	}
 }
 
 // LaunchApp starts the desktop app (exe, with args) on the desktop of every
@@ -84,7 +115,7 @@ func launchAppIn(sessionID uint32, exe string, args []string) (AppLaunch, error)
 		return l, fmt.Errorf("CreateProcessAsUser: %w", err)
 	}
 	windows.CloseHandle(pi.Thread)
-	windows.CloseHandle(pi.Process)
+	l.proc = pi.Process
 	l.PID = pi.ProcessId
 	return l, nil
 }

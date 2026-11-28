@@ -7,10 +7,13 @@ package main
 // iCoreWebView2Vtbl has).
 
 import (
+	"os"
 	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
 )
 
 const (
@@ -140,9 +143,12 @@ func findOwnWindow(class string) uintptr {
 	}
 }
 
-// findWindowInSession finds a top-level window of class in this session
-// belonging to another process (the copy of the app already open).
-func findWindowInSession(class string) uintptr {
+// findAppWindowInSession finds the window of the copy of the app already
+// open in this session: a top-level window of class, of another process
+// that is this same program (the installed app, or this very file) running
+// elevated. Anyone may make a window of that class; this only brings the
+// real one forward.
+func findAppWindowInSession(class string) uintptr {
 	cls, _ := windows.UTF16PtrFromString(class)
 	var self uint32
 	windows.ProcessIdToSessionId(windows.GetCurrentProcessId(), &self)
@@ -154,10 +160,36 @@ func findWindowInSession(class string) uintptr {
 		}
 		var pid, sess uint32
 		procGetWindowThreadProcessID.Call(hwnd, uintptr(unsafe.Pointer(&pid)))
-		if pid != windows.GetCurrentProcessId() && windows.ProcessIdToSessionId(pid, &sess) == nil && sess == self {
+		if pid != windows.GetCurrentProcessId() && windows.ProcessIdToSessionId(pid, &sess) == nil && sess == self && isElevatedApp(pid) {
 			return hwnd
 		}
 	}
+}
+
+// isElevatedApp reports whether pid runs the installed app (or this same
+// program file) with an elevated token.
+func isElevatedApp(pid uint32) bool {
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	if err != nil {
+		return false
+	}
+	defer windows.CloseHandle(h)
+	buf := make([]uint16, windows.MAX_LONG_PATH)
+	n := uint32(len(buf))
+	if windows.QueryFullProcessImageName(h, 0, &buf[0], &n) != nil {
+		return false
+	}
+	img := windows.UTF16ToString(buf[:n])
+	self, _ := os.Executable()
+	if !paths.Same(img, paths.InstalledApp()) && (self == "" || !paths.Same(img, self)) {
+		return false
+	}
+	var tok windows.Token
+	if windows.OpenProcessToken(h, windows.TOKEN_QUERY, &tok) != nil {
+		return false
+	}
+	defer tok.Close()
+	return tok.IsElevated()
 }
 
 // uiRunner runs functions on a window's thread, through a private window
