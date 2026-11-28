@@ -280,6 +280,10 @@ async function core(info) {
   $('#tbState').textContent = info.mode === 'full' ? 'Protected' : 'Locked';
   if (info.mode === 'locked') {
     if (info.alert) $('#lkText').textContent = 'Something was caught. An administrator needs to decide what happens to it.';
+    API.Locked().then(l => {
+      $('#tbState').textContent = l.headline;
+      if (!info.alert) $('#lkText').textContent = `${l.headline}. ${l.baitsHealthy} of ${l.baits} baits in place.` + (l.somethingFrozen ? ' Something is frozen: an administrator needs to decide.' : ' Only an administrator can see the details.');
+    }).catch(() => {});
     $('#openAba').onclick = async () => { $('#lkErr').textContent = await API.OpenElevated(); };
   } else if (info.alert) { $('#alertId').textContent = info.alert; $('#alertLine').hidden = false; }
 
