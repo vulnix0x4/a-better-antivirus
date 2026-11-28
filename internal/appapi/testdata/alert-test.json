@@ -1,0 +1,60 @@
+{
+  "schema": 1,
+  "id": "20261120-100003-77c2",
+  "shortId": "77c2",
+  "time": "2026-11-20T10:00:03Z",
+  "category": "test",
+  "tier": "critical",
+  "outcome": "stopped",
+  "status": "resolved",
+  "note": "test",
+  "title": "Test detection: aba-test-8812.exe read a bait",
+  "summary": "unsigned program running from your Temp folder",
+  "test": true,
+  "learning": false,
+  "frozenNow": false,
+  "cutOff": false,
+  "isolated": false,
+  "instant": false,
+  "latencyMs": 0,
+  "program": {
+    "name": "aba-test-8812.exe",
+    "path": "C:\\Users\\sam\\AppData\\Local\\Temp\\aba-test-8812.exe",
+    "pid": 8812,
+    "signed": false,
+    "signature": "None. Nobody vouches for this file.",
+    "folder": "your Temp folder",
+    "exited": false
+  },
+  "baits": [
+    {
+      "id": "desktop-passwords",
+      "label": "Password list",
+      "icon": "doc",
+      "name": "password list on the Desktop",
+      "path": "C:\\Users\\sam\\Desktop\\passwords.txt",
+      "access": "read",
+      "time": "2026-11-20T10:00:03Z"
+    }
+  ],
+  "reasons": [
+    "unsigned program running from your Temp folder"
+  ],
+  "did": [
+    {
+      "action": "freeze",
+      "ok": true,
+      "words": "Froze it",
+      "time": "2026-11-20T10:00:03Z"
+    }
+  ],
+  "buttons": [],
+  "trustForGood": false,
+  "checklist": [],
+  "absent": [
+    "checklistTicks",
+    "webhookShutdown",
+    "blockedSends",
+    "programSize"
+  ]
+}

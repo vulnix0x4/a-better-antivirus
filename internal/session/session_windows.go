@@ -49,6 +49,11 @@ func LaunchWithInput(exe string, input []byte, args ...string) (int, error) {
 	return n, firstErr
 }
 
+// LaunchWithInputIn is LaunchWithInput for one session.
+func LaunchWithInputIn(sessionID uint32, exe string, input []byte, args ...string) error {
+	return launch(sessionID, exe, args, input)
+}
+
 func launch(sessionID uint32, exe string, args []string, input []byte) error {
 	var tok windows.Token
 	if err := windows.WTSQueryUserToken(sessionID, &tok); err != nil {

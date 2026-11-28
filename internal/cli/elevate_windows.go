@@ -41,6 +41,9 @@ func requireAdmin() error {
 	if winsec.IsElevated() {
 		return nil
 	}
+	if yesMode {
+		return errNeedsAdmin
+	}
 	fmt.Println()
 	fmt.Println(" " + ui.Warn.Bold(true).Render("!") + " " + ui.Plain.Render("This needs administrator rights.") +
 		ui.Dim.Render(" Approve the Windows prompt and it carries on in a new window."))
@@ -58,6 +61,9 @@ func requireAdmin() error {
 func requireAdminQuietly(why string) error {
 	if winsec.IsElevated() {
 		return nil
+	}
+	if yesMode {
+		return errNeedsAdmin
 	}
 	fmt.Println()
 	fmt.Println(" " + ui.Plain.Render(why))

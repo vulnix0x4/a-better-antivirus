@@ -17,7 +17,8 @@
 ;
 ;   /DAppVersion=v1.2.3         the version of the aba.exe inside
 ;   /DAppVersionNumeric=1.2.3   the same as numbers, for the file properties
-;   /DBinDir=<folder>           holds aba-amd64.exe and aba-arm64.exe
+;   /DBinDir=<folder>           holds aba-amd64.exe and aba-arm64.exe, and the
+;                               desktop app: aba-app-amd64.exe, aba-app-arm64.exe
 ;   /DOutDir=<folder>           where ABA-Setup.exe goes
 ;   /DPreview                   a look-only build: it carries no aba.exe and
 ;                               can't install anything (see README.md)
@@ -38,6 +39,9 @@
   #if !FileExists(AddBackslash(BinDir) + "aba-amd64.exe") || !FileExists(AddBackslash(BinDir) + "aba-arm64.exe")
     #error BinDir must hold aba-amd64.exe and aba-arm64.exe
   #endif
+  #if !FileExists(AddBackslash(BinDir) + "aba-app-amd64.exe") || !FileExists(AddBackslash(BinDir) + "aba-app-arm64.exe")
+    #error BinDir must hold aba-app-amd64.exe and aba-app-arm64.exe
+  #endif
 #endif
 
 ; The miner trap's list of mining pools: plain data, installed next to aba.exe
@@ -54,6 +58,7 @@
 ; Where ABA puts itself (internal/paths). Low-profile names, on purpose.
 #define ProgramDir "{commonpf}\File Access Monitor"
 #define InstalledExe ProgramDir + "\aba.exe"
+#define InstalledApp ProgramDir + "\aba-app.exe"
 #define DataDir "{commonappdata}\FileAccessMonitor"
 
 [Setup]
@@ -130,18 +135,25 @@ Source: "{#AddBackslash(BinDir)}aba-amd64.exe"; Flags: dontcopy
 Source: "{#AddBackslash(BinDir)}aba-arm64.exe"; Flags: dontcopy
 ; aba install puts it in place, from next to the aba.exe it runs.
 Source: "{#PoolsFile}"; Flags: dontcopy
+; The desktop app, byte for byte the aba-app_<version>_windows_<arch>.exe
+; files; aba install puts it next to aba.exe, from next to the aba.exe it runs.
+Source: "{#AddBackslash(BinDir)}aba-app-amd64.exe"; Flags: dontcopy
+Source: "{#AddBackslash(BinDir)}aba-app-arm64.exe"; Flags: dontcopy
 
 [Run]
 ; Offered on the last page. --elevated-pause keeps the test's window open at
 ; the end so the result can be read. The test needs administrator rights, which
 ; Setup already has; the dashboard doesn't, so it opens as the person signed in.
 Filename: "{#InstalledExe}"; Parameters: "test --elevated-pause"; Description: "Run the safe test: watch ABA catch a harmless fake stealer"; Flags: postinstall nowait skipifsilent runascurrentuser
-Filename: "{#InstalledExe}"; Description: "Open the dashboard"; Flags: postinstall nowait skipifsilent unchecked
+; The app needs administrator rights, which Setup has: it opens without
+; another prompt. Without the app (or WebView2), the dashboard instead.
+Filename: "{#InstalledApp}"; Description: "Open ABA"; Flags: postinstall nowait skipifsilent unchecked runascurrentuser; Check: AppReady
+Filename: "{#InstalledExe}"; Description: "Open the dashboard"; Flags: postinstall nowait skipifsilent unchecked; Check: not AppReady
 #else
 [Run]
 ; Look-only build: the same two boxes, wired to nothing.
 Filename: "{sys}\cmd.exe"; Parameters: "/c rem"; Description: "Run the safe test: watch ABA catch a harmless fake stealer"; Flags: postinstall nowait skipifsilent runhidden
-Filename: "{sys}\cmd.exe"; Parameters: "/c rem"; Description: "Open the dashboard"; Flags: postinstall nowait skipifsilent runhidden unchecked
+Filename: "{sys}\cmd.exe"; Parameters: "/c rem"; Description: "Open ABA"; Flags: postinstall nowait skipifsilent runhidden unchecked
 #endif
 
 [Code]
@@ -149,6 +161,12 @@ const
   BundledVersion = '{#AppVersion}';
   // The letters ABA's own setup makes ntfy topics from (no 0/o or 1/l).
   TopicLetters = 'abcdefghijkmnpqrstuvwxyz23456789';
+  // Microsoft Edge WebView2, which draws the app's window: its client key
+  // (the same for every channel of the Evergreen runtime), and Microsoft's
+  // link to the Evergreen bootstrapper, a small installer that fetches the
+  // rest.
+  WebView2Client = 'SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
+  WebView2Bootstrapper = 'https://go.microsoft.com/fwlink/p/?LinkId=2124703';
 
 var
   // What's on this PC already (worked out once, in InitializeSetup).
@@ -164,7 +182,9 @@ var
   TrapsPage: TWizardPage;
   ClippersCheck, MinersCheck: TNewCheckBox;
   UpdatesPage: TInputOptionWizardPage;
+  WebView2Page: TInputOptionWizardPage;
   ProgressPage: TOutputProgressWizardPage;
+  NeedWebView2: Boolean;    // no machine-wide WebView2 runtime (worked out in InitializeSetup)
 
   // Filled in while aba.exe install runs.
   StepsDone, StepsExpected: Integer;
@@ -319,6 +339,40 @@ begin
   end;
 end;
 
+// ---- Microsoft Edge WebView2, for the app ----
+
+// WebView2Version is the version of the WebView2 runtime installed under
+// Root, or '' if there is none. Microsoft's way to tell ("Detect if a
+// WebView2 Runtime is already installed"): the pv value under the client key
+// is there and isn't empty or 0.0.0.0. A machine-wide runtime is registered
+// in the 32-bit part of HKLM (WOW6432Node), one for a single person in HKCU.
+function WebView2Version(Root: Integer): String;
+begin
+  if not RegQueryStringValue(Root, WebView2Client, 'pv', Result) then
+    Result := '';
+  if Result = '0.0.0.0' then
+    Result := '';
+end;
+
+// The app uses only the machine-wide runtime (in Program Files, which only
+// administrators can change: see internal/appsec), so a runtime installed for
+// one person doesn't count.
+function MachineWebView2: String;
+begin
+  Result := WebView2Version(HKLM32);
+end;
+
+// AppReady: the app is installed and has its WebView2, so the last page can
+// offer to open it.
+function AppReady: Boolean;
+begin
+#ifdef Preview
+  Result := not NeedWebView2;
+#else
+  Result := FileExists(ExpandConstant('{#InstalledApp}')) and (MachineWebView2 <> '');
+#endif
+end;
+
 // ---- what is on this PC already ----
 
 function InitializeSetup: Boolean;
@@ -342,11 +396,14 @@ begin
   if State = 'newer' then ExistingVersion := 'v999.0.0';
   if State = 'unknown' then ExistingVersion := 'dev';
   Existing := ExistingVersion <> '';
+  NeedWebView2 := Lowercase(Param('PREVIEWWEBVIEW2', 'there')) = 'missing';
 #else
   // ABA counts as set up when its settings file exists (the same test ABA
   // itself uses). `aba uninstall` removes that file.
   Existing := FileExists(ExpandConstant('{#DataDir}\config.json'));
   ExistingVersion := InstalledVersion;
+  NeedWebView2 := MachineWebView2 = '';
+  Log('WebView2 runtime: machine-wide "' + MachineWebView2 + '", for this user only "' + WebView2Version(HKCU) + '".');
 #endif
   Log('Already set up: ' + YesNo(Existing) + '. Installed version: "' + ExistingVersion + '". This installer: ' + BundledVersion + '.');
 
@@ -399,6 +456,16 @@ end;
 function WantAutoUpdate: Boolean;
 begin
   Result := UpdatesPage.SelectedValueIndex = 0;
+end;
+
+// WantWebView2: Setup is to fetch WebView2 for the app (only asked when it
+// is missing). Silent installs do, unless /WEBVIEW2=0.
+function WantWebView2: Boolean;
+begin
+  if WizardSilent then
+    Result := Param('WEBVIEW2', '1') = '1'
+  else
+    Result := WebView2Page.Values[0];
 end;
 
 // The two traps. On a silent install nobody sees the page, so a trap is on
@@ -492,6 +559,9 @@ begin
   P := Param('MINERS', '');
   if (P <> '') and (P <> '0') and (P <> '1') then
     Result := '/MINERS must be 1 (detect hidden miners) or 0 (don''t).';
+  P := Param('WEBVIEW2', '1');
+  if (P <> '0') and (P <> '1') then
+    Result := '/WEBVIEW2 must be 1 (install it if missing) or 0 (don''t).';
   P := Param('NTFYTOPIC', '');
   if (P <> '') and not ValidTopic(P) then
     Result := '/NTFYTOPIC may only have letters, digits, - and _ in it (64 at most).';
@@ -570,7 +640,7 @@ begin
     RtfItem('Settings, alerts and logs',
       'Kept in ' + ExpandConstant('{#DataDir}') + '. Only administrators can read that folder.') +
     RtfItem('Start menu, Installed apps and PATH',
-      '"{#AppName}" is added to the Start menu and to Windows'' list of installed apps. The program folder is added to PATH, so the aba command works in a terminal.') +
+      '"ABA" (the app) and "{#AppName}" (the dashboard in a terminal) are added to the Start menu, and ABA to Windows'' list of installed apps. The program folder is added to PATH, so the aba command works in a terminal.') +
     RtfItem('Firewall',
       'Nothing is blocked now. Only when ABA stops a threat does it add a Windows firewall rule that cuts that one program off from the internet.') +
     RtfItem('Mining pools, if you choose to detect miners',
@@ -702,6 +772,16 @@ begin
   else
     UpdatesPage.SelectedValueIndex := 0;
 
+  // ---- WebView2, only if it's missing ----
+  WebView2Page := CreateInputOptionPage(UpdatesPage.ID,
+    'The ABA app', 'Get Microsoft Edge WebView2 for it?',
+    'ABA''s window is drawn by Microsoft Edge WebView2, a part of Windows that this PC doesn''t have yet. ' +
+    'Setup can download Microsoft''s installer for it from microsoft.com and run it. That takes a few minutes.' + #13#10#13#10 +
+    'Without it ABA protects you just the same: it shows what it caught in a small window instead of the app.',
+    False, False);
+  WebView2Page.Add('Download and install WebView2 from Microsoft (recommended)');
+  WebView2Page.Values[0] := Param('WEBVIEW2', '1') <> '0';
+
   // ---- progress, shown while aba.exe works ----
   ProgressPage := CreateOutputProgressPage('Setting up {#AppName}', 'This takes about a minute. Please wait.');
 end;
@@ -710,6 +790,9 @@ function ShouldSkipPage(PageID: Integer): Boolean;
 begin
   // Already set up: nothing new changes on the PC, and nothing is asked.
   Result := Existing and ((PageID = ChangesPage.ID) or (PageID = PhonePage.ID) or (PageID = TrapsPage.ID) or (PageID = UpdatesPage.ID));
+  // Asked about whenever it's missing, also on an update: the app is new.
+  if PageID = WebView2Page.ID then
+    Result := not NeedWebView2;
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -736,6 +819,17 @@ begin
   end;
 end;
 
+function AppMemo(Space, NewLine: String): String;
+begin
+  Result := 'The ABA app:' + NewLine + Space + 'in the Start menu as "ABA"';
+  if NeedWebView2 then begin
+    if WantWebView2 then
+      Result := Result + NewLine + Space + 'Microsoft Edge WebView2 is downloaded from microsoft.com and installed for it'
+    else
+      Result := Result + NewLine + Space + 'without WebView2: what ABA catches shows in a small window instead';
+  end;
+end;
+
 function UpdateReadyMemo(Space, NewLine, MemoUserInfoInfo, MemoDirInfo, MemoTypeInfo, MemoComponentsInfo, MemoGroupInfo, MemoTasksInfo: String): String;
 begin
   if Existing then begin
@@ -745,7 +839,8 @@ begin
       Result := 'Repair:' + NewLine + Space + 'program files, the background service, the Windows setting and your baits' + NewLine;
     Result := Result + NewLine +
       'Your settings:' + NewLine + Space + 'kept as they are' + NewLine + NewLine +
-      'Protection:' + NewLine + Space + 'pauses for a few seconds while the service restarts';
+      'Protection:' + NewLine + Space + 'pauses for a few seconds while the service restarts' + NewLine + NewLine +
+      AppMemo(Space, NewLine);
     Exit;
   end;
   Result :=
@@ -775,9 +870,10 @@ begin
     Result := Result + Space + 'not watched (turn on later with: aba miners on)' + NewLine;
   Result := Result + NewLine + 'Updates:' + NewLine;
   if WantAutoUpdate then
-    Result := Result + Space + 'automatic, signed releases only'
+    Result := Result + Space + 'automatic, signed releases only' + NewLine
   else
-    Result := Result + Space + 'you update it yourself (with: aba update)';
+    Result := Result + Space + 'you update it yourself (with: aba update)' + NewLine;
+  Result := Result + NewLine + AppMemo(Space, NewLine);
 end;
 
 // ---- running aba.exe install ----
@@ -844,7 +940,7 @@ var
 begin
   Ending := Lowercase(Param('PREVIEWRESULT', 'ok'));
   Log('A real build would run: aba.exe ' + AbaArguments);
-  SetArrayLength(Lines, 8);
+  SetArrayLength(Lines, 9);
   // The marks ABA prints: a tick and a cross.
   Ok := #$2713;
   Bad := #$2717;
@@ -858,10 +954,11 @@ begin
     Lines[6] := Bad + ' Starting the background service: the service did not start (preview)'
   else
     Lines[6] := Ok + ' Starting the background service "File Access Monitor", starts with Windows';
+  Lines[7] := Ok + ' Installing the ABA app in the Start menu as "ABA"';
   if Ending = 'warn' then
-    Lines[7] := '! Sending a test to your phone: couldn''t reach ntfy (preview)'
+    Lines[8] := '! Sending a test to your phone: couldn''t reach ntfy (preview)'
   else
-    Lines[7] := Ok + ' Adding ABA to Installed apps and the Start menu listed as "A Better Antivirus"';
+    Lines[8] := Ok + ' Adding ABA to Installed apps and the Start menu listed as "A Better Antivirus"';
   for I := 0 to GetArrayLength(Lines) - 1 do begin
     Sleep(350);
     OnAbaOutput(Lines[I], False, I = 0);
@@ -875,7 +972,7 @@ end;
 #else
 function RunAba(var Problem: String): Boolean;
 var
-  Name, Exe: String;
+  Arch, Name, Exe: String;
   Code: Integer;
 begin
   Result := False;
@@ -883,12 +980,17 @@ begin
   // be written by administrators, so nothing running as you can swap the file
   // before it is started.
   if IsArm64 then
-    Name := 'aba-arm64.exe'
+    Arch := 'arm64'
   else
-    Name := 'aba-amd64.exe';
+    Arch := 'amd64';
+  Name := 'aba-' + Arch + '.exe';
   try
     ExtractTemporaryFile(Name);
     ExtractTemporaryFile('miner-pools.txt');
+    // The app for this processor, named the way aba install looks for it.
+    ExtractTemporaryFile('aba-app-' + Arch + '.exe');
+    if not RenameFile(ExpandConstant('{tmp}\aba-app-' + Arch + '.exe'), ExpandConstant('{tmp}\aba-app.exe')) then
+      RaiseException('couldn''t name the app aba-app.exe');
   except
     Problem := 'Setup couldn''t unpack its files: ' + GetExceptionMessage;
     Exit;
@@ -916,6 +1018,49 @@ begin
   Result := True;
 end;
 #endif
+
+// AddWarning notes something that didn't work but doesn't stop Setup: the
+// last page lists it.
+procedure AddWarning(const S: String);
+begin
+  if Warnings <> '' then
+    Warnings := Warnings + #13#10;
+  Warnings := Warnings + S;
+end;
+
+// InstallWebView2 downloads Microsoft's Evergreen bootstrapper into Setup's
+// temporary folder (only administrators can write there) over HTTPS from
+// Microsoft, and runs it: being run as administrator, it installs the
+// runtime for the whole PC. Anything that goes wrong is a warning: ABA
+// protects the PC without the app.
+procedure InstallWebView2;
+var
+  Exe: String;
+  Code: Integer;
+begin
+  ProgressPage.SetText('Installing Microsoft Edge WebView2 for the ABA app...', 'This can take a few minutes.');
+#ifdef Preview
+  Log('A real build would download ' + WebView2Bootstrapper + ' and run it with /silent /install.');
+  Sleep(1500);
+#else
+  Exe := ExpandConstant('{tmp}\MicrosoftEdgeWebview2Setup.exe');
+  try
+    DownloadTemporaryFile(WebView2Bootstrapper, 'MicrosoftEdgeWebview2Setup.exe', '', nil);
+  except
+    Log('WebView2: the download failed: ' + GetExceptionMessage);
+    AddWarning('Microsoft Edge WebView2 couldn''t be downloaded, so the ABA app can''t open yet (alerts show in a small window). Run Setup again later to retry.');
+    Exit;
+  end;
+  if not Exec(Exe, '/silent /install', '', SW_HIDE, ewWaitUntilTerminated, Code) then begin
+    Log('WebView2: the installer didn''t start: ' + SysErrorMessage(Code));
+    AddWarning('Microsoft Edge WebView2''s installer didn''t start, so the ABA app can''t open yet (alerts show in a small window).');
+    Exit;
+  end;
+  Log('WebView2: the installer ended with exit code ' + IntToStr(Code) + '; machine-wide runtime now "' + MachineWebView2 + '"');
+  if MachineWebView2 = '' then
+    AddWarning('Microsoft Edge WebView2 wasn''t installed (its installer''s exit code: ' + IntToStr(Code) + '), so the ABA app can''t open yet (alerts show in a small window). Run Setup again later to retry.');
+#endif
+end;
 
 // Setup calls this after Install is clicked (and on a silent install). A text
 // result stops Setup on a page showing it, with exit code 7.
@@ -949,6 +1094,8 @@ begin
         Problem + #13#10#13#10 +
         'What to do next: ' + Next + ' If it stops at the same step, please report it at {#AppURL}/issues and include the text above.';
     end;
+    if (Result = '') and NeedWebView2 and WantWebView2 then
+      InstallWebView2;
     if Result = '' then
       ProgressPage.SetProgress(StepsExpected + 1, StepsExpected + 1);
   finally
@@ -970,7 +1117,7 @@ begin
   if not Existing then
     Text :=
       '{#AppName} is installed and running. It starts with Windows.' + #13#10#13#10 +
-      'You''ll find it in the Start menu. In a terminal, the command is aba.' + #13#10#13#10 +
+      'Open it from the Start menu: "ABA". In a terminal, the command is aba.' + #13#10#13#10 +
       'Don''t open the bait files yourself: that counts as a read.'
   else begin
     WizardForm.FinishedHeadingLabel.Caption := 'All set';

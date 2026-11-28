@@ -70,7 +70,7 @@ func FromAutopsy(a *alerts.Alert) Message {
 			fmt.Fprintf(&b, "%d. %s\n", i+1, st)
 		}
 	}
-	b.WriteString("Full report, on the " + platform.PC + ": " + report.Where)
+	b.WriteString("Full report, on the " + platform.PC + ": " + report.Where())
 	m.Body = b.String()
 	return m
 }

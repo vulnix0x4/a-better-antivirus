@@ -63,7 +63,7 @@ func alertsCmd() *cobra.Command {
 			}
 			fmt.Println(ui.AlertTable(list, ui.Width()))
 			fmt.Println("\n" + ui.Hint("Details:", "aba alerts show <id>") + ui.Dim.Render("  (the last part of the ID is enough)"))
-			fmt.Println(ui.Hint("Full reports, in your web browser:", "aba reports") + ui.Dim.Render("  (also: "+report.Where+")"))
+			fmt.Println(ui.Hint("Full reports, in your web browser:", "aba reports") + ui.Dim.Render("  (also: "+report.Where()+")"))
 			return nil
 		},
 	}
@@ -188,7 +188,7 @@ func resumeCmd() *cobra.Command {
 				}
 				return nil
 			}
-			if !ignore && ui.IsTTY() {
+			if !ignore && !yesMode && ui.IsTTY() {
 				huh.NewConfirm().Title("Trust " + a.ExeName() + " from now on?").
 					Description(rule.Path + "\n" + trust.Describe(rule, baitNames())).
 					Affirmative("Yes").Negative("No").Value(&ignore).WithTheme(theme()).Run()
@@ -323,6 +323,13 @@ func testCmd() *cobra.Command {
 	}
 }
 
+// appInstalled: the desktop app is there (the service opens it on a catch,
+// where it can run; see service.openApp).
+var appInstalled = func() bool {
+	fi, err := os.Stat(paths.InstalledApp())
+	return err == nil && fi.Mode().IsRegular() && runtime.GOOS == "windows"
+}
+
 func runTest() error {
 	if s, _ := svcctl.Status(); s != svcctl.Running {
 		return exitf("the service isn't running (%s); try `aba doctor --fix`", s)
@@ -372,6 +379,7 @@ func runTest() error {
 	fmt.Println(" " + ui.Plain.Render(words.testNetwork))
 	fmt.Println()
 	fmt.Println(" " + ui.Good.Render(ui.IconArr) + ui.Dim.Render(" Running the fake stealer…"))
+	step("A harmless fake stealer is about to read " + baitName + ".")
 
 	reader, err := startTestReader(b, target)
 	if err != nil {
@@ -391,6 +399,7 @@ func runTest() error {
 	if err := os.WriteFile(paths.TestFile(), tr, 0o644); err != nil {
 		return err
 	}
+	step("Waiting for ABA to catch it…")
 	start := time.Now()
 	var found *alerts.Alert
 	for time.Since(start) < 20*time.Second && found == nil {
@@ -417,6 +426,8 @@ func runTest() error {
 		return exitf("test failed")
 	}
 	fmt.Println()
+	step("Caught and frozen.")
+	setDetails(map[string]any{"alertId": found.ID, "latencyMs": found.LatencyMS, "instant": found.Instant})
 	phone := ""
 	if sec, err := config.LoadSecrets(); err == nil && sec.Phone.Enabled() {
 		phone = sec.Phone.Kind
@@ -851,6 +862,17 @@ func baitCmd() *cobra.Command {
 			if bs == nil {
 				return exitf("no bait %q (see `aba bait list`)", args[0])
 			}
+			type shown struct {
+				Path   string `json:"path"`
+				Size   int64  `json:"size"`
+				Text   string `json:"text,omitempty"`
+				Binary bool   `json:"binary"`
+			}
+			var files []shown
+			for _, f := range bs.Files {
+				files = append(files, shown{Path: f.Path, Size: f.Size, Text: strings.ReplaceAll(f.Text, "\r\n", "\n"), Binary: f.Text == ""})
+			}
+			setDetails(map[string]any{"id": bs.ID, "name": bs.Name, "files": files})
 			for _, f := range bs.Files {
 				fmt.Println(ui.Heading(f.Path))
 				if f.Text != "" {
@@ -1070,6 +1092,11 @@ func notifyCmd() *cobra.Command {
 				return nil
 			}
 			a := env.Alert
+			if env.ToastOnly {
+				notify.Toast(a.Title, a.Summary)
+				time.Sleep(3 * time.Second) // let the toast process start before we exit
+				return nil
+			}
 			if env.Autopsy && a.Autopsy != nil {
 				title := "ABA: what " + a.ExeName() + " had already opened"
 				if a.Autopsy.Sent == alerts.SentNothing {
@@ -1113,6 +1140,44 @@ func demoAlert() *alerts.Alert {
 }
 
 // ---- instant freeze ----
+
+// ---- preset ----
+
+// presetCmd sets the protection level (what `aba configure` asks first),
+// without questions.
+func presetCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "preset [alert|balanced|strict]",
+		Short: "How ABA responds when something takes a bait",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireAdmin(); err != nil {
+				return err
+			}
+			cfg, err := mustConfig()
+			if err != nil {
+				return err
+			}
+			if len(args) == 0 {
+				fmt.Println("The protection level is " + ui.Bold.Render(cfg.PresetName()) + ".")
+				for _, p := range config.Presets {
+					fmt.Printf("  %-9s %s\n", p.ID, ui.Dim.Render(p.Description))
+				}
+				fmt.Println(ui.Hint("Change:", "aba preset alert|balanced|strict"))
+				return nil
+			}
+			id := strings.ToLower(args[0])
+			if err := cfg.ApplyPreset(id); err != nil {
+				return exitf("use `aba preset alert`, `balanced` or `strict`")
+			}
+			if err := config.SaveConfig(cfg); err != nil {
+				return err
+			}
+			fmt.Println(ui.Good.Render(ui.IconOK) + " Protection level: " + cfg.PresetName())
+			return install.Reload()
+		},
+	}
+}
 
 func instantCmd() *cobra.Command {
 	c := &cobra.Command{
@@ -1288,6 +1353,9 @@ func renderTestResult(found *alerts.Alert, phoneKind string) string {
 		rows = append(rows, [3]string{"x", "Not frozen", ui.Dim.Render("see the alert for why")})
 	}
 	alert := "popup on your desktop"
+	if appInstalled() {
+		alert = "the ABA app, on your desktop"
+	}
 	if phoneKind != "" {
 		alert += ", and your phone (" + phoneKind + ")"
 	}

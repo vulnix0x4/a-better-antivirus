@@ -2,7 +2,8 @@
 
 The click-through installer: download one file, double-click, Next, Next, Finish.
 
-It is a front end for ABA's own installer, not a second one. It carries the x64 and the Arm64 `aba.exe`, asks
+It is a front end for ABA's own installer, not a second one. It carries the x64 and the Arm64 `aba.exe` (and
+the same two builds of the ABA app, `aba-app.exe`), asks
 the questions of the terminal setup's "Recommended" path (phone alerts, the clipper and miner traps, automatic
 updates), and then runs
 
@@ -12,13 +13,21 @@ aba.exe install --yes --keep-settings --preset balanced --learning 0 --auto-upda
 
 from the copy for this PC. ABA does the rest itself, exactly as it does when installed from PowerShell or by
 hand: it copies itself to `C:\Program Files\File Access Monitor`, creates the service, plants the baits, and
-adds its own entry to Windows' "Installed apps" list and a Start menu shortcut. `aba uninstall` takes all of
-it away again. So Setup puts no files on the PC and registers no uninstaller of its own.
+adds its own entry to Windows' "Installed apps" list. It also puts the app that Setup unpacked next to it
+(`aba-app.exe`) into the program folder, and the Start menu gets one entry, "ABA", which opens the app (without the
+app: "A Better Antivirus" and "ABA reports" instead). `aba uninstall`
+takes all of it away again, and the app's WebView2 profile (`%LocalAppData%\ABA\webview`) too. So Setup puts
+no files on the PC and registers no uninstaller of its own.
+
+The one thing Setup does itself: when this PC has no machine-wide Microsoft Edge WebView2 runtime (the app's
+window needs it; a runtime installed for one person doesn't count, the app only uses the one in Program Files),
+it offers to download Microsoft's Evergreen bootstrapper from `go.microsoft.com` and run it. Without WebView2 ABA
+protects the PC the same; what it catches shows in a small window instead of the app.
 
 | File | What it is |
 |---|---|
 | `aba.iss` | The Inno Setup script: pages, wording, and the call to `aba.exe install`. |
-| `build/` | `go run ./installer/build`: compiles `aba.iss`. GoReleaser calls it once per built `aba.exe`. |
+| `build/` | `go run ./installer/build`: compiles `aba.iss`. GoReleaser calls it once per built `aba.exe` and `aba-app.exe` (`-app`). |
 | `get-inno.ps1` | Fetches the Inno Setup compiler (one fixed version, SHA-256 checked, no admin rights). |
 | `verify.ps1` | Checks a GoReleaser `dist\` folder: the installer is in `SHA256SUMS.txt` and holds the published `aba.exe` files. |
 | `test.ps1` | Installs, checks and uninstalls for real. **CI runners only.** |
@@ -51,6 +60,7 @@ turns on something that touches the clipboard or name lookups. Options (all opti
 | `/NTFYTOPIC=my-topic` | Send phone alerts to this [ntfy](https://ntfy.sh) topic. Letters, digits, `-` and `_`. |
 | `/AUTOUPDATE=0` | Don't update automatically (`1`, the default, does). |
 | `/CLIPPERS=1` | Detect clippers with the clipboard bait (`0` or not given: off). |
+| `/WEBVIEW2=0` | Don't download Microsoft Edge WebView2 for the app if it's missing (`1`, the default, does). |
 | `/MINERS=1` | Detect hidden crypto miners with the miner trap (`0` or not given: off). |
 | `/PRESET=alert\|balanced\|strict` | What happens when something takes a bait. Default `balanced`. |
 | `/LEARNING=3` | Days of learning mode. Only changes something with `strict`. Default `0`. |
@@ -89,6 +99,7 @@ go run ./installer/build -preview
 dist\installer\ABA-Setup-preview.exe                         # a first install
 dist\installer\ABA-Setup-preview.exe /PREVIEWSTATE=upgrade   # or repair, newer, unknown
 dist\installer\ABA-Setup-preview.exe /PREVIEWRESULT=fail     # or warn
+dist\installer\ABA-Setup-preview.exe /PREVIEWWEBVIEW2=missing  # the WebView2 page
 ```
 
 ## Changing things

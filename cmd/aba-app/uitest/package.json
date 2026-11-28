@@ -1,0 +1,15 @@
+{
+  "name": "aba-app-uitest",
+  "private": true,
+  "description": "Development server (mock bridge) and Playwright tests for the ABA desktop app's page. Not shipped.",
+  "type": "module",
+  "scripts": {
+    "serve": "node server.mjs",
+    "test": "node --test --test-concurrency=1 ui.test.mjs",
+    "shots": "node capture.mjs shots",
+    "videos": "node capture.mjs videos"
+  },
+  "devDependencies": {
+    "playwright": "1.65.1"
+  }
+}

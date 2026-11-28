@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ABA</title>
+<script src="boot.js"></script>
+<script type="importmap">{"imports":{"three":"./vendor/three/build/three.module.js","three/addons/":"./vendor/three/addons/"}}</script>
+<link rel="stylesheet" href="style.css">
+</head>
+<body data-mode="loading" data-screen="">
+<div class="window" id="window">
+
+  <header class="titlebar">
+    <div class="brand"><span class="mark"></span><b>ABA</b><span class="tb-state" id="tbState">Starting</span></div>
+  </header>
+
+  <nav class="rail full-only" id="rail" aria-label="Screens">
+    <button type="button" data-nav="home"><i class="ri"></i><em>Home</em></button>
+    <button type="button" data-nav="history"><i class="ri"></i><em>History</em></button>
+    <button type="button" data-nav="baits"><i class="ri"></i><em>Baits</em></button>
+    <button type="button" data-nav="settings"><i class="ri"></i><em>Settings</em></button>
+    <div class="rail-foot"><span class="live" id="railLive"></span><em id="ver"></em></div>
+  </nav>
+
+  <main class="stage full-only" id="stage">
+    <canvas id="gl" aria-hidden="true"></canvas>
+    <div class="atmo"></div>
+    <div id="tags"><div class="btag lone" id="loneTag"><span class="tile"></span><span class="bt-l"></span><u></u></div></div>
+
+    <section class="screen" id="home" aria-label="Home"></section>
+    <section class="screen" id="caught" aria-label="Caught"></section>
+    <section class="screen" id="report" aria-label="Full report"></section>
+    <section class="screen" id="history" aria-label="History"></section>
+    <section class="screen" id="baits" aria-label="Baits"></section>
+    <section class="screen" id="settings" aria-label="Settings"></section>
+
+    <div id="intruder" aria-hidden="true"><i class="in-i"></i><span class="in-l"></span></div>
+    <div class="held" id="held"><i class="held-i"></i>Held in ice for <b id="heldT">0:00</b></div>
+    <div class="testcard panel" id="testCard" hidden></div>
+    <p class="notice" id="notice" hidden></p>
+  </main>
+
+  <main class="locked locked-only" id="locked"></main>
+
+  <aside class="panel diag" id="diag" hidden></aside>
+  <div class="wc" id="wc">
+    <button type="button" id="wMin" aria-label="Minimise"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12"/></svg></button>
+    <button type="button" id="wMax" aria-label="Maximise"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6.5" y="6.5" width="11" height="11" rx="1"/></svg></button>
+    <button type="button" id="wClose" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+  </div>
+  <div class="flash" id="flash"></div>
+  <div id="toasts"></div>
+  <div id="overlay"></div>
+</div>
+<script type="module" src="app.js"></script>
+</body>
+</html>

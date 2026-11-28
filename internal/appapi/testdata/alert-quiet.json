@@ -1,0 +1,53 @@
+{
+  "schema": 1,
+  "id": "20261125-091502-1a2b",
+  "shortId": "1a2b",
+  "time": "2026-11-25T09:15:02Z",
+  "category": "stealer",
+  "tier": "info",
+  "outcome": "noted",
+  "status": "noted",
+  "title": "SearchProtocolHost.exe read a bait (looks legitimate)",
+  "summary": "signed by Microsoft Windows",
+  "test": false,
+  "learning": false,
+  "frozenNow": false,
+  "cutOff": false,
+  "isolated": false,
+  "instant": false,
+  "latencyMs": 0,
+  "program": {
+    "name": "SearchProtocolHost.exe",
+    "path": "C:\\Windows\\System32\\SearchProtocolHost.exe",
+    "pid": 7312,
+    "signed": true,
+    "signer": "Microsoft Windows",
+    "signature": "Signed by Microsoft Windows.",
+    "folder": "Windows",
+    "exited": false
+  },
+  "baits": [
+    {
+      "id": "desktop-passwords",
+      "label": "Password list",
+      "icon": "doc",
+      "name": "password list on the Desktop",
+      "path": "C:\\Users\\sam\\Desktop\\passwords.txt",
+      "access": "read",
+      "time": "2026-11-25T09:15:02Z"
+    }
+  ],
+  "reasons": [
+    "signed by Microsoft Windows"
+  ],
+  "did": [],
+  "buttons": [],
+  "trustForGood": true,
+  "checklist": [],
+  "absent": [
+    "checklistTicks",
+    "webhookShutdown",
+    "blockedSends",
+    "programSize"
+  ]
+}

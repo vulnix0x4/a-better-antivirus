@@ -11,6 +11,7 @@
 package paths
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 )
@@ -28,6 +29,10 @@ const (
 func InstalledCLI() string     { return filepath.Join(InstallDir(), CLIExe) }
 func InstalledService() string { return filepath.Join(InstallDir(), ServiceExe) }
 
+// InstalledApp is the desktop app, when it's installed (Windows only for
+// now): next to the CLI, in the admin-only install folder.
+func InstalledApp() string { return filepath.Join(InstallDir(), AppExe) }
+
 func ConfigFile() string  { return filepath.Join(DataDir(), "config.json") }
 func StateFile() string   { return filepath.Join(DataDir(), "state.json") }
 func SecretsFile() string { return filepath.Join(DataDir(), "secrets.json") } // admin-only, and encrypted where the OS offers it
@@ -42,6 +47,25 @@ func TestFile() string    { return filepath.Join(DataDir(), "pending-test.json")
 // ClipboardTestFile is how a bait put out for `aba clipboard test` went, when
 // the guard caught nothing (clipbait.TestResult).
 func ClipboardTestFile() string { return filepath.Join(DataDir(), "clipboard-test.json") }
+
+// AppDir is the desktop app's own corner of the (admin-only) data folder.
+// (Not its WebView2 profile: WebView2 runs its browser processes with the
+// person's ordinary rights even for an elevated app, so the profile has to
+// be somewhere they can write; see appsec.WebViewDir.)
+func AppDir() string { return filepath.Join(DataDir(), "app") }
+
+// AppShownFile is where the app, started by the service for alert id in a
+// session, says it showed its window (or handed the alert to the copy
+// already open there). Until it does, the service has the popup ready.
+func AppShownFile(session uint32, id string) string {
+	return filepath.Join(AppDir(), fmt.Sprintf("shown-%d-%s", session, id))
+}
+
+// AppOpenRequestFile is where a second start of the app in a session leaves
+// its alert for the copy already open there.
+func AppOpenRequestFile(session uint32) string {
+	return filepath.Join(AppDir(), fmt.Sprintf("open-request-%d.json", session))
+}
 
 // PublicDir is the one corner of the data folder anyone may read.
 func PublicDir() string        { return filepath.Join(DataDir(), "public") }

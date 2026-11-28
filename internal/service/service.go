@@ -429,10 +429,22 @@ func (s *server) Resume(pids []uint32) {
 }
 
 func (s *server) NotifyDesktop(a *alerts.Alert) {
+	// A harmless touch gets a toast at most (the notify command decides);
+	// anything else opens the desktop app, where it's installed, with a
+	// toast that names no file. Without the app: today's popup.
 	// The alert goes to the popup over a pipe: alert files are admin-only now.
 	b, err := json.Marshal(notify.Envelope{Alert: a})
 	if err != nil {
 		s.log.Printf("desktop notify: %v", err)
+		return
+	}
+	popupIn := func(sess uint32) {
+		if err := session.LaunchWithInputIn(sess, s.cliExe, b, "notify"); err != nil {
+			s.log.Printf("desktop notify (session %d): %v", sess, err)
+		}
+	}
+	if !(!a.Test && a.Tier == config.TierInfo) && s.openApp(a, popupIn) {
+		s.toast(a)
 		return
 	}
 	n, err := session.LaunchWithInput(s.cliExe, b, "notify")
@@ -440,6 +452,20 @@ func (s *server) NotifyDesktop(a *alerts.Alert) {
 		s.log.Printf("desktop notify: %v", err)
 	} else if n == 0 {
 		s.log.Printf("desktop notify: nobody logged in; alert %s kept in history", a.ID)
+	}
+}
+
+// toast shows only a notification about a, from an envelope that carries no
+// paths or program details (the app shows those, to administrators).
+func (s *server) toast(a *alerts.Alert) {
+	ta := notify.ToastAlert(a)
+	ta.Title = "ABA: " + a.Title
+	b, err := json.Marshal(notify.Envelope{Alert: ta, ToastOnly: true})
+	if err == nil {
+		_, err = session.LaunchWithInput(s.cliExe, b, "notify")
+	}
+	if err != nil {
+		s.log.Printf("desktop notify (toast): %v", err)
 	}
 }
 

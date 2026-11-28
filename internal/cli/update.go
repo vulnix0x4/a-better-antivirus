@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/huh"
@@ -17,7 +18,7 @@ import (
 )
 
 func updateCmd() *cobra.Command {
-	var check, yes bool
+	var check bool
 	c := &cobra.Command{
 		Use:   "update",
 		Short: "Install the latest signed version",
@@ -49,6 +50,8 @@ func updateCmd() *cobra.Command {
 					fmt.Println(ui.Dim.Render("Automatic updates are off. Turn them on with ") + ui.Code.Render("aba configure"))
 				}
 			}
+			setDetails(map[string]any{"current": Version, "latest": rel.Tag, "url": rel.HTMLURL,
+				"available": update.Updatable(Version) && update.Newer(Version, rel.Tag)})
 			if !update.Updatable(Version) {
 				fmt.Printf("This is a %s build, which doesn't update itself. The latest release is %s.\n", Version, rel.Tag)
 				return nil
@@ -63,7 +66,7 @@ func updateCmd() *cobra.Command {
 				fmt.Println(ui.Hint("Install it with", "aba update"))
 				return nil
 			}
-			if !yes && ui.IsTTY() {
+			if !yesMode && ui.IsTTY() {
 				ok := true
 				huh.NewConfirm().Title("Install " + rel.Tag + " now?").
 					Description("Protection pauses for a few seconds while the service restarts.").
@@ -75,6 +78,7 @@ func updateCmd() *cobra.Command {
 			var exe string
 			steps := []install.Step{
 				{Name: "Downloading " + rel.Tag, Run: func() (string, error) {
+					step("Downloading " + rel.Tag)
 					var err error
 					exe, err = update.Download(ctx, rel, update.Dir())
 					if err != nil {
@@ -84,6 +88,7 @@ func updateCmd() *cobra.Command {
 					return "signature and checksum verified", nil
 				}},
 				{Name: "Installing and restarting the service", Run: func() (string, error) {
+					step("Installing and restarting the service")
 					log := logx.New(paths.LogFile(), false)
 					if err := update.Apply(exe, log.Printf); err != nil {
 						return "", err
@@ -103,8 +108,8 @@ func updateCmd() *cobra.Command {
 		},
 	}
 	c.Flags().BoolVar(&check, "check", false, "only check, don't install")
-	c.Flags().BoolVarP(&yes, "yes", "y", false, "don't ask for confirmation")
-	c.AddCommand(updateApplyCmd())
+	c.Flags().BoolVarP(&yesMode, "yes", "y", yesMode, "don't ask for confirmation")
+	c.AddCommand(updateApplyCmd(), updateAutoCmd())
 	return c
 }
 
@@ -152,4 +157,44 @@ func recordUpdated(from, to string) {
 		st.Update.LastResult = "updated from " + from + " to " + to
 		return nil
 	})
+}
+
+// updateAutoCmd switches automatic updates on or off (what `aba configure`
+// asks), without questions.
+func updateAutoCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "auto [on|off]",
+		Short: "Whether updates install themselves",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireAdmin(); err != nil {
+				return err
+			}
+			cfg, err := mustConfig()
+			if err != nil {
+				return err
+			}
+			if len(args) == 0 {
+				state := ui.Bad.Render("off")
+				if cfg.AutoUpdate {
+					state = ui.Good.Render("on")
+				}
+				fmt.Println("Automatic updates are " + state + ".  " + ui.Hint("Change:", "aba update auto on|off"))
+				return nil
+			}
+			switch strings.ToLower(args[0]) {
+			case "on":
+				cfg.AutoUpdate = true
+			case "off":
+				cfg.AutoUpdate = false
+			default:
+				return exitf("use `aba update auto on` or `aba update auto off`")
+			}
+			if err := config.SaveConfig(cfg); err != nil {
+				return err
+			}
+			fmt.Println(ui.Good.Render(ui.IconOK) + " Automatic updates " + strings.ToLower(args[0]))
+			return install.Reload()
+		},
+	}
 }

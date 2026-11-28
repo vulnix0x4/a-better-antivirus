@@ -1,0 +1,397 @@
+{
+  "schema": 1,
+  "total": 14,
+  "healthy": 14,
+  "lastCheck": "2026-11-27T14:01:00Z",
+  "items": [
+    {
+      "id": "discord",
+      "label": "Discord login",
+      "icon": "discord",
+      "name": "Discord token store",
+      "description": "Fake token, next to the real one",
+      "category": "Apps",
+      "kind": "decoy",
+      "health": "ok",
+      "custom": false,
+      "createdAt": "2026-10-02T09:12:00Z",
+      "lastCheck": "2026-11-27T14:01:00Z",
+      "files": [
+        {
+          "path": "C:\\Users\\sam\\AppData\\Roaming\\discord\\Local Storage\\leveldb\\000005.ldb",
+          "tripwire": true,
+          "size": 2148
+        },
+        {
+          "path": "C:\\Users\\sam\\AppData\\Roaming\\discord\\Local Storage\\leveldb\\CURRENT",
+          "tripwire": false,
+          "size": 16
+        }
+      ],
+      "hasText": false,
+      "touchedBy": [
+        {
+          "alertId": "20261127-140207-7f3a",
+          "program": "NitroGen-Free.exe",
+          "time": "2026-11-27T14:02:07Z",
+          "outcome": "frozen",
+          "access": "read"
+        }
+      ]
+    },
+    {
+      "id": "chrome-profile",
+      "label": "Chrome passwords",
+      "icon": "chrome",
+      "name": "extra profile inside your Chrome",
+      "description": "A fake profile inside your Chrome",
+      "category": "Browsers",
+      "kind": "decoy",
+      "health": "ok",
+      "custom": false,
+      "createdAt": "2026-10-02T09:12:00Z",
+      "lastCheck": "2026-11-27T14:01:00Z",
+      "files": [
+        {
+          "path": "C:\\Users\\sam\\AppData\\Local\\Google\\Chrome\\User Data\\Profile 23\\Login Data",
+          "tripwire": true,
+          "size": 40960
+        },
+        {
+          "path": "C:\\Users\\sam\\AppData\\Local\\Google\\Chrome\\User Data\\Profile 23\\Network\\Cookies",
+          "tripwire": true,
+          "size": 28672
+        }
+      ],
+      "hasText": false,
+      "touchedBy": []
+    },
+    {
+      "id": "metamask",
+      "label": "MetaMask wallet",
+      "icon": "wallet",
+      "name": "MetaMask wallet (inside a fake browser)",
+      "description": "The wallet stealers want most, in a fake browser",
+      "category": "Wallets",
+      "kind": "decoy",
+      "health": "ok",
+      "custom": false,
+      "createdAt": "2026-10-02T09:12:00Z",
+      "lastCheck": "2026-11-27T14:01:00Z",
+      "files": [
+        {
+          "path": "C:\\Users\\sam\\AppData\\Local\\BraveSoftware\\Brave-Browser\\User Data\\Default\\Local Extension Settings\\nkbihfbeogaeaoehlefnkodbefgpgknn\\000003.log",
+          "tripwire": true,
+          "size": 5120
+        }
+      ],
+      "hasText": false,
+      "touchedBy": [
+        {
+          "alertId": "20261029-195510-aa07",
+          "program": "setup_crack.exe",
+          "time": "2026-10-29T19:55:10Z",
+          "outcome": "killed",
+          "access": "read"
+        }
+      ]
+    },
+    {
+      "id": "ssh-backup",
+      "label": "SSH keys",
+      "icon": "key",
+      "name": "Old SSH key backup (~/.ssh)",
+      "description": "An old key backup in your .ssh folder",
+      "category": "Credentials",
+      "kind": "file",
+      "health": "ok",
+      "custom": false,
+      "createdAt": "2026-10-02T09:12:00Z",
+      "lastCheck": "2026-11-27T14:01:00Z",
+      "files": [
+        {
+          "path": "C:\\Users\\sam\\.ssh\\id_rsa.bak",
+          "tripwire": true,
+          "size": 1679
+        }
+      ],
+      "hasText": true,
+      "touchedBy": []
+    },
+    {
+      "id": "telegram",
+      "label": "Telegram session",
+      "icon": "telegram",
+      "name": "Telegram Desktop session",
+      "description": "A logged-in session, as stealers want it",
+      "category": "Apps",
+      "kind": "decoy",
+      "health": "ok",
+      "custom": false,
+      "createdAt": "2026-10-02T09:12:00Z",
+      "lastCheck": "2026-11-27T14:01:00Z",
+      "files": [
+        {
+          "path": "C:\\Users\\sam\\AppData\\Roaming\\Telegram Desktop\\tdata\\key_datas",
+          "tripwire": true,
+          "size": 332
+        }
+      ],
+      "hasText": false,
+      "touchedBy": []
+    },
+    {
+      "id": "desktop-passwords",
+      "label": "Password list",
+      "icon": "doc",
+      "name": "password list on the Desktop",
+      "description": "A password list on your Desktop",
+      "category": "Files",
+      "kind": "file",
+      "health": "ok",
+      "custom": false,
+      "createdAt": "2026-10-02T09:12:00Z",
+      "lastCheck": "2026-11-27T14:01:00Z",
+      "files": [
+        {
+          "path": "C:\\Users\\sam\\Desktop\\passwords.txt",
+          "tripwire": true,
+          "size": 412
+        }
+      ],
+      "hasText": true,
+      "touchedBy": [
+        {
+          "alertId": "20261125-091502-1a2b",
+          "program": "SearchProtocolHost.exe",
+          "time": "2026-11-25T09:15:02Z",
+          "outcome": "noted",
+          "access": "read"
+        },
+        {
+          "alertId": "20261120-100003-77c2",
+          "program": "aba-test-8812.exe",
+          "time": "2026-11-20T10:00:03Z",
+          "outcome": "stopped",
+          "access": "read"
+        }
+      ]
+    },
+    {
+      "id": "edge-profile",
+      "label": "Edge profile",
+      "icon": "globe",
+      "name": "extra profile inside your Edge",
+      "description": "A fake profile inside your Edge",
+      "category": "Browsers",
+      "kind": "decoy",
+      "health": "ok",
+      "custom": false,
+      "createdAt": "2026-10-02T09:12:00Z",
+      "lastCheck": "2026-11-27T14:01:00Z",
+      "files": [
+        {
+          "path": "C:\\Users\\sam\\AppData\\Local\\Microsoft\\Edge\\User Data\\Profile 7\\Login Data",
+          "tripwire": true,
+          "size": 40960
+        }
+      ],
+      "hasText": false,
+      "touchedBy": []
+    },
+    {
+      "id": "exodus",
+      "label": "Exodus wallet",
+      "icon": "wallet",
+      "name": "Exodus wallet",
+      "description": "A fake Exodus wallet",
+      "category": "Wallets",
+      "kind": "decoy",
+      "health": "ok",
+      "custom": false,
+      "createdAt": "2026-10-02T09:12:00Z",
+      "lastCheck": "2026-11-27T14:01:00Z",
+      "files": [
+        {
+          "path": "C:\\Users\\sam\\AppData\\Roaming\\Exodus\\exodus.wallet\\seed.seco",
+          "tripwire": true,
+          "size": 9384
+        },
+        {
+          "path": "C:\\Users\\sam\\AppData\\Roaming\\Exodus\\exodus.wallet\\passphrase.json",
+          "tripwire": false,
+          "size": 92
+        }
+      ],
+      "hasText": false,
+      "touchedBy": []
+    },
+    {
+      "id": "aws",
+      "label": "AWS keys",
+      "icon": "cloud",
+      "name": "AWS credentials (~/.aws)",
+      "description": "Cloud keys that tell on whoever uses them",
+      "category": "Credentials",
+      "kind": "canary",
+      "health": "ok",
+      "custom": false,
+      "createdAt": "2026-10-02T09:12:00Z",
+      "lastCheck": "2026-11-27T14:01:00Z",
+      "files": [
+        {
+          "path": "C:\\Users\\sam\\.aws\\credentials",
+          "tripwire": true,
+          "size": 116
+        }
+      ],
+      "hasText": true,
+      "touchedBy": []
+    },
+    {
+      "id": "seed-phrase",
+      "label": "Recovery phrase",
+      "icon": "grid",
+      "name": "wallet recovery phrase (Documents)",
+      "description": "A wallet recovery phrase in Documents",
+      "category": "Files",
+      "kind": "file",
+      "health": "ok",
+      "custom": false,
+      "createdAt": "2026-10-02T09:12:00Z",
+      "lastCheck": "2026-11-27T14:01:00Z",
+      "files": [
+        {
+          "path": "C:\\Users\\sam\\Documents\\wallet seed.txt",
+          "tripwire": true,
+          "size": 98
+        }
+      ],
+      "hasText": true,
+      "touchedBy": [
+        {
+          "alertId": "20261122-201144-3c4d",
+          "program": "MsMpEng.exe",
+          "time": "2026-11-22T20:11:44Z",
+          "outcome": "noted",
+          "access": "read"
+        },
+        {
+          "alertId": "20261106-112031-91aa",
+          "program": "Reflect.exe",
+          "time": "2026-11-06T11:20:31Z",
+          "outcome": "trusted",
+          "access": "read"
+        }
+      ]
+    },
+    {
+      "id": "brave",
+      "label": "Brave profile",
+      "icon": "globe",
+      "name": "Brave browser profile",
+      "description": "Fake saved passwords and cookies",
+      "category": "Browsers",
+      "kind": "decoy",
+      "health": "ok",
+      "custom": false,
+      "createdAt": "2026-10-02T09:12:00Z",
+      "lastCheck": "2026-11-27T14:01:00Z",
+      "files": [
+        {
+          "path": "C:\\Users\\sam\\AppData\\Local\\BraveSoftware\\Brave-Browser\\User Data\\Default\\Login Data",
+          "tripwire": true,
+          "size": 40960
+        }
+      ],
+      "hasText": false,
+      "touchedBy": []
+    },
+    {
+      "id": "electrum",
+      "label": "Electrum wallet",
+      "icon": "wallet",
+      "name": "Electrum wallet",
+      "description": "A fake Electrum wallet",
+      "category": "Wallets",
+      "kind": "decoy",
+      "health": "ok",
+      "custom": false,
+      "createdAt": "2026-10-02T09:12:00Z",
+      "lastCheck": "2026-11-27T14:01:00Z",
+      "files": [
+        {
+          "path": "C:\\Users\\sam\\AppData\\Roaming\\Electrum\\wallets\\default_wallet",
+          "tripwire": true,
+          "size": 3012
+        }
+      ],
+      "hasText": false,
+      "touchedBy": []
+    },
+    {
+      "id": "backup-codes",
+      "label": "2FA backup codes",
+      "icon": "hashi",
+      "name": "2FA backup codes (Documents)",
+      "description": "Backup codes in Documents",
+      "category": "Files",
+      "kind": "file",
+      "health": "ok",
+      "custom": false,
+      "createdAt": "2026-10-02T09:12:00Z",
+      "lastCheck": "2026-11-27T14:01:00Z",
+      "files": [
+        {
+          "path": "C:\\Users\\sam\\Documents\\backup codes.txt",
+          "tripwire": true,
+          "size": 160
+        }
+      ],
+      "hasText": true,
+      "touchedBy": []
+    },
+    {
+      "id": "opera",
+      "label": "Opera profile",
+      "icon": "globe",
+      "name": "Opera browser profile",
+      "description": "Fake saved passwords and cookies",
+      "category": "Browsers",
+      "kind": "decoy",
+      "health": "ok",
+      "custom": false,
+      "createdAt": "2026-10-02T09:12:00Z",
+      "lastCheck": "2026-11-27T14:01:00Z",
+      "files": [
+        {
+          "path": "C:\\Users\\sam\\AppData\\Roaming\\Opera Software\\Opera Stable\\Login Data",
+          "tripwire": true,
+          "size": 40960
+        }
+      ],
+      "hasText": false,
+      "touchedBy": []
+    }
+  ],
+  "checks": [
+    {
+      "name": "Instant freeze armed",
+      "ok": true
+    },
+    {
+      "name": "Backup watcher on",
+      "ok": true,
+      "detail": "the event log, in case instant freeze misses one"
+    },
+    {
+      "name": "Flight recorder",
+      "ok": true
+    }
+  ],
+  "serviceRunning": true,
+  "absent": [
+    "replant",
+    "heartbeatTrace"
+  ]
+}

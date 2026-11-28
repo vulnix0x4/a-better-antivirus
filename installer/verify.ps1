@@ -7,7 +7,8 @@
 
   - SHA256SUMS.txt lists ABA-Setup.exe, with the hash of the file that is uploaded.
   - The two aba.exe files compiled into ABA-Setup.exe are byte for byte the
-    aba_<tag>_windows_<arch>.exe downloads of the same release.
+    aba_<tag>_windows_<arch>.exe downloads of the same release, and the two
+    aba-app.exe files (the desktop app) the aba-app_<tag>_windows_<arch>.exe ones.
   - The files the auto-updater in installed copies looks for are all still
     there under their usual names, the miner trap's list of mining pools
     (miner-pools.txt) among them.
@@ -16,8 +17,8 @@
   scripts/setup-windows-signing.ps1), also that every Windows program
   published carries a valid, timestamped Authenticode signature, checked with
   `signtool verify /pa` (ABA_SIGNTOOL) and Get-AuthenticodeSignature: both
-  aba_<tag>_windows_<arch>.exe files, the aba.exe in each zip, ABA-Setup.exe
-  and the two aba.exe files inside it.
+  aba_<tag>_windows_<arch>.exe files, the two aba-app_<tag>_windows_<arch>.exe
+  files, the aba.exe in each zip, ABA-Setup.exe and the four programs inside it.
 
   Exits with an error if any of them doesn't hold.
 #>
@@ -55,6 +56,14 @@ foreach ($arch in 'amd64', 'arm64') {
 
     if (@($sums.Keys | Where-Object { $_ -match "^aba_v?[^_]+_windows_$arch\.zip$" }).Count -eq 1) { Ok "aba_<tag>_windows_$arch.zip is still published" }
     else { Bad "aba_<tag>_windows_$arch.zip is missing from SHA256SUMS.txt" }
+
+    # The desktop app: what updates and install.ps1 look for (internal/update AppAssetName).
+    $apps = @($sums.Keys | Where-Object { $_ -match "^aba-app_v?[^_]+_windows_$arch\.exe$" })
+    if ($apps.Count -ne 1) { Bad "expected one aba-app_<tag>_windows_$arch.exe in SHA256SUMS.txt, found $($apps.Count)"; continue }
+    $inside = Join-Path $Dist "installer\bin\aba-app-$arch.exe"
+    if (-not (Test-Path $inside)) { Bad "$inside is missing"; continue }
+    if ($sums[$apps[0]] -eq (Sha $inside)) { Ok "the $arch app inside ABA-Setup.exe is $($apps[0]), byte for byte" }
+    else { Bad "the $arch app inside ABA-Setup.exe differs from $($apps[0])" }
 }
 
 if ($Signed) {
@@ -85,7 +94,7 @@ if ($Signed) {
         if (-not $sig.TimeStamperCertificate) { Bad "${label}: the signature has no timestamp, so it would stop being valid when the certificate expires"; continue }
         Ok "$label is signed by '$($sig.SignerCertificate.Subject)', timestamped"
     }
-    if ($programs.Count -ne 7) { Bad "expected 7 Windows programs to check (2 downloads, 2 in the zips, ABA-Setup.exe and the 2 inside it), found $($programs.Count)" }
+    if ($programs.Count -ne 11) { Bad "expected 11 Windows programs to check (4 downloads, 2 in the zips, ABA-Setup.exe and the 4 inside it), found $($programs.Count)" }
     Remove-Item -Recurse -Force $unzipped -ErrorAction SilentlyContinue
 }
 
@@ -96,8 +105,8 @@ if ($sums['miner-pools.txt'] -and $sums['miner-pools.txt'] -eq (Sha $pools)) { O
 else { Bad "miner-pools.txt: SHA256SUMS.txt says '$($sums['miner-pools.txt'])', the source file is $(Sha $pools)" }
 
 # Nothing else slipped in.
-if ($sums.Count -eq 6) { Ok 'six files in all: the four there always were, ABA-Setup.exe and miner-pools.txt' }
-else { Bad "expected 6 files in SHA256SUMS.txt, found $($sums.Count)" }
+if ($sums.Count -eq 8) { Ok 'eight files in all: the four there always were, ABA-Setup.exe, miner-pools.txt and the two aba-app files' }
+else { Bad "expected 8 files in SHA256SUMS.txt, found $($sums.Count)" }
 
 if ($script:bad) { Write-Host "`n$($script:bad) check(s) failed." -ForegroundColor Red; exit 1 }
 Write-Host "`nThe installer matches the release." -ForegroundColor Green

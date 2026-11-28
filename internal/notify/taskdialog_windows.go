@@ -13,7 +13,6 @@ package notify
 
 import (
 	"encoding/binary"
-	"os"
 	"path/filepath"
 	"runtime"
 	"sync"
@@ -21,6 +20,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/vulnix0x4/a-better-antivirus/internal/sysenv"
 )
 
 var (
@@ -56,10 +57,7 @@ const (
 // commonControls6 activates an activation context that asks for common
 // controls 6, on this thread (keep it locked), and returns how to undo it.
 func commonControls6() (undo func(), ok bool) {
-	win := os.Getenv("SystemRoot")
-	if win == "" {
-		win = `C:\Windows`
-	}
+	win := sysenv.Machine().Defaults().SystemRoot // not the environment's
 	sys := filepath.Join(win, "System32")
 	tries := []actCtxW{
 		// The manifest Explorer itself uses (asks for common controls 6).
@@ -201,8 +199,9 @@ func taskDialog(title, instruction, content, label, note string, icon uint32) (c
 // askReport shows the autopsy popup: the headline, the text, a "Show full
 // report" button (the answer is true) and Close.
 func askReport(title, headline, text string, icon uint32) bool {
-	if clicked, ok := taskDialog(title, headline, text, showReportLabel, "Opens everything ABA found in your web browser", icon); ok {
+	note := reportButtonNote()
+	if clicked, ok := taskDialog(title, headline, text, showReportLabel, note, icon); ok {
 		return clicked
 	}
-	return messageBox(title, headline+"\n\n"+text+"\n\nShow the full report now?\nYes = "+showReportLabel+" (in your web browser)\nNo = Close", mbYesNo|icon) == idYes
+	return messageBox(title, headline+"\n\n"+text+"\n\nShow the full report now?\nYes = "+showReportLabel+" ("+note+")\nNo = Close", mbYesNo|icon) == idYes
 }

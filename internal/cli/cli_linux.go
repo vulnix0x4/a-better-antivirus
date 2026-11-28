@@ -32,6 +32,9 @@ func requireAdmin() error {
 		unix.Umask(0o022)
 		return nil
 	}
+	if yesMode {
+		return errNeedsAdmin
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		return err

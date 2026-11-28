@@ -10,7 +10,7 @@ import (
 
 // Where is how to get back to the reports, said at the bottom of the page
 // and in the popup.
-const Where = "in a terminal, run sudo aba reports"
+func Where() string { return "in a terminal, run sudo aba reports" }
 
 // Open opens url in the default browser (xdg-open), as the person at the
 // screen. Run as root (`sudo aba report`), it opens it as the person who

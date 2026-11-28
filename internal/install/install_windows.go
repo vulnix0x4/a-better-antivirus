@@ -17,6 +17,7 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
+	"github.com/vulnix0x4/a-better-antivirus/internal/sysenv"
 	"github.com/vulnix0x4/a-better-antivirus/internal/winsec"
 )
 
@@ -192,7 +193,7 @@ func migrateLegacy() (string, error) {
 		}
 	}
 	exec.Command("schtasks.exe", "/Delete", "/TN", `\Honeypot`, "/F").Run()
-	legacy := filepath.Join(os.Getenv("ProgramFiles"), "Honeypot")
+	legacy := filepath.Join(sysenv.Machine().Defaults().ProgramFiles, "Honeypot")
 	if _, err := os.Stat(legacy); err == nil {
 		if err := os.RemoveAll(legacy); err == nil {
 			did = append(did, legacy)

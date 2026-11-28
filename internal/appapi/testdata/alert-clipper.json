@@ -1,0 +1,171 @@
+{
+  "schema": 1,
+  "id": "20261111-164002-5e21",
+  "shortId": "5e21",
+  "time": "2026-11-11T16:40:02Z",
+  "category": "clipper",
+  "tier": "critical",
+  "outcome": "killed",
+  "status": "resolved",
+  "note": "killed",
+  "title": "Clipper: clipfix.exe swapped a wallet address on your clipboard",
+  "summary": "it replaced the bait Bitcoin address ABA put on the clipboard with its own",
+  "test": false,
+  "learning": false,
+  "frozenNow": false,
+  "cutOff": false,
+  "isolated": false,
+  "instant": false,
+  "latencyMs": 0,
+  "program": {
+    "name": "clipfix.exe",
+    "path": "C:\\Users\\sam\\AppData\\Local\\clipfix\\clipfix.exe",
+    "pid": 3388,
+    "signed": false,
+    "signature": "None. Nobody vouches for this file.",
+    "sha256": "c0ffee5a1e9b2d7f48a3e61b90d5c27f3e8a14b6d02c9f75e1a3b8d4c6f20e19",
+    "folder": "your AppData folder",
+    "exited": false
+  },
+  "baits": [
+    {
+      "id": "clipboard",
+      "label": "The clipboard bait",
+      "icon": "doc",
+      "name": "the clipboard bait",
+      "path": "",
+      "access": "swap",
+      "time": "2026-11-11T16:40:02Z"
+    }
+  ],
+  "reasons": [
+    "it swapped a wallet address on the clipboard"
+  ],
+  "did": [
+    {
+      "action": "freeze",
+      "ok": true,
+      "words": "Froze it",
+      "time": "2026-11-11T16:40:02Z"
+    },
+    {
+      "action": "kill",
+      "ok": true,
+      "words": "Killed it",
+      "time": "2026-11-11T16:40:42Z"
+    }
+  ],
+  "buttons": [],
+  "trustForGood": true,
+  "checklist": [
+    "Don't send crypto from this PC until it's cleaned. Anywhere you must paste an address, compare every character with the real one on another device.",
+    "From another device, check your recent crypto transfers. One sent to an address you don't recognise went to the attacker: contact the exchange's or wallet's support right away.",
+    "Clippers often come with a stealer. From another device (your phone), change your passwords, email first, and move crypto to a NEW wallet created on a clean device.",
+    "Run a Microsoft Defender Offline scan, then strongly consider resetting Windows: stealers often drop more malware.",
+    "Look the file up on VirusTotal from another device: https://www.virustotal.com/gui/file/c0ffee5a1e9b2d7f48a3e61b90d5c27f3e8a14b6d02c9f75e1a3b8d4c6f20e19"
+  ],
+  "clipper": {
+    "wallet": "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh",
+    "note": "what it swapped in for yours"
+  },
+  "report": {
+    "pending": false,
+    "started": "2026-11-11T16:40:03Z",
+    "finished": "2026-11-11T16:40:08Z",
+    "answer": "no-sign",
+    "tone": "good",
+    "headline": "No sign it read anything of yours.",
+    "summary": [],
+    "steps": [
+      "Don't send crypto from this PC until it's cleaned."
+    ],
+    "stepsUrgent": false,
+    "unsure": [],
+    "leads": [],
+    "dataLeft": "",
+    "dataLeftWhy": [],
+    "baitAt": "2026-11-11T16:40:02Z",
+    "frozenAt": "2026-11-11T16:40:02Z",
+    "timeline": [
+      {
+        "at": "2026-11-11T16:40:02Z",
+        "offsetMs": 0,
+        "kind": "bait",
+        "label": "Opened the The clipboard bait bait",
+        "bad": false
+      },
+      {
+        "at": "2026-11-11T16:40:02Z",
+        "offsetMs": 0,
+        "kind": "frozen",
+        "label": "Frozen",
+        "bad": false
+      }
+    ],
+    "reads": [],
+    "sends": [],
+    "addresses": [],
+    "staged": [],
+    "unpacked": [],
+    "watched": [],
+    "openFiles": [],
+    "left": [],
+    "attackerWallet": "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh",
+    "evidence": {
+      "saved": false,
+      "memoryImage": false,
+      "memoryScanned": 12582912
+    },
+    "notes": [],
+    "sections": [
+      {
+        "key": "answer",
+        "title": "Answer",
+        "lines": [
+          "No sign it read anything of yours."
+        ]
+      },
+      {
+        "key": "steps",
+        "title": "To be safe",
+        "lines": [
+          "1. Don't send crypto from this PC until it's cleaned."
+        ]
+      },
+      {
+        "key": "addresses",
+        "title": "Where it was sending",
+        "lines": [
+          "attacker wallet  bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh  (what it swapped in for yours)",
+          "(12.0 MB of its memory looked through.)"
+        ]
+      },
+      {
+        "key": "program",
+        "title": "The program",
+        "lines": [
+          "Name: clipfix.exe (pid 3388)",
+          "File: C:\\Users\\sam\\AppData\\Local\\clipfix\\clipfix.exe",
+          "Signature: unsigned",
+          "Fingerprint (SHA-256): c0ffee5a1e9b2d7f48a3e61b90d5c27f3e8a14b6d02c9f75e1a3b8d4c6f20e19"
+        ]
+      },
+      {
+        "key": "did",
+        "title": "What ABA did",
+        "lines": [
+          "Caught on Wed Nov 11 2026 at 16:40:02.",
+          "Done: Froze it",
+          "Done: Killed it",
+          "Answered: killed."
+        ]
+      }
+    ]
+  },
+  "absent": [
+    "checklistTicks",
+    "webhookShutdown",
+    "blockedSends",
+    "programSize"
+  ]
+}

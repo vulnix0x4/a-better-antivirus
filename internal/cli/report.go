@@ -54,7 +54,7 @@ func reportsCmd() *cobra.Command {
 		Use:   "reports",
 		Short: "Every caught program's report, newest first, in your web browser",
 		Long: "Opens the list of ABA's reports in your web browser, newest first: pick one to see it whole.\n" +
-			"The Start menu's \"ABA reports\" opens the same list. The page isn't saved anywhere.",
+			"On Windows, the Start menu's \"ABA\" (the app) or \"ABA reports\" opens the same list. The page isn't saved anywhere.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireAdminQuietly(whyAdmin); err != nil {

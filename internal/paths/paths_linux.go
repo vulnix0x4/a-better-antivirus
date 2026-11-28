@@ -12,8 +12,9 @@ import (
 )
 
 const (
-	CLIExe     = "aba"    // what people type; /usr/local/bin/aba links to it
-	ServiceExe = "famsvc" // identical copy the service runs from
+	CLIExe     = "aba"     // what people type; /usr/local/bin/aba links to it
+	ServiceExe = "famsvc"  // identical copy the service runs from
+	AppExe     = "aba-app" // no desktop app on Linux yet
 
 	// Linux file systems tell File.txt and file.txt apart.
 	foldCase = false

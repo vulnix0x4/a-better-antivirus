@@ -82,7 +82,7 @@ func TestPageSaysWhatTheTerminalSays(t *testing.T) {
 	if h < 0 || st < h || rd < st {
 		t.Errorf("order: headline %d, steps %d, reads %d", h, st, rd)
 	}
-	for _, want := range []string{"aba kill 2962", "aba resume 2962", "dis.gd/request", "Fingerprint (SHA-256)", "isn't saved anywhere", Where} {
+	for _, want := range []string{"aba kill 2962", "aba resume 2962", "dis.gd/request", "Fingerprint (SHA-256)", "isn't saved anywhere", Where()} {
 		if !strings.Contains(txt, want) {
 			t.Errorf("the page doesn't say %q", want)
 		}

@@ -51,6 +51,8 @@ jobs:
           foreach ($arch in 'amd64', 'arm64') {
             go run ./installer/build -arch $arch -bin "dist/installer/bin/aba-$arch.exe" -version v0.0.0 -out dist/installer-older
             if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            go run ./installer/build -app -arch $arch -bin "dist/installer/bin/aba-app-$arch.exe" -version v0.0.0 -out dist/installer-older
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
           }
 
       - uses: actions/upload-artifact@v7
@@ -132,6 +134,8 @@ jobs:
         run: |
           foreach ($arch in 'amd64', 'arm64') {
             go run ./installer/build -arch $arch -bin "dist/installer/bin/aba-$arch.exe" -version v0.0.0 -out dist/installer-older
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            go run ./installer/build -app -arch $arch -bin "dist/installer/bin/aba-app-$arch.exe" -version v0.0.0 -out dist/installer-older
             if ($LASTEXITCODE) { exit $LASTEXITCODE }
           }
       - name: Install with the signed ABA-Setup.exe, check, uninstall
