@@ -144,6 +144,7 @@ func (g *guard) installOnUI(c *edge.Chromium) error {
 	onNav := func(counter *atomic.Int64) func(_, args unsafe.Pointer) uintptr {
 		return func(_, args unsafe.Pointer) uintptr {
 			uri := getString(args, idxNavGetURI)
+			trace("navigation starting: %.120s", uri)
 			if !allowedNavigation(uri) {
 				comCall(args, idxNavPutCancel, 1)
 				g.blocked(counter, "navigation to "+uri)
