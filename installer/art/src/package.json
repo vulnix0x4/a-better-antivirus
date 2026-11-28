@@ -1,0 +1,9 @@
+{
+  "private": true,
+  "type": "module",
+  "description": "Renders installer/art (see ../README.md).",
+  "dependencies": {
+    "playwright": "1.65.1",
+    "three": "0.187.0"
+  }
+}

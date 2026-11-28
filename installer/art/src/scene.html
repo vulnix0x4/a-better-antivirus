@@ -1,0 +1,202 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<script type="importmap">{"imports":{"three":"./node_modules/three/build/three.module.js","three/addons/":"./node_modules/three/examples/jsm/"}}</script>
+<style>html,body{margin:0;background:#000}</style>
+</head><body>
+<script type="module">
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+const col = h => new THREE.Color(h);
+const GREEN = col(0x6ee7a0), ICE = col(0xa6dbff);
+const BG = [11, 12, 11];
+const P = new URLSearchParams(location.search);
+const num = (k, d) => P.has(k) ? +P.get(k) : d;
+
+// deterministic random
+let seed = 7; const rnd = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+
+const glowTex = (() => { const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d'); const gr = g.createRadialGradient(64, 64, 0, 64, 64, 64); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(.22, 'rgba(255,255,255,.45)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, 128, 128); return new THREE.CanvasTexture(c); })();
+
+// The app icon as a cut gem: the icon's pentagon (top point, shoulders at 30%,
+// feet at 18%/82%) extruded with a faceted bevel.
+function gemGeometry() {
+  // girdle = the icon's pentagon; a smaller table in front; crown facets
+  // between them; a short girdle band; a pavilion to a point at the back.
+  const pent = [[.5, 0], [1, .3], [.82, 1], [.18, 1], [0, .3]].map(([x, y]) => new THREE.Vector2((x - .5) * 2, (.55 - y) * 2));
+  const c = pent.reduce((a, p) => a.add(p), new THREE.Vector2()).multiplyScalar(1 / 5);
+  const ring = (k, z) => pent.map(p => new THREE.Vector3(c.x + (p.x - c.x) * k, c.y + (p.y - c.y) * k, z));
+  const table = ring(.56, .36), star = pent.map((p, i) => { const q = pent[(i + 1) % 5]; const m = p.clone().add(q).multiplyScalar(.5); return new THREE.Vector3(c.x + (m.x - c.x) * .86, c.y + (m.y - c.y) * .86, .2); });
+  const gF = ring(1, .06), gB = ring(1, -.06), tip = new THREE.Vector3(c.x, c.y, -.78), tc = new THREE.Vector3(c.x, c.y, .36);
+  const v = []; const tri = (a, b, d) => v.push(a.x, a.y, a.z, b.x, b.y, b.z, d.x, d.y, d.z);
+  for (let i = 0; i < 5; i++) {
+    const j = (i + 1) % 5;
+    tri(tc, table[i], table[j]);                 // table
+    tri(table[i], gF[i], star[i]); tri(table[i], star[i], table[j]); tri(table[j], star[i], gF[j]); // crown: kite + stars
+    tri(star[i], gF[i], gF[j]);
+    tri(gF[i], gB[i], gB[j]); tri(gF[i], gB[j], gF[j]); // girdle
+    const m = gB[i].clone().add(gB[j]).multiplyScalar(.5).lerp(tip, .45);
+    tri(gB[i], m, gB[j]); tri(gB[i], tip, m); tri(m, tip, gB[j]); // pavilion
+  }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(v, 3));
+  g.computeVertexNormals(); g.translate(-c.x, -c.y, 0);
+  // make every face point outwards
+  const pos = g.attributes.position; const A = new THREE.Vector3(), B = new THREE.Vector3(), C = new THREE.Vector3(), n = new THREE.Vector3(), mid = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i += 3) { A.fromBufferAttribute(pos, i); B.fromBufferAttribute(pos, i + 1); C.fromBufferAttribute(pos, i + 2);
+    n.subVectors(B, A).cross(C.clone().sub(A)); mid.copy(A).add(B).add(C).multiplyScalar(1 / 3); mid.z -= -.1;
+    if (n.dot(mid) < 0) { pos.setXYZ(i + 1, C.x, C.y, C.z); pos.setXYZ(i + 2, B.x, B.y, B.z); } }
+  g.computeVertexNormals(); return g;
+}
+function iceMaterial(o = {}) {
+  return new THREE.MeshPhysicalMaterial({ color: 0x6fb4e6, roughness: .1, metalness: .45, clearcoat: 1, clearcoatRoughness: .04, flatShading: true,
+    emissive: col(0x1d4d75), emissiveIntensity: .4, envMapIntensity: 1.35, iridescence: .3, iridescenceIOR: 1.35, side: THREE.DoubleSide, ...o });
+}
+const fresVS = `varying vec3 vN,vV;void main(){vN=normalize(normalMatrix*normal);vec4 mv=modelViewMatrix*vec4(position,1.);vV=normalize(-mv.xyz);gl_Position=projectionMatrix*mv;}`;
+const fresFS = `uniform vec3 uC;uniform float uI,uP;varying vec3 vN,vV;void main(){float f=pow(1.-abs(dot(normalize(vN),normalize(vV))),uP);gl_FragColor=vec4(uC*f*uI,1.);}`;
+
+function makeRenderer(w, h, alpha) {
+  const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
+  const r = new THREE.WebGLRenderer({ canvas, antialias: true, alpha, preserveDrawingBuffer: true });
+  r.setPixelRatio(1); r.setSize(w, h, false); r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = 1.1;
+  if (alpha) r.setClearColor(0, 0);
+  return r;
+}
+
+// ---------- the tall welcome/finish picture ----------
+function welcome(w, h, opt) {
+  seed = 7;
+  const renderer = makeRenderer(w, h, false);
+  const scene = new THREE.Scene(); scene.background = col(0x000000);
+  scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), .04).texture; scene.environmentIntensity = .7;
+  const camera = new THREE.PerspectiveCamera(opt.fov, w / h, .1, 100);
+  camera.position.set(opt.cx, opt.cy, opt.cz); camera.lookAt(opt.lx, opt.ly, opt.lz);
+  const px = h / 600; // line/point scale relative to a 600px-tall picture
+
+  // the web: spokes and rings on the ground
+  const SP = 26, RINGS = 12, r0 = .9, dr = .75; const pos = [], br = [], ppos = [], pbr = [];
+  const PT = (k, s) => { const r = r0 + k * dr, a = s / SP * Math.PI * 2 + .11; return [Math.cos(a) * r, 0, Math.sin(a) * r]; };
+  for (let s = 0; s < SP; s++) {
+    for (let k = -1; k < RINGS - 1; k++) { const a = k < 0 ? [0, 0, 0] : PT(k, s), b = PT(k + 1, s); pos.push(...a, ...b); br.push(.3, .3); }
+    for (let k = 0; k < RINGS; k++) { const a = PT(k, s), b = PT(k, s + 1), m = [(a[0] + b[0]) / 2 * .975, 0, (a[2] + b[2]) / 2 * .975]; const bb = k % 3 === 0 ? .7 : .2; pos.push(...a, ...m, ...m, ...b); br.push(bb, bb, bb, bb); ppos.push(...a); pbr.push(k % 3 === 0 ? 1 : .3); }
+  }
+  const webVS = `uniform float uPx;attribute float aB;varying float vA;varying vec3 vC;
+  void main(){vec3 p=position;float r=length(p.xz);
+  vec3 g=vec3(.05,.32,.17);vC=g*(.35+aB*1.6);
+  vA=(.1+.9*(1.-smoothstep(2.5,9.,r)));
+  vec4 mv=modelViewMatrix*vec4(p,1.);gl_Position=projectionMatrix*mv;gl_PointSize=uPx*(1.+aB*1.6)*(10./-mv.z);}`;
+  const webFS = pts => `varying float vA;varying vec3 vC;void main(){${pts ? 'float d=length(gl_PointCoord-.5);if(d>.5)discard;float m=smoothstep(.5,.1,d);' : 'float m=1.;'}gl_FragColor=vec4(vC*vA*m*${opt.web.toFixed(2)},1.);}`;
+  const U = { uPx: { value: 2.4 * px } };
+  const mk = (p, b) => { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(p, 3)); g.setAttribute('aB', new THREE.Float32BufferAttribute(b, 1)); return g; };
+  const base = { uniforms: U, vertexShader: webVS, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending };
+  scene.add(new THREE.LineSegments(mk(pos, br), new THREE.ShaderMaterial({ ...base, fragmentShader: webFS(0) })));
+  scene.add(new THREE.Points(mk(ppos, pbr), new THREE.ShaderMaterial({ ...base, fragmentShader: webFS(1) })));
+
+  // bait gems on stems, with halo rings on the web
+  const NODE_Y = .62;
+  const gemGeo = new THREE.OctahedronGeometry(.17, 0); gemGeo.scale(1, 1.45, 1);
+  const ringGeo = new THREE.RingGeometry(.3, .325, 64); ringGeo.rotateX(-Math.PI / 2);
+  const ring2Geo = new THREE.RingGeometry(.48, .49, 64); ring2Geo.rotateX(-Math.PI / 2);
+  const baits = opt.baits.map(([r, a]) => ({ x: Math.cos(a * Math.PI / 180) * r, z: Math.sin(a * Math.PI / 180) * r, r }));
+  for (const b of baits) {
+    const g = new THREE.Group(); g.position.set(b.x, 0, b.z);
+    const fade = 1 - Math.min(1, Math.max(0, (b.r - 3) / 6));
+    const mat = new THREE.MeshStandardMaterial({ color: 0x0c1a12, emissive: GREEN, emissiveIntensity: .95 * (.4 + .6 * fade), flatShading: true, roughness: .25, metalness: .3 });
+    const gem = new THREE.Mesh(gemGeo, mat); gem.position.y = NODE_Y; gem.rotation.y = rnd() * 3; g.add(gem);
+    const hm = new THREE.MeshBasicMaterial({ color: GREEN.clone().multiplyScalar(.85 * fade + .15), transparent: true, opacity: .75, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+    g.add(new THREE.Mesh(ringGeo, hm)); g.add(new THREE.Mesh(ring2Geo, hm));
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(.006, .006, NODE_Y, 5), hm); stem.position.y = NODE_Y / 2; g.add(stem);
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: GREEN.clone().multiplyScalar(fade), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: opt.baitGlow })); sp.scale.setScalar(1.1); sp.position.y = NODE_Y; g.add(sp);
+    scene.add(g);
+  }
+
+  // the hero: ABA's ice gem, floating over the middle of the web
+  const hero = new THREE.Group(); hero.position.set(0, opt.heroY, 0); scene.add(hero);
+  const hg = gemGeometry(); const heroMesh = new THREE.Mesh(hg, iceMaterial(opt.heroMat || {})); heroMesh.scale.setScalar(opt.heroS);
+  heroMesh.rotation.set(opt.heroRX, opt.heroRY, 0); hero.add(heroMesh);
+  const shell = new THREE.Mesh(hg, new THREE.ShaderMaterial({ uniforms: { uC: { value: ICE.clone() }, uI: { value: opt.shell }, uP: { value: 2.6 } }, vertexShader: fresVS, fragmentShader: fresFS, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+  shell.scale.setScalar(opt.heroS * 1.02); shell.rotation.copy(heroMesh.rotation); hero.add(shell);
+  const hgl = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: ICE, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: opt.heroGlow })); hgl.scale.setScalar(opt.heroS * 7); hero.add(hgl);
+  const key = new THREE.DirectionalLight(0xeaf6ff, opt.keyI); key.position.set(-3, 5, 4); scene.add(key);
+  const rim = new THREE.PointLight(0xa6dbff, 30, 10); rim.position.set(2.5, opt.heroY - .5, -2); scene.add(rim);
+  const under = new THREE.PointLight(0x6ee7a0, 6, 6); under.position.set(0, .3, 1); scene.add(under);
+  // halo rings around the hero, like the app's core
+  const ringMat = new THREE.MeshBasicMaterial({ color: ICE.clone().multiplyScalar(.9), transparent: true, opacity: .55, blending: THREE.AdditiveBlending, depthWrite: false });
+  [[1.7, .006, .78]].forEach(([r, t, arc], i) => { const m = new THREE.Mesh(new THREE.TorusGeometry(r * opt.heroS, t * px * 1.4, 8, 160, Math.PI * 2 * arc), ringMat); m.rotation.set(Math.PI / 2 + .12 * (i ? -1 : 1), 0, i * 1.3); hero.add(m); });
+  // beam from the hero down to the web
+  const beam = new THREE.Mesh(new THREE.CylinderGeometry(.006, .006, opt.heroY, 6), ringMat); beam.position.y = -opt.heroY / 2; hero.add(beam);
+
+  // tripwires: bait to bait, and near baits up to the hero
+  const wireMat = new THREE.MeshBasicMaterial({ color: GREEN.clone().multiplyScalar(.5), transparent: true, opacity: .9, blending: THREE.AdditiveBlending, depthWrite: false });
+  const iceWire = new THREE.MeshBasicMaterial({ color: ICE.clone().multiplyScalar(.42), transparent: true, opacity: .9, blending: THREE.AdditiveBlending, depthWrite: false });
+  const curves = [];
+  const add = (A, B, lift, m) => { const a = new THREE.Vector3(A.x, A.y ?? NODE_Y, A.z), b = new THREE.Vector3(B.x, B.y ?? NODE_Y, B.z), mid = a.clone().add(b).multiplyScalar(.5); mid.y += lift; const c = new THREE.QuadraticBezierCurve3(a, mid, b); scene.add(new THREE.Mesh(new THREE.TubeGeometry(c, 60, opt.wireR, 6), m)); curves.push(c); };
+  const done = new Set();
+  baits.forEach((b, i) => {
+    if (b.r < 3.6) add({ x: 0, y: opt.heroY - .55 * opt.heroS, z: 0 }, b, .35, iceWire);
+    baits.map((o, j) => [Math.hypot(o.x - b.x, o.z - b.z), j]).filter(d => d[1] !== i).sort((p, q) => p[0] - q[0]).slice(0, 2).forEach(([d, j]) => { const k = Math.min(i, j) + '-' + Math.max(i, j); if (!done.has(k)) { done.add(k); add(b, baits[j], .3 + d * .06, wireMat); } });
+  });
+  // pulses travelling along the wires
+  const pp = []; curves.forEach((c, i) => { for (const t of [.3 + .4 * rnd()]) { const v = c.getPoint(t); pp.push(v.x, v.y, v.z); } });
+  const pg = new THREE.BufferGeometry(); pg.setAttribute('position', new THREE.Float32BufferAttribute(pp, 3));
+  scene.add(new THREE.Points(pg, new THREE.PointsMaterial({ map: glowTex, size: .2, color: col(0xcffff0), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false })));
+  // dust
+  const dp = []; for (let i = 0; i < 90; i++) { const a = rnd() * 6.28, r = 1 + rnd() * 7; dp.push(Math.cos(a) * r, .2 + rnd() * 3.2, Math.sin(a) * r); }
+  const dg = new THREE.BufferGeometry(); dg.setAttribute('position', new THREE.Float32BufferAttribute(dp, 3));
+  scene.add(new THREE.Points(dg, new THREE.PointsMaterial({ map: glowTex, size: .06, color: col(0x9fe8c0), transparent: true, opacity: .5, blending: THREE.AdditiveBlending, depthWrite: false })));
+
+  const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, samples: 4 }));
+  composer.setPixelRatio(1); composer.setSize(w, h);
+  composer.addPass(new RenderPass(scene, camera));
+  composer.addPass(new UnrealBloomPass(new THREE.Vector2(w, h), opt.bloom, .6, opt.thr));
+  composer.addPass(new OutputPass());
+  composer.render();
+
+  // onto ABA's background, light added, fading out toward the right edge
+  // (where the page's own background takes over) and the bottom.
+  const out = document.createElement('canvas'); out.width = w; out.height = h; const x = out.getContext('2d');
+  x.drawImage(renderer.domElement, 0, 0);
+  x.globalCompositeOperation = 'destination-in';
+  const gr = x.createLinearGradient(0, 0, w, 0); gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(opt.fadeR, 'rgba(0,0,0,1)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); x.fillStyle = gr; x.fillRect(0, 0, w, h);
+  const gv = x.createLinearGradient(0, 0, 0, h); gv.addColorStop(0, 'rgba(0,0,0,0)'); gv.addColorStop(.06, 'rgba(0,0,0,1)'); gv.addColorStop(.86, 'rgba(0,0,0,1)'); gv.addColorStop(1, 'rgba(0,0,0,0)'); x.fillStyle = gv; x.fillRect(0, 0, w, h);
+  const fin = document.createElement('canvas'); fin.width = w; fin.height = h; const f = fin.getContext('2d');
+  f.fillStyle = `rgb(${BG})`; f.fillRect(0, 0, w, h); f.globalCompositeOperation = 'lighter'; f.drawImage(out, 0, 0);
+  renderer.dispose();
+  return fin.toDataURL('image/png');
+}
+
+// ---------- the small square header icon (transparent) ----------
+function icon(sz, opt) {
+  const S = sz * 2;
+  const renderer = makeRenderer(S, S, true);
+  const scene = new THREE.Scene();
+  scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), .04).texture; scene.environmentIntensity = .8;
+  const camera = new THREE.PerspectiveCamera(22, 1, .1, 50); camera.position.set(0, .35, 8.2); camera.lookAt(0, 0, 0);
+  const hg = gemGeometry(); const m = new THREE.Mesh(hg, iceMaterial()); m.rotation.set(opt.rx, opt.ry, 0); m.scale.setScalar(opt.s); scene.add(m);
+  const shell = new THREE.Mesh(hg, new THREE.ShaderMaterial({ uniforms: { uC: { value: ICE.clone() }, uI: { value: .6 }, uP: { value: 2.2 } }, vertexShader: fresVS, fragmentShader: fresFS, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+  shell.rotation.copy(m.rotation); shell.scale.setScalar(opt.s * 1.02); scene.add(shell);
+  const key = new THREE.DirectionalLight(0xeaf6ff, 2.2); key.position.set(-3, 5, 4); scene.add(key);
+  const rim = new THREE.PointLight(0xa6dbff, 30, 10); rim.position.set(2.5, -.5, -2); scene.add(rim);
+  renderer.render(scene, camera);
+  const out = document.createElement('canvas'); out.width = out.height = sz; const x = out.getContext('2d');
+  // soft ice glow behind the gem
+  const g = x.createRadialGradient(sz / 2, sz / 2, 0, sz / 2, sz / 2, sz / 2); g.addColorStop(0, `rgba(166,219,255,${opt.glow})`); g.addColorStop(.45, `rgba(166,219,255,${opt.glow * .35})`); g.addColorStop(1, 'rgba(166,219,255,0)');
+  x.fillStyle = g; x.fillRect(0, 0, sz, sz);
+  x.imageSmoothingQuality = 'high'; x.drawImage(renderer.domElement, 0, 0, sz, sz);
+  renderer.dispose();
+  return out.toDataURL('image/png');
+}
+
+window.renderWelcome = (w, h, o) => welcome(w, h, Object.assign({
+  fov: 30, cx: .6, cy: 5.6, cz: 10.5, lx: 0, ly: 1.2, lz: 0,
+  heroY: 2.35, heroS: .62, heroRX: -.18, heroRY: .38, heroGlow: .55,
+  web: 1, bloom: .55, fadeR: .8, wireR: .007, baitGlow: .22, thr: .3, shell: .3, keyI: 2.2,
+  baits: [[2.2, 30], [2.4, 150], [2.0, 260], [3.9, 85], [4.3, 210], [4.0, 330], [6.2, 120], [6.5, 20], [6.0, 250], [8.2, 70], [8.5, 160], [8.0, 300]],
+}, o || {}));
+window.renderIcon = (sz, o) => icon(sz, Object.assign({ rx: -.12, ry: .42, s: 1.05, glow: .32 }, o || {}));
+window.__ready = true;
+</script>
+</body></html>
