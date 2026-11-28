@@ -95,19 +95,23 @@ export function createReport(app) {
     }
     const w = (a.clipper && a.clipper.wallet) || (r && r.attackerWallet);
     if (w) rows.push({ icon: 'wallet', color: COLORS.red, title: "The attacker's address", sub: cap((a.clipper && a.clipper.note) || (r && r.walletNote) || 'what it swapped in for yours') + '.', value: w });
-    for (const ad of (r ? r.addresses : [])) {
+    const rank = { 'discord-webhook': 0, 'telegram-bot': 0, connection: 1 };
+    const ads = (r ? r.addresses : []).map((ad, i) => [ad, i]).sort((x, y) => ((rank[x[0].kind] ?? 2) - (rank[y[0].kind] ?? 2)) || (x[1] - y[1])).map(x => x[0]);
+    for (const ad of ads) {
       const [icon, title, sub] = ADDR[ad.kind] || ADDR.url;
-      rows.push({ icon, color: ad.kind === 'url' || ad.kind === 'connection' ? COLORS.amber : COLORS.red, title: ADDR[ad.kind] ? title : (ad.label || title), sub: sub || (ad.shareable ? '' : 'It may be from your own data it collected.'), value: ad.value, hint: WHERE[ad.where] || '' });
+      rows.push({ kind: ad.kind, icon, color: ad.kind === 'url' || ad.kind === 'connection' ? COLORS.amber : COLORS.red, title: ADDR[ad.kind] ? title : (ad.label || title), sub: sub || (ad.shareable ? '' : 'It may be from your own data it collected.'), value: ad.value, hint: WHERE[ad.where] || '' });
     }
     if (!rows.length) return null;
     const [first, ...rest] = rows;
+    // Only web addresses found in it: that's a lead, not where it sent.
+    const sure = a.mine || w || first.kind !== 'url';
     // "Shut down this webhook" isn't there yet (absent: webhookShutdown); Copy is.
-    return panel('r-hook', a.mine ? 'Where it was mining' : 'Where it was sending', first.hint,
+    return panel('r-hook', a.mine ? 'Where it was mining' : sure ? 'Where it was sending' : 'Addresses found in it', sure ? first.hint : 'Leads, not proof it sent there',
       h('div.hook-row', tile(first.icon, first.color, 't-lg', { live: true }), h('div', h('b', first.title), first.sub ? h('p', first.sub) : null)),
       h('div.well.url.sel', first.value),
       h('div.hook-btns', copyButton(app.bridge, () => first.value)),
-      rest.length ? h('div.hook-more', rest.slice(0, 5).map(x => h('div.hm', tile(x.icon, x.color, 't-sm'), h('div', h('b', x.title), h('p.mono.sel', x.value)), copyButton(app.bridge, () => x.value, 'Copy', 'sm ghost')))) : null,
-      rows.length > 6 ? h('p.fine', `${rows.length - 6} more in the text at the end.`) : null);
+      rest.length ? h('div.hook-more', rest.slice(0, 3).map(x => h('div.hm', tile(x.icon, x.color, 't-sm'), h('div', h('b', x.title), h('p.mono.sel', x.value)), copyButton(app.bridge, () => x.value, 'Copy', 'sm ghost')))) : null,
+      rows.length > 4 ? h('p.fine', `${rows.length - 4} more in the text at the end.`) : null);
   }
 
   /* ---- what left the PC ---- */

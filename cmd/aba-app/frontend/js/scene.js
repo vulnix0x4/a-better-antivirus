@@ -256,6 +256,8 @@ vec4 mv=modelViewMatrix*vec4(p,1.);gl_Position=projectionMatrix*mv;gl_PointSize=
     C.melt = T; busy(3); return at(T + 1.7).then(() => { if (C && C.melt !== null) { C = null; if (S.screen === 'caught' || S.screen === 'report') setPoseTargets(); } });
   }
   function clearCatch() { if (C) { C = null; invalidate(); } }
+  // Resolves when the program on show is frozen (at once if it already is, or nothing is on show).
+  const whenFrozen = () => C && C.fz !== null && T < C.fz ? at(C.fz + .15) : Promise.resolve();
 
   /* ---- drawing one frame ---- */
   const v3 = new THREE.Vector3(), tmpC = new THREE.Color(), pp = {};
@@ -263,6 +265,7 @@ vec4 mv=modelViewMatrix*vec4(p,1.);gl_Position=projectionMatrix*mv;gl_PointSize=
 
   function frame(t) {
     const dt = clamp(t - lastT, 0, .25); lastT = t; T = t;
+    if (!S.screen) return; // nothing is drawn before the first screen is chosen (no flash of another camera)
     const ts = t - S.screenT0;
     const fr = frozen(); const fk = fr ? t - C.fz : 0; const tc = C ? t - C.born : -1;
     const mk = C && C.melt !== null ? clamp((t - C.melt) / 1.5) : 0; // 0 → 1 while the ice lets go
@@ -284,7 +287,7 @@ vec4 mv=modelViewMatrix*vec4(p,1.);gl_Position=projectionMatrix*mv;gl_PointSize=
     // core
     const coreIn = backOut((open - .3) / 1.1);
     core.scale.setScalar(Math.max(.001, coreIn) * clamp((dim - .32) / .2) * (1 + Math.sin(t * 1.6) * .03) * lerp(1, .8, iceG));
-    tmpC.copy(GREEN).lerp(ICE, iceG); coreMat.uniforms.uC.value.copy(tmpC); ringMat.color.copy(tmpC).multiplyScalar(.9 * dim); coreGlow.material.color.copy(tmpC); coreGlow.material.opacity = .28 * dim;
+    tmpC.copy(GREEN).lerp(ICE, iceG); coreMat.uniforms.uC.value.copy(tmpC); ringMat.color.copy(tmpC).multiplyScalar(.9 * dim); coreGlow.material.color.copy(tmpC); coreGlow.material.opacity = (light ? .5 : .28) * dim;
     const rt_ = waveT;
     rings[0].rotation.set(1.2 + rt_ * .5, rt_ * .35, 0); rings[1].rotation.set(rt_ * .3, 1 + rt_ * .42, .4); rings[2].rotation.set(1.57, 0, rt_ * .7);
     wireMat.color.copy(tmpC).multiplyScalar(.38 * dim);
@@ -304,7 +307,7 @@ vec4 mv=modelViewMatrix*vec4(p,1.);gl_Position=projectionMatrix*mv;gl_PointSize=
       const hot = mine && t > touchT - .1 && t < C.fz + .25;
       if (hot) tmpC.copy(RED).lerp(WHITE, clamp((t - C.fz) * 8));
       b.mat.emissive.copy(tmpC); b.mat.emissiveIntensity = .95 * (.25 + .75 * dim) * (hot ? 3 : 1) * (b.health === 'missing' ? .45 : 1);
-      b.hm.color.copy(tmpC).multiplyScalar(dim); b.sp.material.color.copy(tmpC); b.sp.material.opacity = .28 * dim;
+      b.hm.color.copy(tmpC).multiplyScalar(dim); b.sp.material.color.copy(tmpC); b.sp.material.opacity = (light ? .5 : .28) * dim;
     }
     // pulses along the wires
     if (pulses && wires.length) {
@@ -339,7 +342,9 @@ vec4 mv=modelViewMatrix*vec4(p,1.);gl_Position=projectionMatrix*mv;gl_PointSize=
       motes.material.opacity = (.25 + .65 * Math.exp(-fk * 1.2)) * (1 - mk);
     } else iceL.intensity = 0;
     if (bloom) bloom.strength = .42 + (fr ? Math.exp(-fk * 5) * .7 : 0);
-    if (composer) composer.render(); else renderer.render(scene, camera);
+    // (scrolled far down the report, the scene is off the screen: nothing to draw)
+    const away = S.screen === 'report' && scrollY_ * .55 > GH;
+    if (!away) { if (composer) composer.render(); else renderer.render(scene, camera); }
     frames++;
 
     // labels
@@ -390,7 +395,7 @@ vec4 mv=modelViewMatrix*vec4(p,1.);gl_Position=projectionMatrix*mv;gl_PointSize=
     raf = requestAnimationFrame(tick);
     const want = 1000 / (active ? busyFps : idleFps);
     const since = wall - lastWall; if (since < want - 3) return;
-    const dt = Math.min(since, 100) / 1000; lastWall = wall; clockT += dt;
+    const dt = Math.min(since, 250) / 1000; lastWall = wall; clockT += dt; // (real time down to 4 frames a second)
     const t0 = performance.now(); frame(clockT);
     // A GPU that can't keep up: drop the sharpness, then the bloom.
     if (!light && downgraded < 2) { slow += performance.now() - t0 > 24 || since > 2.2 * want ? 1 : 0; if (++measured >= 120) { if (slow > 60) { downgraded++; if (downgraded === 1) { maxPR = 1; applySize(); } else { composer = null; } } slow = measured = 0; } }
@@ -417,7 +422,7 @@ vec4 mv=modelViewMatrix*vec4(p,1.);gl_Position=projectionMatrix*mv;gl_PointSize=
   applySize();
 
   return {
-    setBaits, go, showFrozen, playCatch, approach, strike, melt, clearCatch, resize, invalidate, busy, frame,
+    setBaits, go, showFrozen, playCatch, approach, strike, melt, clearCatch, whenFrozen, resize, invalidate, busy, frame,
     select(id) { selected = id; invalidate(); },
     // Point the Caught and Report cameras at a bait when nothing is in ice (an old alert).
     aim(baitId) { if (C) return; const b = BAITS.find(x => x.id === baitId) || slot(0); CP.set(b.x, CUBE_Y, b.z); },

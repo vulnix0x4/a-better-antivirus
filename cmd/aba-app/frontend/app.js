@@ -78,7 +78,8 @@ async function loadSnap() {
     const sn = await bridge.snapshot(); S.snap = sn; notice('');
     if (dev && dev.fixedNow) setNow(sn.now);
     if (scene) scene.setBaits(sn.baits.tags);
-    screens.home.update(sn); paintFrame(); syncCatch();
+    if (!S.holdHome) { screens.home.update(sn); paintFrame(); } // (while a catch is being shown happening, Home doesn't say it's frozen yet)
+    syncCatch();
     return sn;
   } catch (e) { notice("ABA's data can't be read right now. " + String(e && e.message || e)); return null; }
 }
@@ -137,9 +138,10 @@ async function go(name, params = {}) {
   S.screen = name; document.body.dataset.screen = name;
   for (const s of $$('.screen')) {
     const on = s.id === name; s.classList.toggle('on', on); s.inert = !on;
-    if (on && (!same || params.replay)) { s.classList.remove('enter'); void s.offsetWidth; s.classList.add('enter'); s.style.setProperty('--base', (params.base || 0) + 's'); }
+    s.classList.toggle('hold', on && !!params.hold);
+    if (on && (!same || params.replay) && !params.hold) { s.classList.remove('enter'); void s.offsetWidth; s.classList.add('enter'); }
   }
-  clearTimeout(enterTimer); enterTimer = setTimeout(() => { for (const s of $$('.screen.enter')) s.classList.remove('enter'); }, 4200 + (params.base || 0) * 1000);
+  entered();
   if (!params.keepScene) syncCatch();
   if (scene) scene.go(name, { d: params.d });
   if (name === 'report') screens.report.enterScreen();
@@ -150,6 +152,16 @@ async function go(name, params = {}) {
   const focusTo = $(`#${name} h1`); if (!same && focusTo && !params.quiet) { focusTo.tabIndex = -1; focusTo.focus({ preventScroll: true }); }
 }
 function openAlert(id) { return go('caught', { id }); }
+// Once a screen's entrance has played, parts redrawn later don't replay it.
+function entered() {
+  clearTimeout(enterTimer);
+  enterTimer = setTimeout(() => { for (const s of $$('.screen.enter')) s.classList.toggle('enter', false); }, 4200);
+}
+// A screen that was held back (shown, but empty) comes in now.
+function reveal(name) {
+  const s = $('#' + name); if (!s.classList.contains('hold')) return;
+  s.classList.toggle('hold', false); s.classList.add('enter'); entered();
+}
 
 /* ---------------- actions ---------------- */
 async function answer(a, kind) {
@@ -173,12 +185,12 @@ async function present(id) {
   const live = a.frozenNow && scene && !gfx.reduced;
   if (live) {
     toast('ABA just caught something.', 'info');
-    S.sceneCatch = id; scene.clearCatch();
+    S.sceneCatch = id; scene.clearCatch(); S.holdHome = true;
     await go('home', { keepScene: true, quiet: true });
     await Promise.race([scene.playCatch(catchInfo(a)), sleep(9000)]);
   }
-  await loadSnap();
   await go('caught', { id, d: 1.7 });
+  S.holdHome = false; await loadSnap();
 }
 
 // The safe test, live: the fake stealer crawls in while ABA's steps are shown.
@@ -276,7 +288,12 @@ async function startFull(info) {
     S.presented.add(a.id); for (const w of (sn ? sn.waiting : [])) S.presented.add(w.id);
     // Opened on a catch: the last scuttle onto the bait, the ice, then the words.
     const intro = a.frozenNow && scene && !gfx.reduced && !want;
-    if (intro) { await go('caught', { id: a.id, keepScene: true, base: 1.25 }); S.sceneCatch = a.id; scene.playCatch(catchInfo(a), { crawl: 1.1, from: .7 }); }
+    if (intro) {
+      // The words come in when the ice shuts: by the scene's clock, however slow the machine.
+      await go('caught', { id: a.id, keepScene: true, hold: true }); S.sceneCatch = a.id;
+      scene.playCatch(catchInfo(a), { crawl: 1.1, from: .7 });
+      Promise.race([scene.whenFrozen(), sleep(7000)]).then(() => reveal('caught'));
+    }
     else await go(want === 'report' ? 'report' : 'caught', { id: a.id });
   } else { S.alertId = ''; for (const w of (sn ? sn.waiting : [])) S.presented.add(w.id); await go(want && want !== 'caught' && want !== 'report' ? want : 'home'); }
 
