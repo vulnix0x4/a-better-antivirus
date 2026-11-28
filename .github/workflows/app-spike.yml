@@ -59,7 +59,8 @@ jobs:
       - name: Self-test, as administrator
         shell: pwsh
         run: |
-          $out = "$env:RUNNER_TEMP\st-admin.json"
+          New-Item -ItemType Directory -Force reports | Out-Null
+          $out = "$pwd\reports\st-admin.json"
           $p = Start-Process dist\aba-app.exe -ArgumentList '--selftest', '--selftest-out', $out -PassThru
           if (!$p.WaitForExit(150000)) { $p.Kill(); throw 'self-test hung' }
           Get-Content $out
@@ -77,6 +78,7 @@ jobs:
           while (!(Test-Path $out) -and (Get-Date) -lt $deadline) { Start-Sleep 2 }
           if (!(Test-Path $out)) { throw 'no report from the locked self-test' }
           Start-Sleep 2
+          Copy-Item $out reports\
           Get-Content $out
           $r = Get-Content $out -Raw | ConvertFrom-Json
           if (!$r.ok -or $r.mode -ne 'locked') { throw 'locked self-test failed' }
@@ -86,7 +88,5 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: app-selftest-${{ matrix.os }}
-          path: |
-            ${{ runner.temp }}/st-admin.json
-            C:/Users/Public/st-locked.json
+          path: reports/
           if-no-files-found: ignore

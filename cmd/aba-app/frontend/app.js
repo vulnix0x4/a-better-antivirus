@@ -221,6 +221,7 @@ async function attacks() {
 
 /* ---------------- start ---------------- */
 (async () => {
+  window.__abaStarted = true;
   const info = await API.Info(); // waits on the Go side until the guard is in place
   document.body.dataset.mode = info.mode;
   $('#ver').textContent = info.version;
@@ -255,6 +256,7 @@ async function attacks() {
     report.light = sc ? sc.light : null;
     report.attacks = await attacks();
     report.cspViolations = violations;
+    report.errors = window.__abaErrors;
     await API.SelftestDone(JSON.stringify(report));
   }
 })().catch(e => { API.SelftestDone(JSON.stringify({ error: String(e && e.stack || e) })); });

@@ -75,7 +75,12 @@ func selftestProblems(mode string, page map[string]any, g GuardStatus) []string 
 		bad("WebGL renderer unknown")
 	}
 	if mode == "full" {
-		if n, _ := page["frames"].(float64); n < 20 {
+		// With reduced motion the scene is drawn once and left still.
+		want := 20.0
+		if reduced, _ := page["reducedMotion"].(bool); reduced {
+			want = 1
+		}
+		if n, _ := page["frames"].(float64); n < want {
 			bad("3D scene drew only %v frames", n)
 		}
 	}

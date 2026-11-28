@@ -81,8 +81,8 @@ func TestCSP(t *testing.T) {
 	}
 	// The import map is the page's only inline script, and nothing has an
 	// inline style or handler (CSP would block them).
-	if n := len(regexp.MustCompile(`<script(?: [^>]*)?>`).FindAll(idx, -1)); n != 2 {
-		t.Errorf("index.html has %d script tags, want the import map and app.js", n)
+	if n := len(regexp.MustCompile(`<script(?: [^>]*)?>`).FindAll(idx, -1)); n != 3 {
+		t.Errorf("index.html has %d script tags, want boot.js, the import map and app.js", n)
 	}
 	if regexp.MustCompile(`(?i)\s(style|on[a-z]+)=`).Match(idx) {
 		t.Error("index.html has an inline style or event handler")
@@ -96,7 +96,9 @@ func TestCSP(t *testing.T) {
 // to open a browser or a file dialog (elevated, both would be an
 // administrator's).
 func TestNoDangerousCalls(t *testing.T) {
-	js, _ := fs.ReadFile(frontendFS(), "app.js")
+	app, _ := fs.ReadFile(frontendFS(), "app.js")
+	boot, _ := fs.ReadFile(frontendFS(), "boot.js")
+	js := append(app, boot...)
 	for _, bad := range []string{"innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function", "BrowserOpenURL"} {
 		if strings.Contains(string(js), bad) {
 			t.Errorf("app.js uses %s", bad)
@@ -181,6 +183,11 @@ func TestSelftestProblems(t *testing.T) {
 	bad("no CSP", "full", clone(func(m map[string]any) { m["cspViolations"] = []any{} }), g)
 	bad("page error", "full", clone(func(m map[string]any) { m["error"] = "boom" }), g)
 	bad("no WebGL", "locked", clone(func(m map[string]any) { m["gl"] = map[string]any{"ok": false} }), g)
+	// With reduced motion the scene is drawn once and left still.
+	if p := selftestProblems("full", clone(func(m map[string]any) { m["frames"] = float64(1); m["reducedMotion"] = true }), g); len(p) != 0 {
+		t.Errorf("reduced motion: %q", p)
+	}
+	bad("reduced motion, nothing drawn", "full", clone(func(m map[string]any) { m["frames"] = float64(0); m["reducedMotion"] = true }), g)
 	// The locked view draws no scene.
 	if p := selftestProblems("locked", clone(func(m map[string]any) { m["frames"] = float64(0) }), g); len(p) != 0 {
 		t.Errorf("locked: %q", p)
