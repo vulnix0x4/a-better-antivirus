@@ -16,7 +16,7 @@
 - **Opening it asks for the Windows admin approval**, every time, because it shows what only administrators may see
   (which files are baits, what a caught program did). Say no and it opens a locked view that only says whether you're
   protected, with an **Open ABA** button to approve it after all. On a PC where you're not an administrator, that
-  locked view is what you get, and it tells you an administrator needs to decide.
+  locked view is what you get: only an administrator can see the details and decide what happens.
 - It needs Microsoft Edge WebView2, which Windows 11 and most Windows 10 PCs already have; if yours doesn't, setup
   offers to fetch it from Microsoft. Without it, ABA works exactly as before: the popup, and the report in your web
   browser.
