@@ -1,13 +1,16 @@
 // Command build compiles ABA-Setup.exe from installer/aba.iss with Inno Setup.
 //
-// In a release, GoReleaser runs it once for each aba.exe it has just built:
+// In a release, GoReleaser runs it once for each aba.exe and each aba-app.exe
+// (the desktop app, -app) it has just built:
 //
 //	go run ./installer/build -arch amd64 -bin dist/.../aba.exe -version v1.2.3
+//	go run ./installer/build -app -arch amd64 -bin dist/.../aba-app.exe -version v1.2.3
 //
 // Each call sets its binary aside in dist/installer/bin. The call that brings
-// the second one compiles the installer from the two. That way the aba.exe
-// files inside ABA-Setup.exe are the very files GoReleaser publishes as
-// aba_<version>_windows_<arch>.exe, not a second build of the same source.
+// the last of the four compiles the installer from them. That way the files
+// inside ABA-Setup.exe are the very files GoReleaser publishes as
+// aba_<version>_windows_<arch>.exe and aba-app_<version>_windows_<arch>.exe,
+// not a second build of the same source.
 //
 // When the release job has set up code signing (ABA_WINDOWS_SIGNING, see
 // scripts/setup-windows-signing.ps1), each aba.exe is signed in place first,
@@ -44,7 +47,8 @@ var machines = map[string]uint16{"amd64": pe.IMAGE_FILE_MACHINE_AMD64, "arm64": 
 
 func main() {
 	arch := flag.String("arch", "", "architecture of -bin: amd64 or arm64")
-	bin := flag.String("bin", "", "an aba.exe that was just built")
+	bin := flag.String("bin", "", "an aba.exe (or with -app, an aba-app.exe) that was just built")
+	app := flag.Bool("app", false, "-bin is the desktop app, aba-app.exe")
 	version := flag.String("version", "", "version of the aba.exe files, like v1.2.3")
 	out := flag.String("out", filepath.Join("dist", "installer"), "folder for ABA-Setup.exe (the binaries are kept in its bin subfolder)")
 	script := flag.String("script", filepath.Join("installer", "aba.iss"), "the Inno Setup script")
@@ -53,13 +57,13 @@ func main() {
 	flag.Parse()
 
 	signer = *signScript
-	if err := run(*arch, *bin, *version, *out, *script, *preview); err != nil {
+	if err := run(*arch, *bin, *version, *out, *script, *preview, *app); err != nil {
 		fmt.Fprintln(os.Stderr, "installer:", err)
 		os.Exit(1)
 	}
 }
 
-func run(arch, bin, version, out, script string, preview bool) error {
+func run(arch, bin, version, out, script string, preview, app bool) error {
 	out, err := filepath.Abs(out)
 	if err != nil {
 		return err
@@ -74,7 +78,7 @@ func run(arch, bin, version, out, script string, preview bool) error {
 		return compile(script, out, "", version, true)
 	}
 	if _, ok := machines[arch]; !ok || bin == "" || version == "" {
-		return errors.New("need -arch amd64|arm64, -bin <aba.exe> and -version <vX.Y.Z> (or -preview)")
+		return errors.New("need -arch amd64|arm64, -bin <aba.exe or, with -app, aba-app.exe> and -version <vX.Y.Z> (or -preview)")
 	}
 
 	// GoReleaser builds both architectures at the same time, so two of these
@@ -93,13 +97,19 @@ func run(arch, bin, version, out, script string, preview bool) error {
 	if err := sign(bin); err != nil {
 		return err
 	}
-	if err := stage(bin, staged(binDir, arch), arch); err != nil {
+	what := "aba"
+	if app {
+		what = "aba-app"
+	}
+	if err := stage(bin, staged(binDir, what, arch), arch, app); err != nil {
 		return err
 	}
-	for a := range machines {
-		if _, err := os.Stat(staged(binDir, a)); err != nil {
-			fmt.Printf("installer: kept the %s aba.exe; waiting for %s\n", arch, a)
-			return nil
+	for _, w := range []string{"aba", "aba-app"} {
+		for a := range machines {
+			if _, err := os.Stat(staged(binDir, w, a)); err != nil {
+				fmt.Printf("installer: kept the %s %s.exe; waiting for the %s %s.exe\n", arch, what, a, w)
+				return nil
+			}
 		}
 	}
 	if err := compile(script, out, binDir, version, false); err != nil {
@@ -109,7 +119,7 @@ func run(arch, bin, version, out, script string, preview bool) error {
 		return err
 	}
 	// For the build log: what went in, and what came out.
-	for _, f := range []string{staged(binDir, "amd64"), staged(binDir, "arm64"), filepath.Join(out, "ABA-Setup.exe")} {
+	for _, f := range []string{staged(binDir, "aba", "amd64"), staged(binDir, "aba", "arm64"), staged(binDir, "aba-app", "amd64"), staged(binDir, "aba-app", "arm64"), filepath.Join(out, "ABA-Setup.exe")} {
 		sum, err := sha256File(f)
 		if err != nil {
 			return err
@@ -119,20 +129,34 @@ func run(arch, bin, version, out, script string, preview bool) error {
 	return nil
 }
 
-func staged(binDir, arch string) string { return filepath.Join(binDir, "aba-"+arch+".exe") }
+// staged is where a binary waits for the others: aba-amd64.exe,
+// aba-app-arm64.exe...
+func staged(binDir, what, arch string) string { return filepath.Join(binDir, what+"-"+arch+".exe") }
 
-// stage copies a finished aba.exe next to the other one, after checking it
-// really is a Windows program for the processor it claims: a mix-up here
-// would install a program that can't start.
-func stage(src, dst, arch string) error {
+// stage copies a finished program next to the others, after checking it
+// really is a Windows program for the processor it claims, and the right one
+// of the two (the app is a windowed program, aba.exe a console one): a
+// mix-up here would install a program that can't start.
+func stage(src, dst, arch string, app bool) error {
 	f, err := pe.Open(src)
 	if err != nil {
 		return fmt.Errorf("%s is not a Windows program: %w", src, err)
 	}
 	machine := f.Machine
+	var subsystem uint16
+	if oh, ok := f.OptionalHeader.(*pe.OptionalHeader64); ok {
+		subsystem = oh.Subsystem
+	}
 	f.Close()
 	if machine != machines[arch] {
 		return fmt.Errorf("%s is not built for %s (machine type 0x%04x)", src, arch, machine)
+	}
+	want := uint16(pe.IMAGE_SUBSYSTEM_WINDOWS_CUI)
+	if app {
+		want = pe.IMAGE_SUBSYSTEM_WINDOWS_GUI
+	}
+	if subsystem != want {
+		return fmt.Errorf("%s has Windows subsystem %d, want %d (the app is built with -H=windowsgui, aba.exe isn't)", src, subsystem, want)
 	}
 	in, err := os.Open(src)
 	if err != nil {
