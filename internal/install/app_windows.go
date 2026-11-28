@@ -29,6 +29,9 @@ import (
 // AppShortcutName is the app's Start menu entry.
 const AppShortcutName = "ABA"
 
+// AppShortcutArgs is what it passes the app.
+const AppShortcutArgs = "--elevate"
+
 // appMade is set on the Installed apps entry once ABA has made the app's
 // shortcut, so an update doesn't put it back after you deleted it.
 const appMade = "ABAAppShortcut"
@@ -36,9 +39,11 @@ const appMade = "ABAAppShortcut"
 func (e appEntry) appShortcut() string { return filepath.Join(e.menuDir, AppShortcutName+".lnk") }
 
 func (e appEntry) addAppShortcut() error {
-	// The app asks for administrator rights itself when it opens (one UAC
-	// prompt): the shortcut starts it like any program.
-	if err := createShortcut(e.appShortcut(), e.app, "", e.dir, "Open ABA: whether you're protected, and anything it caught"); err != nil {
+	// The app asks for administrator rights itself as it opens (--elevate:
+	// one UAC prompt, before any window; declined, it shows its locked
+	// view). Not the shortcut's "run as administrator" flag: declined, that
+	// opens nothing at all.
+	if err := createShortcut(e.appShortcut(), e.app, AppShortcutArgs, e.dir, "Open ABA: whether you're protected, and anything it caught"); err != nil {
 		return err
 	}
 	k, err := registry.OpenKey(e.root, e.keyPath, registry.SET_VALUE)

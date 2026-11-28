@@ -33,8 +33,8 @@ func TestRegisterAppAddsTheAppShortcut(t *testing.T) {
 	if !paths.Same(paths.Long(target), paths.Long(e.app)) {
 		t.Errorf("the ABA shortcut opens %s, want %s", target, e.app)
 	}
-	if args, _ := shortcutArgs(lnk); args != "" {
-		t.Errorf("the ABA shortcut passes %q, want nothing", args)
+	if args, _ := shortcutArgs(lnk); args != "--elevate" {
+		t.Errorf("the ABA shortcut passes %q, want --elevate (the UAC prompt first)", args)
 	}
 	// It is the only one: no terminal dashboard, no reports in the browser.
 	if exists(e.shortcut()) || exists(e.reportsShortcut()) {

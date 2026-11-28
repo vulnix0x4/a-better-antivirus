@@ -7,7 +7,13 @@
 // everything; without administrator rights it shows only a locked view
 // whose one button asks Windows to start it again elevated.
 //
-//	aba-app.exe [--alert <id>] [--selftest [--selftest-out <file>]] [--probe]
+//	aba-app.exe [--elevate] [--alert <id>] [--selftest [--selftest-out <file>]] [--probe]
+//
+// --elevate (what the Start menu's "ABA" passes) asks Windows straight away
+// for administrator rights: the UAC prompt comes before any window, and the
+// copy that gets them is started without --elevate (so it can't ask again).
+// Declined, or not possible: this copy goes on to the locked view, whose
+// "Open ABA" asks again.
 //
 // --selftest runs the app, has the page check WebGL and try what the guard
 // must stop, prints a JSON report and exits 0 when everything held.
@@ -57,6 +63,7 @@ func main() {
 	selftestOut := flag.String("selftest-out", "", "also write the self-test report here")
 	probe := flag.Bool("probe", false, "show a probe button and count input reaching the page")
 	debugLog := flag.String("debug-log", "", "write start-up steps to this file")
+	elevate := flag.Bool("elevate", false, "ask for administrator rights first (the Start menu's ABA)")
 	flag.Parse()
 	if *debugLog != "" {
 		if f, err := os.Create(*debugLog); err == nil {
@@ -87,6 +94,13 @@ func main() {
 	a.mode = "locked"
 	if a.elevated {
 		a.mode = "full"
+	}
+	if *elevate && !a.elevated && !a.selftest && !a.probe {
+		err := relaunchElevated(a.alert)
+		trace("asked Windows for administrator rights: %v", err)
+		if err == nil {
+			return // the elevated copy takes over
+		}
 	}
 	os.Exit(a.run())
 }
@@ -318,15 +332,22 @@ func (p *API) OpenElevated() string {
 	if a.mode != "locked" {
 		return ""
 	}
-	args := []string{}
-	if a.alert != "" {
-		args = append(args, "--alert", a.alert)
-	}
-	if err := appsec.RelaunchElevated(args...); err != nil {
+	if err := relaunchElevated(a.alert); err != nil {
 		return "Windows didn't start ABA as administrator (" + err.Error() + ")."
 	}
 	go runtime.Quit(a.ctx)
 	return ""
+}
+
+// relaunchElevated starts this app again with administrator rights (the UAC
+// prompt), for the alert it was opened for if any. Never with --elevate:
+// the new copy is elevated or never starts.
+func relaunchElevated(alert string) error {
+	args := []string{}
+	if alert != "" {
+		args = append(args, "--alert", alert)
+	}
+	return appsec.RelaunchElevated(args...)
 }
 
 // ProbeCounts: input that reached the page, in --probe mode.
