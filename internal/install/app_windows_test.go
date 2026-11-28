@@ -241,3 +241,59 @@ func TestIsApp(t *testing.T) {
 		}
 	}
 }
+
+// Left out (install.ps1 with ABA_NO_APP), then wanted again (aba-app.off
+// deleted, so update.KeepApp installs it): the app gets its "ABA" entry back,
+// and the Start menu is never left with no ABA entry at all.
+func TestAppLeftOutThenBackGetsItsShortcut(t *testing.T) {
+	e := withApp(t)
+	if err := e.register("v1.0.0"); err != nil {
+		t.Fatal(err)
+	}
+	// What leaveAppOut does with the shortcut, then the listing step.
+	os.Remove(e.app)
+	if err := e.removeAppShortcut(); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.register("v1.0.0"); err != nil {
+		t.Fatal(err)
+	}
+	if exists(e.appShortcut()) || !exists(e.shortcut()) || !exists(e.reportsShortcut()) {
+		t.Fatalf("left out: ABA %v, A Better Antivirus %v, ABA reports %v",
+			exists(e.appShortcut()), exists(e.shortcut()), exists(e.reportsShortcut()))
+	}
+	// Back (InstallApp -> appShortcutOnce).
+	os.WriteFile(e.app, []byte("app"), 0o644)
+	if err := e.appShortcutOnce(); err != nil {
+		t.Fatal(err)
+	}
+	if !exists(e.appShortcut()) {
+		t.Fatal("the app came back without its ABA shortcut")
+	}
+	if exists(e.shortcut()) || exists(e.reportsShortcut()) {
+		t.Error("the terminal shortcuts stayed next to the app's")
+	}
+}
+
+// The owner deleted "ABA" (ABA remembers it made it): an update keeps the
+// terminal shortcuts rather than leave the Start menu with no ABA at all.
+func TestDeletedAppShortcutKeepsTheOthers(t *testing.T) {
+	e := withApp(t)
+	if err := e.register("v1.0.0"); err != nil {
+		t.Fatal(err)
+	}
+	os.Remove(e.appShortcut())
+	// Made by hand, say, or by an older version.
+	if err := createShortcut(e.shortcut(), e.exe, "", e.dir, "x"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.appShortcutOnce(); err != nil {
+		t.Fatal(err)
+	}
+	if exists(e.appShortcut()) {
+		t.Error("the deleted ABA shortcut came back")
+	}
+	if !exists(e.shortcut()) {
+		t.Error("the only ABA entry left was taken away")
+	}
+}

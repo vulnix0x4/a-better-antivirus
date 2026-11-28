@@ -76,7 +76,25 @@ func (e appEntry) appShortcutOnce() error {
 			return err
 		}
 	}
+	if !fileExists(e.appShortcut()) {
+		// You deleted the app's entry: the others are all the Start menu has.
+		return nil
+	}
 	return e.removeTerminalShortcuts()
+}
+
+// forgetAppShortcut: the app was taken away with its shortcut, so the next
+// time it comes, it gets its shortcut again (that wasn't you deleting it).
+func (e appEntry) forgetAppShortcut() error {
+	k, err := registry.OpenKey(e.root, e.keyPath, registry.SET_VALUE)
+	if err != nil {
+		return nil // not listed: nothing remembered
+	}
+	defer k.Close()
+	if err := k.DeleteValue(appMade); err != nil && !errors.Is(err, registry.ErrNotExist) {
+		return err
+	}
+	return nil
 }
 
 // AppWanted reports whether the app belongs on this PC: it wasn't left out
@@ -127,7 +145,8 @@ func installApp(self string) (string, error) {
 }
 
 // leaveAppOut removes the app and its shortcut and remembers that, so
-// updates don't bring it back.
+// updates don't bring it back. (The install's listing step then puts the
+// terminal dashboard and the reports in the Start menu instead.)
 func leaveAppOut() error {
 	if err := os.MkdirAll(paths.InstallDir(), 0o755); err != nil {
 		return err
@@ -146,11 +165,18 @@ func leaveAppOut() error {
 		}
 	}
 	if e, err := systemAppEntry(); err == nil {
-		if err := os.Remove(e.appShortcut()); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err := e.removeAppShortcut(); err != nil {
 			errs = append(errs, err)
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func (e appEntry) removeAppShortcut() error {
+	if err := os.Remove(e.appShortcut()); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return e.forgetAppShortcut()
 }
 
 // closeApp ends the installed app if it's open (it is about to be removed).
